@@ -149,22 +149,22 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
     let mut generator: &mut dyn Iterator<Item = CamillaFloat> = match params.signal {
         config::Signal::Sine { freq, level } => {
             sine_gen = SineGenerator::new(
-                freq,
+                freq.get(),
                 params.samplerate,
-                db_to_linear(level).to_camilla_float(),
+                db_to_linear(level.get()).to_camilla_float(),
             );
             &mut sine_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
         config::Signal::Square { freq, level } => {
             square_gen = SquareGenerator::new(
-                freq,
+                freq.get(),
                 params.samplerate,
-                db_to_linear(level).to_camilla_float(),
+                db_to_linear(level.get()).to_camilla_float(),
             );
             &mut square_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
         config::Signal::WhiteNoise { level } => {
-            noise_gen = NoiseGenerator::new(db_to_linear(level).to_camilla_float());
+            noise_gen = NoiseGenerator::new(db_to_linear(level.get()).to_camilla_float());
             &mut noise_gen as &mut dyn Iterator<Item = CamillaFloat>
         }
     };

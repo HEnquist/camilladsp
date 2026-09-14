@@ -33,7 +33,7 @@ pub struct Clipper {
 impl Clipper {
     /// Creates a Clipper from a config struct
     pub fn from_config(name: &str, config: config::ClipperParameters) -> Self {
-        let clip_limit = db_to_linear(config.clip_limit).to_camilla_float();
+        let clip_limit = db_to_linear(config.clip_limit.get()).to_camilla_float();
 
         debug!(
             "Creating clipper '{}', soft_clip: {}, clip_limit dB: {}, linear: {}",
@@ -88,7 +88,7 @@ impl Filter for Clipper {
             parameters: config, ..
         } = config
         {
-            let clip_limit = db_to_linear(config.clip_limit).to_camilla_float();
+            let clip_limit = db_to_linear(config.clip_limit.get()).to_camilla_float();
 
             self.soft_clip = config.soft_clip();
             self.clip_limit = clip_limit;

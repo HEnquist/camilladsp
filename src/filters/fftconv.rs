@@ -335,7 +335,7 @@ fn coeffs_from_config(conf: config::ConvParameters) -> Vec<CamillaFloat> {
             filters::read_wav(&params.filename, params.channel()).unwrap()
         }
         config::ConvParameters::Dummy { length } => {
-            let mut values = vec![0.0; length];
+            let mut values = vec![0.0; length.get()];
             values[0] = 1.0;
             values
         }
@@ -639,14 +639,14 @@ pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
-            Ok(())
+            config::check_all_finite("coefficients", &coeffs)
         }
         config::ConvParameters::Wav(params) => {
             let coeffs = filters::read_wav(&params.filename, params.channel())?;
             if coeffs.is_empty() {
                 return Err(config::ConfigError::new("Conv coefficients are empty").into());
             }
-            Ok(())
+            config::check_all_finite("coefficients", &coeffs)
         }
     }
 }
@@ -657,6 +657,7 @@ mod tests {
     use crate::ToCamillaFloat;
     use crate::config;
     use crate::config::ConvParameters;
+    use crate::config::finite;
     use crate::filters::Filter;
     use crate::filters::fftconv::{ConvCoeffCache, FftConv};
     use num_complex::Complex;
@@ -691,7 +692,7 @@ mod tests {
 
     #[test]
     fn check_result() {
-        let coeffs = vec![0.5, 0.5];
+        let coeffs = vec![finite!(0.5), finite!(0.5)];
         let conf = ConvParameters::Values { values: coeffs };
         let mut filter = FftConv::from_config("test", 8, conf);
         let mut wave1 = vec![1.0, 1.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0];
@@ -754,7 +755,7 @@ mod tests {
     #[test]
     fn cache_does_not_share_across_lengths() {
         let conf = config::ConvParameters::Values {
-            values: vec![0.1, 0.2, 0.3, 0.4],
+            values: vec![finite!(0.1), finite!(0.2), finite!(0.3), finite!(0.4)],
         };
         let mut cache = ConvCoeffCache::new();
         let mut short = FftConv::from_config_cached("conv", 8, conf.clone(), &mut cache);
@@ -792,6 +793,7 @@ mod tests {
         // A config always carries f64, whatever the processing precision is.
         let values: Vec<f64> = (0..48).map(|m| m as f64).collect();
         let coeffs: Vec<CamillaFloat> = values.iter().map(|v| v.to_camilla_float()).collect();
+        let values = values.into_iter().map(|v| finite!(v)).collect();
         let conf = ConvParameters::Values { values };
         let mut cache = ConvCoeffCache::new();
         let mut left = FftConv::from_config_cached("conv", 8, conf.clone(), &mut cache);
@@ -838,7 +840,7 @@ mod tests {
         let conf = config::Filter::Conv {
             description: None,
             parameters: ConvParameters::Values {
-                values: vec![0.0, 1.0, 0.0, 0.0],
+                values: vec![finite!(0.0), finite!(1.0), finite!(0.0), finite!(0.0)],
             },
         };
         let mut cache = ConvCoeffCache::new();

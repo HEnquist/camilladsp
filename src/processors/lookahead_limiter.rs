@@ -80,10 +80,10 @@ impl LookaheadLimiter {
         let monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
         let process_channels = all_channels_if_empty(config.process_channels(), channels);
         let (limit, attack_samples, release_coeff) = limiter_parameters(
-            config.limit,
-            config.attack,
+            config.limit.get(),
+            config.attack.get(),
             config.attack_unit,
-            config.release,
+            config.release.get(),
             config.release_unit,
             samplerate,
         );
@@ -162,10 +162,10 @@ impl Processor for LookaheadLimiter {
             let channels = config.channels;
             let samplerate = self.samplerate;
             let (limit, attack_samples, release_coeff) = limiter_parameters(
-                config.limit,
-                config.attack,
+                config.limit.get(),
+                config.attack.get(),
                 config.attack_unit,
-                config.release,
+                config.release.get(),
                 config.release_unit,
                 samplerate,
             );
@@ -206,9 +206,9 @@ pub fn validate_lookahead_limiter(
 ) -> Res<()> {
     let channels = config.channels;
     validate_times(
-        config.attack,
+        config.attack.get(),
         config.attack_unit,
-        config.release,
+        config.release.get(),
         samplerate,
     )?;
     for ch in config.monitor_channels().iter() {
@@ -238,6 +238,7 @@ pub fn validate_lookahead_limiter(
 mod tests {
     use super::*;
     use crate::config::TimeUnit;
+    use crate::config::finite;
 
     fn params(
         monitor_channels: Option<Vec<usize>>,
@@ -249,10 +250,10 @@ mod tests {
             channels: 2,
             monitor_channels,
             process_channels,
-            limit: 0.0,
-            attack,
+            limit: finite!(0.0),
+            attack: finite!(attack),
             attack_unit: TimeUnit::Samples,
-            release,
+            release: finite!(release),
             release_unit: TimeUnit::Samples,
             delay_processed_only: None,
         }
@@ -289,10 +290,10 @@ mod tests {
                 channels: 1,
                 monitor_channels: None,
                 process_channels: None,
-                limit: 0.0,
-                attack: 4.0,
+                limit: finite!(0.0),
+                attack: finite!(4.0),
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2,
+                release: finite!(1.0 / std::f64::consts::LN_2),
                 release_unit: TimeUnit::Samples,
                 delay_processed_only: None,
             },
@@ -302,10 +303,10 @@ mod tests {
         let mut filter = crate::filters::lookahead_limiter::LookaheadLimiter::from_config(
             "test",
             config::LookaheadLimiterParameters {
-                limit: 0.0,
-                attack: 4.0,
+                limit: finite!(0.0),
+                attack: finite!(4.0),
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2,
+                release: finite!(1.0 / std::f64::consts::LN_2),
                 release_unit: TimeUnit::Samples,
             },
             samplerate,

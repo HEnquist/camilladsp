@@ -22,6 +22,7 @@ use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::DelayParameters;
 use crate::config::GainParameters;
+use crate::config::finite;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Delay;
 use crate::filters::basicfilters::Gain;
@@ -50,10 +51,11 @@ fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayPara
         config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as f64,
         config::DelayUnit::Samples => 1.0,
     };
-    let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);
+    let compensated_delay = (config.delay.get() - sample_period_in_delay_unit).max(0.0);
 
     config::DelayParameters {
-        delay: compensated_delay,
+        // Both operands are finite, so the difference is too.
+        delay: finite!(compensated_delay),
         delay_unit: config.delay_unit,
         subsample: config.subsample_delay,
     }
@@ -61,7 +63,8 @@ fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayPara
 
 fn gain_config(config: &config::RACEParameters) -> GainParameters {
     config::GainParameters {
-        gain: -config.attenuation,
+        // Negating a finite value keeps it finite.
+        gain: finite!(-config.attenuation.get()),
         scale: Some(config::GainScale::Decibel),
         inverted: Some(true),
         mute: Some(false),

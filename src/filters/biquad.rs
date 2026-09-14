@@ -77,9 +77,11 @@ impl BiquadCoefficients {
     pub fn from_config(fs: usize, parameters: config::BiquadParameters) -> Self {
         match parameters {
             config::BiquadParameters::Free { a1, a2, b0, b1, b2 } => {
+                let (a1, a2, b0, b1, b2) = (a1.get(), a2.get(), b0.get(), b1.get(), b2.get());
                 BiquadCoefficients::new(a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Highpass { freq, q } => {
+                let (freq, q) = (freq.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -93,6 +95,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Lowpass { freq, q } => {
+                let (freq, q) = (freq.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -106,6 +109,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Peaking(config::PeakingWidth::Q { freq, gain, q }) => {
+                let (freq, gain, q) = (freq.get(), gain.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -124,6 +128,7 @@ impl BiquadCoefficients {
                 gain,
                 bandwidth,
             }) => {
+                let (freq, gain, bandwidth) = (freq.get(), gain.get(), bandwidth.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -139,6 +144,7 @@ impl BiquadCoefficients {
             }
 
             config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { freq, q, gain }) => {
+                let (freq, q, gain) = (freq.get(), q.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -157,6 +163,7 @@ impl BiquadCoefficients {
                 slope,
                 gain,
             }) => {
+                let (freq, slope, gain) = (freq.get(), slope.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -173,6 +180,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::HighshelfFO { freq, gain } => {
+                let (freq, gain) = (freq.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let tn = (omega / 2.0).tan();
                 let ampl = 10.0f64.powf(gain / 40.0);
@@ -185,6 +193,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { freq, q, gain }) => {
+                let (freq, q, gain) = (freq.get(), q.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -203,6 +212,7 @@ impl BiquadCoefficients {
                 slope,
                 gain,
             }) => {
+                let (freq, slope, gain) = (freq.get(), slope.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -219,6 +229,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::LowshelfFO { freq, gain } => {
+                let (freq, gain) = (freq.get(), gain.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let tn = (omega / 2.0).tan();
                 let ampl = 10.0f64.powf(gain / 40.0);
@@ -231,6 +242,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::LowpassFO { freq } => {
+                let freq = freq.get();
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let k = (omega / 2.0).tan();
                 let alpha = 1.0 + k;
@@ -243,6 +255,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::HighpassFO { freq } => {
+                let freq = freq.get();
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let k = (omega / 2.0).tan();
                 let alpha = 1.0 + k;
@@ -255,6 +268,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Notch(config::NotchWidth::Q { freq, q }) => {
+                let (freq, q) = (freq.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -268,6 +282,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Notch(config::NotchWidth::Bandwidth { freq, bandwidth }) => {
+                let (freq, bandwidth) = (freq.get(), bandwidth.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -281,9 +296,11 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::GeneralNotch(params) => {
-                let tn_z = (std::f64::consts::PI * params.freq_z / (fs as f64)).tan();
-                let tn_p = (std::f64::consts::PI * params.freq_p / (fs as f64)).tan();
-                let alpha = tn_p / params.q_p;
+                let (freq_z, freq_p, q_p) =
+                    (params.freq_z.get(), params.freq_p.get(), params.q_p.get());
+                let tn_z = (std::f64::consts::PI * freq_z / (fs as f64)).tan();
+                let tn_p = (std::f64::consts::PI * freq_p / (fs as f64)).tan();
+                let alpha = tn_p / q_p;
                 let tn2_p = tn_p.powi(2);
                 let tn2_z = tn_z.powi(2);
                 let gain = if params.normalize_at_dc() {
@@ -300,6 +317,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Bandpass(config::NotchWidth::Q { freq, q }) => {
+                let (freq, q) = (freq.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -316,6 +334,7 @@ impl BiquadCoefficients {
                 freq,
                 bandwidth,
             }) => {
+                let (freq, bandwidth) = (freq.get(), bandwidth.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -329,6 +348,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::Allpass(config::NotchWidth::Q { freq, q }) => {
+                let (freq, q) = (freq.get(), q.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -345,6 +365,7 @@ impl BiquadCoefficients {
                 freq,
                 bandwidth,
             }) => {
+                let (freq, bandwidth) = (freq.get(), bandwidth.get());
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let sn = omega.sin();
                 let cs = omega.cos();
@@ -358,6 +379,7 @@ impl BiquadCoefficients {
                 BiquadCoefficients::normalize(a0, a1, a2, b0, b1, b2)
             }
             config::BiquadParameters::AllpassFO { freq } => {
+                let freq = freq.get();
                 let omega = 2.0 * std::f64::consts::PI * freq / (fs as f64);
                 let tn = (omega / 2.0).tan();
                 let alpha = (tn + 1.0) / (tn - 1.0);
@@ -375,6 +397,12 @@ impl BiquadCoefficients {
                 freq_target,
                 q_target,
             } => {
+                let (freq_act, q_act, freq_target, q_target) = (
+                    freq_act.get(),
+                    q_act.get(),
+                    freq_target.get(),
+                    q_target.get(),
+                );
                 let d0i = (2.0 * std::f64::consts::PI * freq_act).powi(2);
                 let d1i = (2.0 * std::f64::consts::PI * freq_act) / q_act;
                 let c0i = (2.0 * std::f64::consts::PI * freq_target).powi(2);
@@ -1201,6 +1229,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
 mod tests {
     use crate::CamillaFloat;
     use crate::ToF64;
+    use crate::config::finite;
     use crate::config::{
         BiquadParameters, GeneralNotchParams, NotchWidth, PeakingWidth, ShelfSteepness,
     };
@@ -1250,8 +1279,8 @@ mod tests {
     #[test]
     fn check_result() {
         let conf = BiquadParameters::Lowpass {
-            freq: 10000.0,
-            q: 0.5,
+            freq: finite!(10000.0),
+            q: finite!(0.5),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         let mut wave = vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
@@ -1264,8 +1293,8 @@ mod tests {
     #[test]
     fn make_lowpass() {
         let conf = BiquadParameters::Lowpass {
-            freq: 100.0,
-            q: std::f64::consts::FRAC_1_SQRT_2,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::FRAC_1_SQRT_2),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1280,8 +1309,8 @@ mod tests {
     #[test]
     fn make_highpass() {
         let conf = BiquadParameters::Highpass {
-            freq: 100.0,
-            q: std::f64::consts::FRAC_1_SQRT_2,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::FRAC_1_SQRT_2),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1295,7 +1324,9 @@ mod tests {
 
     #[test]
     fn make_lowpass_fo() {
-        let conf = BiquadParameters::LowpassFO { freq: 100.0 };
+        let conf = BiquadParameters::LowpassFO {
+            freq: finite!(100.0),
+        };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
         let (gain_f0, _) = gain_and_phase(coeffs, 100.0, 44100);
@@ -1308,7 +1339,9 @@ mod tests {
 
     #[test]
     fn make_highpass_fo() {
-        let conf = BiquadParameters::HighpassFO { freq: 100.0 };
+        let conf = BiquadParameters::HighpassFO {
+            freq: finite!(100.0),
+        };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
         let (gain_f0, _) = gain_and_phase(coeffs, 100.0, 44100);
@@ -1322,9 +1355,9 @@ mod tests {
     #[test]
     fn make_peaking() {
         let conf = BiquadParameters::Peaking(PeakingWidth::Q {
-            freq: 100.0,
-            gain: 7.0,
-            q: 3.0,
+            freq: finite!(100.0),
+            gain: finite!(7.0),
+            q: finite!(3.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1339,8 +1372,8 @@ mod tests {
     #[test]
     fn make_bandpass() {
         let conf = BiquadParameters::Bandpass(NotchWidth::Q {
-            freq: 100.0,
-            q: 1.0,
+            freq: finite!(100.0),
+            q: finite!(1.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1355,8 +1388,8 @@ mod tests {
     #[test]
     fn make_notch() {
         let conf = BiquadParameters::Notch(NotchWidth::Q {
-            freq: 100.0,
-            q: 3.0,
+            freq: finite!(100.0),
+            q: finite!(3.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1371,9 +1404,9 @@ mod tests {
     #[test]
     fn make_generalnotch_hp() {
         let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
-            freq_p: 2000.0,
-            freq_z: 1000.0,
-            q_p: 1.0,
+            freq_p: finite!(2000.0),
+            freq_z: finite!(1000.0),
+            q_p: finite!(1.0),
             normalize_at_dc: Some(false),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
@@ -1390,9 +1423,9 @@ mod tests {
     #[test]
     fn make_generalnotch_lp() {
         let conf = BiquadParameters::GeneralNotch(GeneralNotchParams {
-            freq_p: 500.0,
-            freq_z: 1000.0,
-            q_p: 1.0,
+            freq_p: finite!(500.0),
+            freq_z: finite!(1000.0),
+            q_p: finite!(1.0),
             normalize_at_dc: Some(true),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
@@ -1409,8 +1442,8 @@ mod tests {
     #[test]
     fn make_allpass() {
         let conf = BiquadParameters::Allpass(NotchWidth::Q {
-            freq: 100.0,
-            q: 3.0,
+            freq: finite!(100.0),
+            q: finite!(3.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1427,7 +1460,9 @@ mod tests {
 
     #[test]
     fn make_allpass_fo() {
-        let conf = BiquadParameters::AllpassFO { freq: 100.0 };
+        let conf = BiquadParameters::AllpassFO {
+            freq: finite!(100.0),
+        };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
         let (gain_f0, phase_f0) = gain_and_phase(coeffs, 100.0, 44100);
@@ -1444,9 +1479,9 @@ mod tests {
     #[test]
     fn make_highshelf() {
         let conf = BiquadParameters::Highshelf(ShelfSteepness::Slope {
-            freq: 100.0,
-            slope: 6.0,
-            gain: -24.0,
+            freq: finite!(100.0),
+            slope: finite!(6.0),
+            gain: finite!(-24.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1465,9 +1500,9 @@ mod tests {
     #[test]
     fn make_lowshelf() {
         let conf = BiquadParameters::Lowshelf(ShelfSteepness::Slope {
-            freq: 100.0,
-            slope: 6.0,
-            gain: -24.0,
+            freq: finite!(100.0),
+            slope: finite!(6.0),
+            gain: finite!(-24.0),
         });
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1486,14 +1521,14 @@ mod tests {
     #[test]
     fn lowshelf_slope_vs_q() {
         let conf_slope = BiquadParameters::Lowshelf(ShelfSteepness::Slope {
-            freq: 100.0,
-            slope: 12.0,
-            gain: -24.0,
+            freq: finite!(100.0),
+            slope: finite!(12.0),
+            gain: finite!(-24.0),
         });
         let conf_q = BiquadParameters::Lowshelf(ShelfSteepness::Q {
-            freq: 100.0,
-            q: std::f64::consts::FRAC_1_SQRT_2,
-            gain: -24.0,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::FRAC_1_SQRT_2),
+            gain: finite!(-24.0),
         });
         let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -1507,14 +1542,14 @@ mod tests {
     #[test]
     fn highshelf_slope_vs_q() {
         let conf_slope = BiquadParameters::Highshelf(ShelfSteepness::Slope {
-            freq: 100.0,
-            slope: 12.0,
-            gain: -24.0,
+            freq: finite!(100.0),
+            slope: finite!(12.0),
+            gain: finite!(-24.0),
         });
         let conf_q = BiquadParameters::Highshelf(ShelfSteepness::Q {
-            freq: 100.0,
-            q: std::f64::consts::FRAC_1_SQRT_2,
-            gain: -24.0,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::FRAC_1_SQRT_2),
+            gain: finite!(-24.0),
         });
         let coeffs_slope = BiquadCoefficients::from_config(44100, conf_slope);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -1528,12 +1563,12 @@ mod tests {
     #[test]
     fn bandpass_bw_vs_q() {
         let conf_bw = BiquadParameters::Bandpass(NotchWidth::Bandwidth {
-            freq: 100.0,
-            bandwidth: 1.0,
+            freq: finite!(100.0),
+            bandwidth: finite!(1.0),
         });
         let conf_q = BiquadParameters::Bandpass(NotchWidth::Q {
-            freq: 100.0,
-            q: std::f64::consts::SQRT_2,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::SQRT_2),
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -1548,12 +1583,12 @@ mod tests {
     #[test]
     fn notch_bw_vs_q() {
         let conf_bw = BiquadParameters::Notch(NotchWidth::Bandwidth {
-            freq: 100.0,
-            bandwidth: 1.0,
+            freq: finite!(100.0),
+            bandwidth: finite!(1.0),
         });
         let conf_q = BiquadParameters::Notch(NotchWidth::Q {
-            freq: 100.0,
-            q: std::f64::consts::SQRT_2,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::SQRT_2),
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -1567,12 +1602,12 @@ mod tests {
     #[test]
     fn allpass_bw_vs_q() {
         let conf_bw = BiquadParameters::Allpass(NotchWidth::Bandwidth {
-            freq: 100.0,
-            bandwidth: 1.0,
+            freq: finite!(100.0),
+            bandwidth: finite!(1.0),
         });
         let conf_q = BiquadParameters::Allpass(NotchWidth::Q {
-            freq: 100.0,
-            q: std::f64::consts::SQRT_2,
+            freq: finite!(100.0),
+            q: finite!(std::f64::consts::SQRT_2),
         });
         let coeffs_bw = BiquadCoefficients::from_config(44100, conf_bw);
         let coeffs_q = BiquadCoefficients::from_config(44100, conf_q);
@@ -1586,8 +1621,8 @@ mod tests {
     #[test]
     fn make_highshelf_fo() {
         let conf = BiquadParameters::HighshelfFO {
-            freq: 100.0,
-            gain: -12.0,
+            freq: finite!(100.0),
+            gain: finite!(-12.0),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1602,8 +1637,8 @@ mod tests {
     #[test]
     fn make_lowshelf_fo() {
         let conf = BiquadParameters::LowshelfFO {
-            freq: 100.0,
-            gain: -12.0,
+            freq: finite!(100.0),
+            gain: finite!(-12.0),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1617,10 +1652,10 @@ mod tests {
     #[test]
     fn make_lt() {
         let conf = BiquadParameters::LinkwitzTransform {
-            freq_act: 100.0,
-            q_act: 1.2,
-            freq_target: 25.0,
-            q_target: 0.7,
+            freq_act: finite!(100.0),
+            q_act: finite!(1.2),
+            freq_target: finite!(25.0),
+            q_target: finite!(0.7),
         };
         let coeffs = BiquadCoefficients::from_config(44100, conf);
         assert!(coeffs.is_stable());
@@ -1638,27 +1673,27 @@ mod tests {
     fn check_freq_q() {
         let fs = 48000;
         let okconf1 = BiquadParameters::Peaking(PeakingWidth::Q {
-            freq: 1000.0,
-            q: 2.0,
-            gain: 1.23,
+            freq: finite!(1000.0),
+            q: finite!(2.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &okconf1).is_ok());
         let badconf1 = BiquadParameters::Peaking(PeakingWidth::Q {
-            freq: 1000.0,
-            q: 0.0,
-            gain: 1.23,
+            freq: finite!(1000.0),
+            q: finite!(0.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &badconf1).is_err());
         let badconf2 = BiquadParameters::Peaking(PeakingWidth::Q {
-            freq: 25000.0,
-            q: 1.0,
-            gain: 1.23,
+            freq: finite!(25000.0),
+            q: finite!(1.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &badconf2).is_err());
         let badconf3 = BiquadParameters::Peaking(PeakingWidth::Q {
-            freq: 0.0,
-            q: 1.0,
-            gain: 1.23,
+            freq: finite!(0.0),
+            q: finite!(1.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &badconf3).is_err());
     }
@@ -1667,21 +1702,21 @@ mod tests {
     fn check_slope() {
         let fs = 48000;
         let okconf1 = BiquadParameters::Highshelf(ShelfSteepness::Slope {
-            freq: 1000.0,
-            slope: 5.0,
-            gain: 1.23,
+            freq: finite!(1000.0),
+            slope: finite!(5.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &okconf1).is_ok());
         let badconf1 = BiquadParameters::Highshelf(ShelfSteepness::Slope {
-            freq: 1000.0,
-            slope: 0.0,
-            gain: 1.23,
+            freq: finite!(1000.0),
+            slope: finite!(0.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &badconf1).is_err());
         let badconf2 = BiquadParameters::Highshelf(ShelfSteepness::Slope {
-            freq: 1000.0,
-            slope: 15.0,
-            gain: 1.23,
+            freq: finite!(1000.0),
+            slope: finite!(15.0),
+            gain: finite!(1.23),
         });
         assert!(validate_config(fs, &badconf2).is_err());
     }
@@ -1696,9 +1731,9 @@ mod tests {
         (0..stages)
             .map(|k| {
                 let conf = BiquadParameters::Peaking(PeakingWidth::Q {
-                    freq: 100.0 + 137.0 * ((k + 3 * seed) as f64),
-                    q: 0.7 + 0.05 * (k as f64),
-                    gain: 1.5 + 0.25 * (seed as f64),
+                    freq: finite!(100.0 + 137.0 * ((k + 3 * seed) as f64)),
+                    q: finite!(0.7 + 0.05 * (k as f64)),
+                    gain: finite!(1.5 + 0.25 * (seed as f64)),
                 });
                 Biquad::new("t", 44100, BiquadCoefficients::from_config(44100, conf))
             })
@@ -1941,13 +1976,18 @@ mod tests {
         let old = BiquadCoefficients::from_config(
             fs,
             BiquadParameters::Peaking(PeakingWidth::Q {
-                freq: 1000.0,
-                q: 4.0,
-                gain: 12.0,
+                freq: finite!(1000.0),
+                q: finite!(4.0),
+                gain: finite!(12.0),
             }),
         );
-        let new =
-            BiquadCoefficients::from_config(fs, BiquadParameters::Highpass { freq: 25.0, q: 3.0 });
+        let new = BiquadCoefficients::from_config(
+            fs,
+            BiquadParameters::Highpass {
+                freq: finite!(25.0),
+                q: finite!(3.0),
+            },
+        );
 
         // Settle the old filter on a sine well inside its passband.
         let mut guarded = Biquad::new("test", fs, old);
@@ -2001,39 +2041,45 @@ mod tests {
         let changes = [
             (
                 BiquadParameters::Highpass {
-                    freq: 200.0,
-                    q: 0.7,
+                    freq: finite!(200.0),
+                    q: finite!(0.7),
                 },
                 BiquadParameters::Lowpass {
-                    freq: 200.0,
-                    q: 0.7,
+                    freq: finite!(200.0),
+                    q: finite!(0.7),
                 },
             ),
             (
                 BiquadParameters::Lowpass {
-                    freq: 500.0,
-                    q: 10.0,
+                    freq: finite!(500.0),
+                    q: finite!(10.0),
                 },
                 BiquadParameters::Lowpass {
-                    freq: 500.0,
-                    q: 0.5,
+                    freq: finite!(500.0),
+                    q: finite!(0.5),
                 },
             ),
             (
                 BiquadParameters::Peaking(PeakingWidth::Q {
-                    freq: 1000.0,
-                    q: 4.0,
-                    gain: 12.0,
+                    freq: finite!(1000.0),
+                    q: finite!(4.0),
+                    gain: finite!(12.0),
                 }),
                 BiquadParameters::Peaking(PeakingWidth::Q {
-                    freq: 1000.0,
-                    q: 4.0,
-                    gain: -12.0,
+                    freq: finite!(1000.0),
+                    q: finite!(4.0),
+                    gain: finite!(-12.0),
                 }),
             ),
             (
-                BiquadParameters::Lowpass { freq: 80.0, q: 0.7 },
-                BiquadParameters::Lowpass { freq: 60.0, q: 0.7 },
+                BiquadParameters::Lowpass {
+                    freq: finite!(80.0),
+                    q: finite!(0.7),
+                },
+                BiquadParameters::Lowpass {
+                    freq: finite!(60.0),
+                    q: finite!(0.7),
+                },
             ),
         ];
         for (from, to) in changes {
@@ -2067,8 +2113,8 @@ mod tests {
             BiquadCoefficients::from_config(
                 fs,
                 BiquadParameters::Highpass {
-                    freq: 200.0,
-                    q: 0.7,
+                    freq: finite!(200.0),
+                    q: finite!(0.7),
                 },
             ),
         );
@@ -2080,8 +2126,8 @@ mod tests {
         bq.set_coefficients(BiquadCoefficients::from_config(
             fs,
             BiquadParameters::Lowpass {
-                freq: 200.0,
-                q: 0.7,
+                freq: finite!(200.0),
+                q: finite!(0.7),
             },
         ));
         assert_eq!(bq.s1, s1);
@@ -2099,14 +2145,17 @@ mod tests {
             BiquadCoefficients::from_config(
                 fs,
                 BiquadParameters::Lowpass {
-                    freq: 1000.0,
-                    q: 0.7,
+                    freq: finite!(1000.0),
+                    q: finite!(0.7),
                 },
             ),
         );
         bq.set_coefficients(BiquadCoefficients::from_config(
             fs,
-            BiquadParameters::Highpass { freq: 25.0, q: 3.0 },
+            BiquadParameters::Highpass {
+                freq: finite!(25.0),
+                q: finite!(3.0),
+            },
         ));
         assert_eq!(bq.s1, 0.0);
         assert_eq!(bq.s2, 0.0);
@@ -2119,9 +2168,14 @@ mod tests {
     fn state_ring_estimate_survives_repeated_poles() {
         let fs = 48000;
         for q in [0.4, 0.49, 0.5, 0.51, 0.6] {
-            let coeffs: RuntimeCoefficients =
-                BiquadCoefficients::from_config(fs, BiquadParameters::Lowpass { freq: 500.0, q })
-                    .into();
+            let coeffs: RuntimeCoefficients = BiquadCoefficients::from_config(
+                fs,
+                BiquadParameters::Lowpass {
+                    freq: finite!(500.0),
+                    q: finite!(q),
+                },
+            )
+            .into();
             let estimate = coeffs.state_ring_estimate(0.3, 0.2);
             assert!(
                 estimate.is_finite() && estimate < 100.0,

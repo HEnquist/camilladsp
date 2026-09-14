@@ -231,6 +231,7 @@ pub fn validate_config(parameters: &config::DiffEqParameters) -> Res<()> {
 mod tests {
     use crate::CamillaFloat;
     use crate::config;
+    use crate::config::finite;
     use crate::filters::Filter;
     use crate::filters::diffeq::{DiffEq, validate_config};
 
@@ -394,8 +395,8 @@ mod tests {
 
     fn parameters(a: Vec<f64>, b: Vec<f64>) -> config::DiffEqParameters {
         config::DiffEqParameters {
-            a: Some(a),
-            b: Some(b),
+            a: Some(a.into_iter().map(|value| finite!(value)).collect()),
+            b: Some(b.into_iter().map(|value| finite!(value)).collect()),
         }
     }
 
@@ -443,7 +444,8 @@ mod tests {
     #[test]
     fn validate_invalid_coefficients() {
         assert!(validate_config(&parameters(vec![0.0, 0.5], vec![1.0])).is_err());
-        assert!(validate_config(&parameters(vec![1.0, f64::NAN], vec![1.0])).is_err());
-        assert!(validate_config(&parameters(vec![1.0, 0.5], vec![f64::INFINITY])).is_err());
+        // A non-finite coefficient cannot be built any more, `FiniteF64` cannot hold one, so
+        // there is nothing left to test here. Rejecting `.nan` and `.inf` in a config file is
+        // covered by `config::utils::tests::non_finite_rejected_while_parsing`.
     }
 }

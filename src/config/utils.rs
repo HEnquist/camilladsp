@@ -23,12 +23,12 @@ use crate::processors::noisegate;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
-use serde::{Deserialize, de};
 use std::error;
 use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -84,18 +84,69 @@ impl ConfigErrorType {
     }
 }
 
-pub(crate) fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let value = usize::deserialize(d)?;
-    if value < 1 {
-        return Err(de::Error::invalid_value(
-            de::Unexpected::Unsigned(value as u64),
-            &"a value > 0",
-        ));
+/// Reject a non-finite value that did not come from the config file.
+///
+/// Coefficients read from a raw or wav file cannot be checked while deserializing, since they
+/// never pass through serde. This is the equivalent check for them.
+pub fn check_all_finite<T: Into<f64> + Copy>(name: &str, values: &[T]) -> Res<()> {
+    for (index, value) in values.iter().enumerate() {
+        let value: f64 = (*value).into();
+        if !value.is_finite() {
+            let msg = format!(
+                "Value for '{name}' at index {index} must be a finite number, got {value}."
+            );
+            return Err(ConfigError::new(&msg).into());
+        }
     }
-    Ok(value)
+    Ok(())
+}
+
+/// Validate the resampler parameters that rubato does not check itself.
+///
+/// Only the free `AsyncSinc` parameters can be wrong, the profiles are fixed and the other
+/// resamplers take no parameters of their own.
+fn validate_resampler(resampler: &Option<Resampler>) -> Res<()> {
+    let Some(Resampler::AsyncSinc(AsyncSincParameters::Free {
+        sinc_len,
+        interpolation,
+        f_cutoff,
+        oversampling_factor,
+        ..
+    })) = resampler
+    else {
+        return Ok(());
+    };
+    // Checked here rather than with a `NonZeroUsize` field, since `AsyncSincParameters` is
+    // untagged and a rejected field there only reports that no variant matched.
+    if *sinc_len == 0 {
+        let msg = "sinc_len must be larger than zero, 64 to 256 are typical values.";
+        return Err(ConfigError::new(msg).into());
+    }
+    // Rubato fits a polynomial through a number of neighbouring sincs, and wraps an index that
+    // runs past the end of the table only once. Fitting n points therefore needs a table of at
+    // least n - 1, and anything smaller indexes out of bounds and panics.
+    let min_oversampling = match interpolation {
+        AsyncSincInterpolation::Nearest | AsyncSincInterpolation::Linear => 1,
+        AsyncSincInterpolation::Quadratic => 2,
+        AsyncSincInterpolation::Cubic => 3,
+    };
+    if *oversampling_factor < min_oversampling {
+        let msg = format!(
+            "oversampling_factor must be at least {min_oversampling} for {interpolation:?} interpolation, got {oversampling_factor}. \
+             Values in the hundreds are normal, see the profiles for typical settings."
+        );
+        return Err(ConfigError::new(&msg).into());
+    }
+    if let Some(cutoff) = f_cutoff
+        && !(0.0 < *cutoff && *cutoff <= 1.0)
+    {
+        let msg = format!(
+            "f_cutoff must be larger than 0 and no larger than 1.0, got {cutoff}. \
+             It is relative to the Nyquist limit, useful values are in the range 0.9 - 0.99."
+        );
+        return Err(ConfigError::new(&msg).into());
+    }
+    Ok(())
 }
 
 /// Parse a YAML configuration file and apply any active [`OVERRIDES`].
@@ -145,12 +196,17 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
         _ => {}
     }
     if let Some(rate) = overrides.samplerate {
-        let cfg_rate = configuration.devices.samplerate;
-        let cfg_chunksize = configuration.devices.chunksize;
+        let Some(rate_nonzero) = NonZeroUsize::new(rate) else {
+            return Err(
+                ConfigError::new("The samplerate override must be larger than zero").into(),
+            );
+        };
+        let cfg_rate = configuration.devices.samplerate();
+        let cfg_chunksize = configuration.devices.chunksize();
 
         if configuration.devices.resampler.is_none() {
             debug!("Apply override for samplerate: {rate}");
-            configuration.devices.samplerate = rate;
+            configuration.devices.samplerate = rate_nonzero;
             let scaled_chunksize = if rate > cfg_rate {
                 cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
             } else {
@@ -159,14 +215,12 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             // Scaling down is an integer division, so a small enough chunksize
             // divides away entirely. Zero would hang the capture loop, and a
             // configuration this odd should still run, so keep one frame.
-            let scaled_chunksize = if scaled_chunksize == 0 {
+            let scaled_chunksize = NonZeroUsize::new(scaled_chunksize).unwrap_or_else(|| {
                 warn!(
                     "Overriding the samplerate to {rate} scales chunksize {cfg_chunksize} below one frame, using 1"
                 );
-                1
-            } else {
-                scaled_chunksize
-            };
+                NonZeroUsize::MIN
+            });
             debug!(
                 "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
             );
@@ -195,7 +249,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             }
         } else {
             debug!("Apply override for capture_samplerate: {rate}");
-            configuration.devices.capture_samplerate = Some(rate);
+            configuration.devices.capture_samplerate = Some(rate_nonzero);
             if rate == cfg_rate && !configuration.devices.rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
                 configuration.devices.resampler = None;
@@ -217,6 +271,9 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     }
     if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {chans}");
+        let Some(chans) = NonZeroUsize::new(chans) else {
+            return Err(ConfigError::new("The channels override must be larger than zero").into());
+        };
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.channels = chans;
@@ -316,7 +373,7 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 }
 
 fn replace_tokens_in_config(config: &mut Configuration) {
-    let samplerate = config.devices.samplerate;
+    let samplerate = config.devices.samplerate();
     let num_channels = config.devices.capture.channels();
     if let Some(filters) = &mut config.filters {
         for filter in filters.values_mut() {
@@ -489,14 +546,15 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     if let Some(fname) = filename {
         replace_relative_paths_in_config(conf, fname);
     }
+    validate_resampler(&conf.devices.resampler)?;
     #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
-        (4 + conf.devices.queuelimit()) * conf.devices.chunksize
+        (4 + conf.devices.queuelimit()) * conf.devices.chunksize()
     } else {
-        (2 + conf.devices.queuelimit()) * conf.devices.chunksize
+        (2 + conf.devices.queuelimit()) * conf.devices.chunksize()
     };
     #[cfg(not(target_os = "linux"))]
-    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
+    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize();
 
     if conf.devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {target_level_limit}");
@@ -506,6 +564,11 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         && interval <= 0.0
     {
         return Err(ConfigError::new("adjust_interval_s must be positive and > 0").into());
+    }
+    if let Some(interval) = conf.devices.rate_measure_interval_s
+        && interval <= 0.0
+    {
+        return Err(ConfigError::new("rate_measure_interval_s must be positive and > 0").into());
     }
     if let Some(threshold) = conf.devices.silence_threshold
         && threshold > 0.0
@@ -527,7 +590,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     if matches!(conf.devices.resampler, Some(Resampler::Slip))
-        && conf.devices.capture_samplerate() != conf.devices.samplerate
+        && conf.devices.capture_samplerate() != conf.devices.samplerate()
     {
         return Err(ConfigError::new(
             "The Slip resampler requires matching samplerate and capture_samplerate",
@@ -614,7 +677,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         })?;
     }
     let mut num_channels = conf.devices.capture.channels();
-    let fs = conf.devices.samplerate;
+    let fs = conf.devices.samplerate();
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline {
             match step {
@@ -625,7 +688,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                 let msg = format!("Use of missing mixer '{}'", step.name);
                                 return Err(ConfigError::new(&msg).into());
                             } else {
-                                let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
+                                let chan_in = mixers.get(&step.name).unwrap().channels.input();
                                 if chan_in != num_channels {
                                     let msg = format!(
                                         "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
@@ -633,7 +696,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                     );
                                     return Err(ConfigError::new(&msg).into());
                                 }
-                                num_channels = mixers.get(&step.name).unwrap().channels.out;
+                                num_channels = mixers.get(&step.name).unwrap().channels.output();
                                 match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
@@ -842,5 +905,186 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
         conf.devices.capture.labels()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{check_all_finite, validate_resampler};
+    use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
+
+    fn free_sinc(
+        sinc_len: usize,
+        interpolation: AsyncSincInterpolation,
+        oversampling_factor: usize,
+        f_cutoff: Option<f32>,
+    ) -> Option<Resampler> {
+        Some(Resampler::AsyncSinc(AsyncSincParameters::Free {
+            sinc_len,
+            interpolation,
+            window: AsyncSincWindow::Blackman2,
+            f_cutoff: f_cutoff.map(crate::config::FiniteF32::expect_finite),
+            oversampling_factor,
+        }))
+    }
+
+    fn parse(yaml: &str) -> Result<crate::config::Configuration, yaml_serde::Error> {
+        yaml_serde::from_str(yaml)
+    }
+
+    const BASE: &str = r#"
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture: {type: Stdin, channels: 2, format: S16_LE}
+  playback: {type: Stdout, channels: 2, format: S16_LE}
+"#;
+
+    fn with_filter(params: &str) -> String {
+        format!(
+            "{BASE}filters:\n  f:\n    {params}\npipeline:\n  - type: Filter\n    channels: [0]\n    names: [f]\n"
+        )
+    }
+
+    #[test]
+    fn non_finite_rejected_while_parsing() {
+        // A plain f64 field.
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: 3.0}")).is_ok());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: .nan}")).is_err());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: .inf}")).is_err());
+        assert!(parse(&with_filter("type: Gain\n    parameters: {gain: -.inf}")).is_err());
+        // An optional field, where an explicit null must still be accepted.
+        assert!(
+            parse(&with_filter(
+                "type: Volume\n    parameters: {fader: Aux1, limit: null}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: Volume\n    parameters: {fader: Aux1, limit: .nan}"
+            ))
+            .is_err()
+        );
+        // A list field.
+        assert!(
+            parse(&with_filter(
+                "type: Conv\n    parameters: {type: Values, values: [0.5, 0.5]}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: Conv\n    parameters: {type: Values, values: [0.5, .nan]}"
+            ))
+            .is_err()
+        );
+        // An optional list field.
+        assert!(
+            parse(&with_filter(
+                "type: DiffEq\n    parameters: {a: [1.0], b: [1.0]}"
+            ))
+            .is_ok()
+        );
+        assert!(
+            parse(&with_filter(
+                "type: DiffEq\n    parameters: {a: [1.0], b: [1.0, .inf]}"
+            ))
+            .is_err()
+        );
+        // A devices field.
+        assert!(
+            parse(&BASE.replace("chunksize: 1024", "chunksize: 1024\n  volume_limit: .nan"))
+                .is_err()
+        );
+    }
+
+    /// The websocket `GetConfig` hands the config back as YAML, so the finite wrappers must
+    /// serialize as plain numbers. A newtype that serialized as a map would change the wire
+    /// format for every client.
+    #[test]
+    fn config_round_trips_as_plain_numbers() {
+        let yaml = format!(
+            "{BASE}filters:\n  g:\n    type: Gain\n    parameters: {{gain: -6.5}}\n\
+             pipeline:\n  - type: Filter\n    channels: [0]\n    names: [g]\n"
+        );
+        let parsed = parse(&yaml).unwrap();
+        let written = yaml_serde::to_string(&parsed).unwrap();
+        assert!(written.contains("gain: -6.5"), "{written}");
+        assert!(written.contains("samplerate: 44100"), "{written}");
+        assert!(!written.contains("FiniteF"), "{written}");
+        // And it parses back to the same thing.
+        let reparsed: crate::config::Configuration = yaml_serde::from_str(&written).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn check_all_finite_covers_file_coefficients() {
+        assert!(check_all_finite("x", &[1.0, 2.0, 3.0]).is_ok());
+        assert!(check_all_finite::<f64>("x", &[]).is_ok());
+        assert!(check_all_finite("x", &[1.0, f64::NAN]).is_err());
+        assert!(check_all_finite("x", &[1.0f32, f32::INFINITY]).is_err());
+        let err = check_all_finite("x", &[1.0, 2.0, f64::INFINITY])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("index 2"), "{err}");
+    }
+
+    #[test]
+    fn resampler_profile_and_none_are_accepted() {
+        assert!(validate_resampler(&None).is_ok());
+        assert!(validate_resampler(&Some(Resampler::Synchronous)).is_ok());
+        assert!(validate_resampler(&Some(Resampler::Slip)).is_ok());
+        assert!(
+            validate_resampler(&Some(Resampler::AsyncSinc(AsyncSincParameters::Profile {
+                profile: crate::config::AsyncSincProfile::Balanced,
+            })))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn resampler_sinc_len_must_be_nonzero() {
+        assert!(
+            validate_resampler(&free_sinc(0, AsyncSincInterpolation::Cubic, 256, None)).is_err()
+        );
+        assert!(
+            validate_resampler(&free_sinc(1, AsyncSincInterpolation::Cubic, 256, None)).is_ok()
+        );
+    }
+
+    /// Rubato fits the interpolation polynomial through neighbouring sincs and wraps a
+    /// running index only once, so a table smaller than the number of fitted points panics.
+    #[test]
+    fn resampler_oversampling_minimum_follows_interpolation() {
+        for (interpolation, minimum) in [
+            (AsyncSincInterpolation::Nearest, 1),
+            (AsyncSincInterpolation::Linear, 1),
+            (AsyncSincInterpolation::Quadratic, 2),
+            (AsyncSincInterpolation::Cubic, 3),
+        ] {
+            assert!(
+                validate_resampler(&free_sinc(64, interpolation, minimum, None)).is_ok(),
+                "{interpolation:?} should accept {minimum}"
+            );
+            assert!(
+                validate_resampler(&free_sinc(64, interpolation, minimum - 1, None)).is_err(),
+                "{interpolation:?} should reject {}",
+                minimum - 1
+            );
+        }
+    }
+
+    #[test]
+    fn resampler_cutoff_range() {
+        let cubic = AsyncSincInterpolation::Cubic;
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, None)).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(0.95))).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.0))).is_ok());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(0.0))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(-0.5))).is_err());
+        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.5))).is_err());
+        // A non-finite cutoff cannot reach here at all, `FiniteF32` cannot hold one. The
+        // parsing side of that is covered by `non_finite_rejected_while_parsing`.
     }
 }

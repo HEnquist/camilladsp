@@ -63,11 +63,12 @@ impl Compressor {
                 process_channels.push(n);
             }
         }
-        let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
-        let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+        let attack_samples = time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+        let release_samples =
+            time_to_samples(config.release.get(), config.release_unit, samplerate);
         let attack = (-1.0 / attack_samples).exp().to_camilla_float();
         let release = (-1.0 / release_samples).exp().to_camilla_float();
-        let clip_limit = config.clip_limit.map(db_to_linear);
+        let clip_limit = config.clip_limit.map(|limit| db_to_linear(limit.get()));
 
         let scratch = vec![0.0; chunksize];
 
@@ -198,11 +199,13 @@ impl Processor for Compressor {
                     process_channels.push(n);
                 }
             }
-            let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
-            let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+            let attack_samples =
+                time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+            let release_samples =
+                time_to_samples(config.release.get(), config.release_unit, samplerate);
             let attack = (-1.0 / attack_samples).exp();
             let release = (-1.0 / release_samples).exp();
-            let clip_limit = config.clip_limit.map(db_to_linear);
+            let clip_limit = config.clip_limit.map(|limit| db_to_linear(limit.get()));
 
             let clipper = if let Some(limit) = config.clip_limit {
                 let clipconf = config::ClipperParameters {
@@ -252,6 +255,12 @@ pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
     }
     if config.release <= 0.0 {
         let msg = "Release value must be larger than zero.";
+        return Err(config::ConfigError::new(msg).into());
+    }
+    // A factor of zero divides by zero in `calculate_linear_gain`, giving every sample above the
+    // threshold an infinite gain. A factor below one is legitimate upward expansion.
+    if config.factor <= 0.0 {
+        let msg = "Factor must be larger than zero.";
         return Err(config::ConfigError::new(msg).into());
     }
     for ch in config.monitor_channels().iter() {
