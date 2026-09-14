@@ -47,8 +47,8 @@ pub struct MixerSource {
 impl Mixer {
     /// Creates a Mixer from a config struct
     pub fn from_config(name: String, config: config::Mixer) -> Self {
-        let ch_in = config.channels.r#in;
-        let ch_out = config.channels.out;
+        let ch_in = config.channels.input();
+        let ch_out = config.channels.output();
         let mut mapping = vec![Vec::<MixerSource>::new(); ch_out];
         for cfg_mapping in config.mapping {
             if !cfg_mapping.is_mute() {
@@ -106,8 +106,8 @@ impl Mixer {
 
 /// Validate the mixer config, to give a helpful message intead of a panic.
 pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
-    let chan_in = mixer_config.channels.r#in;
-    let chan_out = mixer_config.channels.out;
+    let chan_in = mixer_config.channels.input();
+    let chan_out = mixer_config.channels.output();
     let mut output_channels: Vec<usize> = Vec::with_capacity(chan_out);
     let mut input_channels: Vec<usize> = Vec::with_capacity(chan_in);
     for mapping in mixer_config.mapping.iter() {
@@ -151,7 +151,7 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Res<()> {
 
 /// Get a vector showing which input channels are used
 pub fn used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
-    let chan_in = mixer_config.channels.r#in;
+    let chan_in = mixer_config.channels.input();
     let mut used_channels = vec![false; chan_in];
     for mapping in mixer_config.mapping.iter() {
         if !mapping.is_mute() {
@@ -167,37 +167,42 @@ pub fn used_input_channels(mixer_config: &config::Mixer) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::finite;
     use crate::config::{Mixer, MixerChannels, MixerMapping, MixerSource};
     use crate::mixer;
     use crate::mixer::used_input_channels;
+    use std::num::NonZeroUsize;
 
     #[test]
     fn check_all_used() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -234,31 +239,34 @@ mod tests {
 
     #[test]
     fn check_not_mapped() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -295,31 +303,34 @@ mod tests {
 
     #[test]
     fn check_mute_source() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(true),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(true),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -356,31 +367,34 @@ mod tests {
 
     #[test]
     fn check_mute_mapping() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(-3.0),
+            gain: Some(finite!(-3.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -417,31 +431,34 @@ mod tests {
 
     #[test]
     fn check_make_mixer() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 0,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -505,31 +522,34 @@ mod tests {
 
     #[test]
     fn check_make_mixer_muted() {
-        let chans = MixerChannels { r#in: 2, out: 4 };
+        let chans = MixerChannels {
+            r#in: NonZeroUsize::new(2).unwrap(),
+            out: NonZeroUsize::new(4).unwrap(),
+        };
         let src0 = MixerSource {
             channel: 0,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src1 = MixerSource {
             channel: 1,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src2 = MixerSource {
             channel: 0,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
         };
         let src3 = MixerSource {
             channel: 1,
-            gain: Some(0.0),
+            gain: Some(finite!(0.0)),
             inverted: Some(false),
             mute: Some(false),
             scale: None,
@@ -564,7 +584,7 @@ mod tests {
         assert_eq!(mix.channels_in, 2);
         assert_eq!(mix.channels_out, 4);
 
-        //let exp_src0 = mixer::MixerSource {channel: 0, gain: 1.0};
+        //let exp_src0 = mixer::MixerSource {channel: 0, gain: finite!(1.0)};
         let exp_src1 = mixer::MixerSource {
             channel: 1,
             gain: 1.0,

@@ -305,7 +305,7 @@ impl Gain {
     }
 
     pub fn from_config(name: &str, conf: config::GainParameters) -> Self {
-        let gain = conf.gain;
+        let gain = conf.gain.get();
         let inverted = conf.is_inverted();
         let mute = conf.is_mute();
         let linear = conf.scale() == config::GainScale::Linear;
@@ -333,7 +333,7 @@ impl Filter for Gain {
             parameters: conf, ..
         } = conf
         {
-            let gain_value = conf.gain;
+            let gain_value = conf.gain.get();
             let inverted = conf.is_inverted();
             let mute = conf.is_mute();
             let linear = conf.scale() == config::GainScale::Linear;
@@ -423,7 +423,7 @@ impl Delay {
     }
 
     pub fn from_config(name: &str, samplerate: usize, conf: config::DelayParameters) -> Self {
-        let delay_samples = delay_to_samples(conf.delay, conf.delay_unit(), samplerate);
+        let delay_samples = delay_to_samples(conf.delay.get(), conf.delay_unit(), samplerate);
 
         Self::new(name, samplerate, delay_samples, conf.subsample())
     }

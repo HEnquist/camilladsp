@@ -24,6 +24,7 @@ use crate::CamillaFloat;
 use crate::ProcessingParameters;
 use crate::Res;
 use crate::ToF32;
+use crate::config::finite;
 
 pub struct Loudness {
     pub name: String,
@@ -58,11 +59,19 @@ fn rel_boost(level: f32, reference: f32) -> f32 {
 }
 
 fn highshelf_conf(freq: f64, q: f64, gain: f64) -> config::BiquadParameters {
-    config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { freq, q, gain })
+    config::BiquadParameters::Highshelf(config::ShelfSteepness::Q {
+        freq: finite!(freq),
+        q: finite!(q),
+        gain: finite!(gain),
+    })
 }
 
 fn lowshelf_conf(freq: f64, q: f64, gain: f64) -> config::BiquadParameters {
-    config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { freq, q, gain })
+    config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q {
+        freq: finite!(freq),
+        q: finite!(q),
+        gain: finite!(gain),
+    })
 }
 
 impl Loudness {
@@ -75,7 +84,7 @@ impl Loudness {
         info!("Create loudness filter");
         let fader = conf.fader();
         let current_volume = processing_params.target_volume(fader);
-        let relboost = rel_boost(current_volume, conf.reference_level);
+        let relboost = rel_boost(current_volume, conf.reference_level.get());
         let active = relboost > 0.01;
         let high_boost = (relboost * conf.high_boost()) as f64;
         let low_boost = (relboost * conf.low_boost()) as f64;
@@ -84,7 +93,7 @@ impl Loudness {
         let gain = if conf.attenuate_mid() {
             let max_gain = low_boost.max(high_boost);
             let gain_params = config::GainParameters {
-                gain: -max_gain,
+                gain: finite!(-max_gain),
                 inverted: None,
                 mute: None,
                 scale: None,
@@ -109,7 +118,7 @@ impl Loudness {
         Loudness {
             name: name.to_string(),
             current_volume: current_volume as CamillaFloat,
-            reference_level: conf.reference_level,
+            reference_level: conf.reference_level.get(),
             high_boost: conf.high_boost(),
             low_boost: conf.low_boost(),
             high_freq: conf.high_freq(),
@@ -161,7 +170,7 @@ impl Filter for Loudness {
             if let Some(gain) = &mut self.gain {
                 let max_gain = low_boost.max(high_boost);
                 let gain_params = config::GainParameters {
-                    gain: -max_gain,
+                    gain: finite!(-max_gain),
                     inverted: None,
                     mute: None,
                     scale: None,
@@ -190,7 +199,7 @@ impl Filter for Loudness {
         {
             self.fader = conf.fader();
             let current_volume = self.processing_params.current_volume(self.fader);
-            let relboost = rel_boost(current_volume, conf.reference_level);
+            let relboost = rel_boost(current_volume, conf.reference_level.get());
             let high_boost = (relboost * conf.high_boost()) as f64;
             let low_boost = (relboost * conf.low_boost()) as f64;
             self.active = relboost > 0.001;
@@ -207,7 +216,7 @@ impl Filter for Loudness {
             if conf.attenuate_mid() {
                 let max_gain = low_boost.max(high_boost);
                 let gain_params = config::GainParameters {
-                    gain: -max_gain,
+                    gain: finite!(-max_gain),
                     inverted: None,
                     mute: None,
                     scale: None,
@@ -224,7 +233,7 @@ impl Filter for Loudness {
                 self.gain = None
             }
 
-            self.reference_level = conf.reference_level;
+            self.reference_level = conf.reference_level.get();
             self.high_boost = conf.high_boost();
             self.low_boost = conf.low_boost();
             self.high_freq = conf.high_freq();
@@ -278,6 +287,7 @@ mod tests {
     use crate::CamillaFloat;
     use crate::ProcessingParameters;
     use crate::config::{BiquadParameters, LoudnessParameters, ShelfSteepness};
+    use crate::config::{finite, finite32};
     use crate::filters::Filter;
     use crate::filters::biquad::{self, BiquadCoefficients};
     use crate::filters::loudness::validate_config;
@@ -285,7 +295,7 @@ mod tests {
 
     fn params() -> LoudnessParameters {
         LoudnessParameters {
-            reference_level: -25.0,
+            reference_level: finite32!(-25.0),
             high_boost: None,
             low_boost: None,
             high_freq: None,
@@ -313,17 +323,17 @@ mod tests {
             let from_q = BiquadCoefficients::from_config(
                 44100,
                 BiquadParameters::Highshelf(ShelfSteepness::Q {
-                    freq: conf.high_freq(),
-                    q: conf.high_q(),
-                    gain,
+                    freq: finite!(conf.high_freq()),
+                    q: finite!(conf.high_q()),
+                    gain: finite!(gain),
                 }),
             );
             let from_slope = BiquadCoefficients::from_config(
                 44100,
                 BiquadParameters::Highshelf(ShelfSteepness::Slope {
-                    freq: 3500.0,
-                    slope: 12.0,
-                    gain,
+                    freq: finite!(3500.0),
+                    slope: finite!(12.0),
+                    gain: finite!(gain),
                 }),
             );
             assert!(is_close(from_q.a1, from_slope.a1));
@@ -342,16 +352,16 @@ mod tests {
     #[test]
     fn shelves_must_not_cross() {
         let mut conf = params();
-        conf.low_freq = Some(4000.0);
+        conf.low_freq = Some(finite!(4000.0));
         assert!(validate_config(44100, &conf).is_err());
-        conf.high_freq = Some(8000.0);
+        conf.high_freq = Some(finite!(8000.0));
         assert!(validate_config(44100, &conf).is_ok());
     }
 
     #[test]
     fn freq_must_be_below_nyquist() {
         let mut conf = params();
-        conf.high_freq = Some(9000.0);
+        conf.high_freq = Some(finite!(9000.0));
         assert!(validate_config(44100, &conf).is_ok());
         assert!(validate_config(16000, &conf).is_err());
     }
@@ -359,18 +369,18 @@ mod tests {
     #[test]
     fn freq_must_be_positive() {
         let mut conf = params();
-        conf.low_freq = Some(0.0);
+        conf.low_freq = Some(finite!(0.0));
         assert!(validate_config(44100, &conf).is_err());
     }
 
     #[test]
     fn q_must_be_within_limits() {
         let mut conf = params();
-        conf.high_q = Some(0.0);
+        conf.high_q = Some(finite!(0.0));
         assert!(validate_config(44100, &conf).is_err());
-        conf.high_q = Some(1e10);
+        conf.high_q = Some(finite!(1e10));
         assert!(validate_config(44100, &conf).is_err());
-        conf.high_q = Some(1.5);
+        conf.high_q = Some(finite!(1.5));
         assert!(validate_config(44100, &conf).is_ok());
     }
 
@@ -383,14 +393,14 @@ mod tests {
         const FS: usize = 44100;
         const VOLUME: f32 = -30.0;
         let conf = LoudnessParameters {
-            reference_level: -10.0,
-            high_boost: Some(8.0),
-            low_boost: Some(6.0),
+            reference_level: finite32!(-10.0),
+            high_boost: Some(finite32!(8.0)),
+            low_boost: Some(finite32!(6.0)),
             ..params()
         };
         // Below the reference level, or the filter does nothing at all and the
         // comparison would pass on two untouched waveforms.
-        let relboost = rel_boost(VOLUME, conf.reference_level);
+        let relboost = rel_boost(VOLUME, conf.reference_level.get());
         assert!(relboost > 0.01, "the filter has to be active to be tested");
 
         let processing = Arc::new(ProcessingParameters::default());
@@ -413,9 +423,9 @@ mod tests {
                 BiquadCoefficients::from_config(
                     FS,
                     BiquadParameters::Highshelf(ShelfSteepness::Q {
-                        freq: conf.high_freq(),
-                        q: conf.high_q(),
-                        gain: high_boost,
+                        freq: finite!(conf.high_freq()),
+                        q: finite!(conf.high_q()),
+                        gain: finite!(high_boost),
                     }),
                 ),
             ),
@@ -425,9 +435,9 @@ mod tests {
                 BiquadCoefficients::from_config(
                     FS,
                     BiquadParameters::Lowshelf(ShelfSteepness::Q {
-                        freq: conf.low_freq(),
-                        q: conf.low_q(),
-                        gain: low_boost,
+                        freq: finite!(conf.low_freq()),
+                        q: finite!(conf.low_q()),
+                        gain: finite!(low_boost),
                     }),
                 ),
             ),

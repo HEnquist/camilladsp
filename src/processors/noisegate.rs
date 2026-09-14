@@ -60,8 +60,9 @@ impl NoiseGate {
                 process_channels.push(n);
             }
         }
-        let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
-        let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+        let attack_samples = time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+        let release_samples =
+            time_to_samples(config.release.get(), config.release_unit, samplerate);
         let attack = (-1.0 / attack_samples).exp();
         let release = (-1.0 / release_samples).exp();
         let scratch = vec![0.0; chunksize];
@@ -78,7 +79,7 @@ impl NoiseGate {
             config.attenuation
         );
 
-        let factor = db_to_linear(-config.attenuation).to_camilla_float();
+        let factor = db_to_linear(-config.attenuation.get()).to_camilla_float();
 
         NoiseGate {
             name,
@@ -172,8 +173,10 @@ impl Processor for NoiseGate {
                     process_channels.push(n);
                 }
             }
-            let attack_samples = time_to_samples(config.attack, config.attack_unit, samplerate);
-            let release_samples = time_to_samples(config.release, config.release_unit, samplerate);
+            let attack_samples =
+                time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+            let release_samples =
+                time_to_samples(config.release.get(), config.release_unit, samplerate);
             let attack = (-1.0 / attack_samples).exp();
             let release = (-1.0 / release_samples).exp();
 
@@ -181,8 +184,8 @@ impl Processor for NoiseGate {
             self.process_channels = process_channels;
             self.attack = attack.to_camilla_float();
             self.release = release.to_camilla_float();
-            self.threshold = config.threshold.to_camilla_float();
-            self.factor = db_to_linear(-config.attenuation).to_camilla_float();
+            self.threshold = config.threshold.get().to_camilla_float();
+            self.factor = db_to_linear(-config.attenuation.get()).to_camilla_float();
 
             debug!(
                 "Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",

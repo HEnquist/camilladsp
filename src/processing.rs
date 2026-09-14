@@ -74,8 +74,8 @@ fn processing(
     rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
     processing_params: Arc<ProcessingParameters>,
 ) {
-    let chunksize = conf_proc.devices.chunksize;
-    let samplerate = conf_proc.devices.samplerate;
+    let chunksize = conf_proc.devices.chunksize();
+    let samplerate = conf_proc.devices.samplerate();
     let multithreaded = conf_proc.devices.multithreaded();
     let nbr_threads = conf_proc.devices.worker_threads();
     let hw_threads = std::thread::available_parallelism()

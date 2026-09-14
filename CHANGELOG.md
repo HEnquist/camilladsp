@@ -28,7 +28,14 @@ Bugfixes:
 - The `Compressor` now rejects a `factor` of zero, which previously gave every sample above the
   threshold an infinite gain. Values below 1.0 are still allowed, for upward expansion.
 - No numeric config value accepts `.nan`, `.inf` or `-.inf` any more. The range tests were written
-  so that every comparison against NaN passed, and one-sided tests let infinities through.
+  so that every comparison against NaN passed, and one-sided tests let infinities through. Every
+  float field now has type `FiniteF64` or `FiniteF32`, so the rule is part of the field
+  declaration and a field added later cannot forget it. The types are confined to the config
+  module, the rest of CamillaDSP reads plain floats through getters, and they serialize as plain
+  numbers so the websocket config format is unchanged.
+- Fields that must be larger than zero now have type `NonZeroUsize` rather than a validator that
+  had to be attached by hand. This covers `samplerate`, `chunksize`, `capture_samplerate`, every
+  device `channels`, the mixer channel counts, and the dummy convolution `length`.
 - PipeWire: an `autoconnect_to` target that cannot be found now leaves the node unconnected,
   instead of falling back to the default device and capturing from or playing to the wrong node.
   The node is connected automatically if the target appears later.

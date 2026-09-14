@@ -1937,7 +1937,7 @@ fn make_spectrum_subscription(
         .active_config
         .lock()
         .as_ref()
-        .map(|c| c.devices.samplerate)
+        .map(|c| c.devices.samplerate())
         .unwrap_or(0);
     if samplerate == 0 {
         return Err(WsResult::ProcessingNotRunningError);
@@ -1992,7 +1992,7 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
         .active_config
         .lock()
         .as_ref()
-        .map(|c| c.devices.samplerate)
+        .map(|c| c.devices.samplerate())
         .unwrap_or(0);
     if samplerate == 0 {
         return WsReply::GetSpectrum {

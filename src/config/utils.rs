@@ -23,12 +23,12 @@ use crate::processors::noisegate;
 use crate::processors::race;
 use crate::utils::wavtools::find_data_in_wav_stream;
 use parking_lot::RwLock;
-use serde::{Deserialize, de};
 use std::error;
 use std::fmt;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -84,142 +84,6 @@ impl ConfigErrorType {
     }
 }
 
-pub(crate) fn validate_nonzero_usize<'de, D>(d: D) -> Result<usize, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let value = usize::deserialize(d)?;
-    if value < 1 {
-        return Err(de::Error::invalid_value(
-            de::Unexpected::Unsigned(value as u64),
-            &"a value > 0",
-        ));
-    }
-    Ok(value)
-}
-
-/// The same as [`validate_nonzero_usize`], for an optional field.
-///
-/// A missing field is handled by `#[serde(default)]` and never reaches this, but an
-/// explicit `null` does, and is left alone like any other unset value.
-pub(crate) fn validate_nonzero_usize_option<'de, D>(d: D) -> Result<Option<usize>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let value = Option::<usize>::deserialize(d)?;
-    if let Some(number) = value
-        && number < 1
-    {
-        return Err(de::Error::invalid_value(
-            de::Unexpected::Unsigned(number as u64),
-            &"a value > 0",
-        ));
-    }
-    Ok(value)
-}
-
-/// Reject a non-finite value at parse time.
-///
-/// No config value has a meaningful `.nan` or `.inf` setting. The range tests in the validators
-/// are written as `<= 0.0` and similar, and every comparison against NaN is false, so a NaN
-/// passes all of them. An infinity passes any test that is bounded on one side only. Rejecting
-/// both while deserializing keeps those range tests as they are, and reports the problem with
-/// the line and column it came from.
-macro_rules! finite_deserializer {
-    ($name:ident, $ty:ty) => {
-        pub(crate) fn $name<'de, D>(d: D) -> Result<$ty, D::Error>
-        where
-            D: de::Deserializer<'de>,
-        {
-            let value = <$ty>::deserialize(d)?;
-            if !value.is_finite() {
-                return Err(de::Error::invalid_value(
-                    de::Unexpected::Float(value as f64),
-                    &"a finite number",
-                ));
-            }
-            Ok(value)
-        }
-    };
-}
-
-/// The same, for an optional field. A missing field is handled by `#[serde(default)]` and never
-/// reaches this, but an explicit `null` does, and is left alone like any other unset value.
-macro_rules! finite_deserializer_option {
-    ($name:ident, $ty:ty) => {
-        pub(crate) fn $name<'de, D>(d: D) -> Result<Option<$ty>, D::Error>
-        where
-            D: de::Deserializer<'de>,
-        {
-            let value = Option::<$ty>::deserialize(d)?;
-            if let Some(number) = value
-                && !number.is_finite()
-            {
-                return Err(de::Error::invalid_value(
-                    de::Unexpected::Float(number as f64),
-                    &"a finite number",
-                ));
-            }
-            Ok(value)
-        }
-    };
-}
-
-/// The same, for a list. The expectation message names the offending index.
-macro_rules! finite_deserializer_vec {
-    ($name:ident, $ty:ty) => {
-        pub(crate) fn $name<'de, D>(d: D) -> Result<Vec<$ty>, D::Error>
-        where
-            D: de::Deserializer<'de>,
-        {
-            let values = Vec::<$ty>::deserialize(d)?;
-            check_list_finite(&values)?;
-            Ok(values)
-        }
-    };
-}
-
-/// The same, for an optional list.
-macro_rules! finite_deserializer_vec_option {
-    ($name:ident, $ty:ty) => {
-        pub(crate) fn $name<'de, D>(d: D) -> Result<Option<Vec<$ty>>, D::Error>
-        where
-            D: de::Deserializer<'de>,
-        {
-            let values = Option::<Vec<$ty>>::deserialize(d)?;
-            if let Some(values) = &values {
-                check_list_finite(values)?;
-            }
-            Ok(values)
-        }
-    };
-}
-
-fn check_list_finite<E, T>(values: &[T]) -> Result<(), E>
-where
-    E: de::Error,
-    T: Copy + Into<f64>,
-{
-    for (index, value) in values.iter().enumerate() {
-        let value: f64 = (*value).into();
-        if !value.is_finite() {
-            return Err(de::Error::invalid_value(
-                de::Unexpected::Float(value),
-                &format!("all values finite, the one at index {index} is not").as_str(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-finite_deserializer!(validate_finite_f64, f64);
-finite_deserializer!(validate_finite_f32, f32);
-finite_deserializer_option!(validate_finite_f64_option, f64);
-finite_deserializer_option!(validate_finite_f32_option, f32);
-finite_deserializer_vec!(validate_finite_f64_vec, f64);
-finite_deserializer_vec!(validate_finite_f32_vec, f32);
-finite_deserializer_vec_option!(validate_finite_f64_vec_option, f64);
-
 /// Reject a non-finite value that did not come from the config file.
 ///
 /// Coefficients read from a raw or wav file cannot be checked while deserializing, since they
@@ -252,7 +116,7 @@ fn validate_resampler(resampler: &Option<Resampler>) -> Res<()> {
     else {
         return Ok(());
     };
-    // Checked here rather than with `validate_nonzero_usize`, since `AsyncSincParameters` is
+    // Checked here rather than with a `NonZeroUsize` field, since `AsyncSincParameters` is
     // untagged and a rejected field there only reports that no variant matched.
     if *sinc_len == 0 {
         let msg = "sinc_len must be larger than zero, 64 to 256 are typical values.";
@@ -332,12 +196,17 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
         _ => {}
     }
     if let Some(rate) = overrides.samplerate {
-        let cfg_rate = configuration.devices.samplerate;
-        let cfg_chunksize = configuration.devices.chunksize;
+        let Some(rate_nonzero) = NonZeroUsize::new(rate) else {
+            return Err(
+                ConfigError::new("The samplerate override must be larger than zero").into(),
+            );
+        };
+        let cfg_rate = configuration.devices.samplerate();
+        let cfg_chunksize = configuration.devices.chunksize();
 
         if configuration.devices.resampler.is_none() {
             debug!("Apply override for samplerate: {rate}");
-            configuration.devices.samplerate = rate;
+            configuration.devices.samplerate = rate_nonzero;
             let scaled_chunksize = if rate > cfg_rate {
                 cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
             } else {
@@ -346,14 +215,12 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             // Scaling down is an integer division, so a small enough chunksize
             // divides away entirely. Zero would hang the capture loop, and a
             // configuration this odd should still run, so keep one frame.
-            let scaled_chunksize = if scaled_chunksize == 0 {
+            let scaled_chunksize = NonZeroUsize::new(scaled_chunksize).unwrap_or_else(|| {
                 warn!(
                     "Overriding the samplerate to {rate} scales chunksize {cfg_chunksize} below one frame, using 1"
                 );
-                1
-            } else {
-                scaled_chunksize
-            };
+                NonZeroUsize::MIN
+            });
             debug!(
                 "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
             );
@@ -382,7 +249,7 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             }
         } else {
             debug!("Apply override for capture_samplerate: {rate}");
-            configuration.devices.capture_samplerate = Some(rate);
+            configuration.devices.capture_samplerate = Some(rate_nonzero);
             if rate == cfg_rate && !configuration.devices.rate_adjust() {
                 debug!("Disabling unneccesary 1:1 resampling");
                 configuration.devices.resampler = None;
@@ -404,6 +271,9 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     }
     if let Some(chans) = overrides.channels {
         debug!("Apply override for capture channels: {chans}");
+        let Some(chans) = NonZeroUsize::new(chans) else {
+            return Err(ConfigError::new("The channels override must be larger than zero").into());
+        };
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
                 dev.channels = chans;
@@ -503,7 +373,7 @@ fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
 }
 
 fn replace_tokens_in_config(config: &mut Configuration) {
-    let samplerate = config.devices.samplerate;
+    let samplerate = config.devices.samplerate();
     let num_channels = config.devices.capture.channels();
     if let Some(filters) = &mut config.filters {
         for filter in filters.values_mut() {
@@ -679,12 +549,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     validate_resampler(&conf.devices.resampler)?;
     #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
-        (4 + conf.devices.queuelimit()) * conf.devices.chunksize
+        (4 + conf.devices.queuelimit()) * conf.devices.chunksize()
     } else {
-        (2 + conf.devices.queuelimit()) * conf.devices.chunksize
+        (2 + conf.devices.queuelimit()) * conf.devices.chunksize()
     };
     #[cfg(not(target_os = "linux"))]
-    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize;
+    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize();
 
     if conf.devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {target_level_limit}");
@@ -720,7 +590,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         return Err(ConfigError::new("Volume limit cannot be less than -150 dB").into());
     }
     if matches!(conf.devices.resampler, Some(Resampler::Slip))
-        && conf.devices.capture_samplerate() != conf.devices.samplerate
+        && conf.devices.capture_samplerate() != conf.devices.samplerate()
     {
         return Err(ConfigError::new(
             "The Slip resampler requires matching samplerate and capture_samplerate",
@@ -807,7 +677,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         })?;
     }
     let mut num_channels = conf.devices.capture.channels();
-    let fs = conf.devices.samplerate;
+    let fs = conf.devices.samplerate();
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline {
             match step {
@@ -818,7 +688,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                 let msg = format!("Use of missing mixer '{}'", step.name);
                                 return Err(ConfigError::new(&msg).into());
                             } else {
-                                let chan_in = mixers.get(&step.name).unwrap().channels.r#in;
+                                let chan_in = mixers.get(&step.name).unwrap().channels.input();
                                 if chan_in != num_channels {
                                     let msg = format!(
                                         "Mixer '{}' has wrong number of input channels. Expected {}, found {}.",
@@ -826,7 +696,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                     );
                                     return Err(ConfigError::new(&msg).into());
                                 }
-                                num_channels = mixers.get(&step.name).unwrap().channels.out;
+                                num_channels = mixers.get(&step.name).unwrap().channels.output();
                                 match mixer::validate_mixer(mixers.get(&step.name).unwrap()) {
                                     Ok(_) => {}
                                     Err(err) => {
@@ -1053,7 +923,7 @@ mod tests {
             sinc_len,
             interpolation,
             window: AsyncSincWindow::Blackman2,
-            f_cutoff,
+            f_cutoff: f_cutoff.map(crate::config::FiniteF32::expect_finite),
             oversampling_factor,
         }))
     }
@@ -1129,6 +999,25 @@ devices:
         );
     }
 
+    /// The websocket `GetConfig` hands the config back as YAML, so the finite wrappers must
+    /// serialize as plain numbers. A newtype that serialized as a map would change the wire
+    /// format for every client.
+    #[test]
+    fn config_round_trips_as_plain_numbers() {
+        let yaml = format!(
+            "{BASE}filters:\n  g:\n    type: Gain\n    parameters: {{gain: -6.5}}\n\
+             pipeline:\n  - type: Filter\n    channels: [0]\n    names: [g]\n"
+        );
+        let parsed = parse(&yaml).unwrap();
+        let written = yaml_serde::to_string(&parsed).unwrap();
+        assert!(written.contains("gain: -6.5"), "{written}");
+        assert!(written.contains("samplerate: 44100"), "{written}");
+        assert!(!written.contains("FiniteF"), "{written}");
+        // And it parses back to the same thing.
+        let reparsed: crate::config::Configuration = yaml_serde::from_str(&written).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
     #[test]
     fn check_all_finite_covers_file_coefficients() {
         assert!(check_all_finite("x", &[1.0, 2.0, 3.0]).is_ok());
@@ -1195,7 +1084,7 @@ devices:
         assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(0.0))).is_err());
         assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(-0.5))).is_err());
         assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.5))).is_err());
-        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(f32::NAN))).is_err());
-        assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(f32::INFINITY))).is_err());
+        // A non-finite cutoff cannot reach here at all, `FiniteF32` cannot hold one. The
+        // parsing side of that is covered by `non_finite_rejected_while_parsing`.
     }
 }

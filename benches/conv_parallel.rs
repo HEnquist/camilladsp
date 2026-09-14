@@ -40,7 +40,7 @@ fn conv_config(length: usize) -> config::ConvParameters {
     let scale = 1.0 / length as f64;
     config::ConvParameters::Values {
         values: (0..length)
-            .map(|n| (n as f64 * 0.001).sin() * scale)
+            .map(|n| config::FiniteF64::expect_finite((n as f64 * 0.001).sin() * scale))
             .collect(),
     }
 }

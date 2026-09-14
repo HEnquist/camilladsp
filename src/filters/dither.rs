@@ -762,6 +762,7 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::finite;
     use crate::{CamillaFloat, config::DitherParameters, filters::Filter, filters::dither::Dither};
 
     fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
@@ -803,7 +804,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Flat {
             bits: 8,
-            amplitude: 2.0,
+            amplitude: finite!(2.0),
         };
         let mut dith = Dither::from_config("test", conf);
         dith.process_waveform(&mut waveform);

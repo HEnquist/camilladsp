@@ -16,7 +16,7 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::time::Duration;
 
 use camillalib::CamillaFloat;
-use camillalib::config::{BiquadParameters, NotchWidth};
+use camillalib::config::{BiquadParameters, FiniteF64, NotchWidth};
 use camillalib::filters::Filter;
 use camillalib::filters::biquad::{
     Biquad, BiquadCoefficients, MAX_CHANNELS, MAX_DEPTH, choose_split, process_cascades_with_split,
@@ -33,8 +33,8 @@ fn cascade(stages: usize, seed: usize) -> Vec<Biquad> {
     (0..stages)
         .map(|k| {
             let conf = BiquadParameters::Allpass(NotchWidth::Q {
-                freq: 110.0 + 173.0 * ((k + 3 * seed) as f64),
-                q: 0.7 + 0.05 * (k as f64),
+                freq: FiniteF64::expect_finite(110.0 + 173.0 * ((k + 3 * seed) as f64)),
+                q: FiniteF64::expect_finite(0.7 + 0.05 * (k as f64)),
             });
             Biquad::new(
                 "b",

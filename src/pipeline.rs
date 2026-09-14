@@ -432,10 +432,11 @@ impl Pipeline {
                 config::PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
-                        num_channels = mixconf.channels.out;
+                        num_channels = mixconf.channels.output();
                         debug!(
                             "Add Mixer step with mixer {}, pipeline becomes {} channels wide",
-                            step.name, mixconf.channels.out
+                            step.name,
+                            mixconf.channels.output()
                         );
                         let mixer = mixer::Mixer::from_config(step.name, mixconf);
                         steps.push(PipelineStep::MixerStep(mixer));
@@ -485,7 +486,7 @@ impl Pipeline {
                                     &channels,
                                     names,
                                     filter_configs,
-                                    conf.devices.samplerate,
+                                    conf.devices.samplerate(),
                                 )));
                                 continue;
                             }
@@ -494,8 +495,8 @@ impl Pipeline {
                                     channel,
                                     names,
                                     filter_configs.clone(),
-                                    conf.devices.chunksize,
-                                    conf.devices.samplerate,
+                                    conf.devices.chunksize(),
+                                    conf.devices.samplerate(),
                                     processing_params.clone(),
                                     &mut coeff_cache,
                                 );
@@ -513,8 +514,8 @@ impl Pipeline {
                                 let comp = processors::compressor::Compressor::from_config(
                                     &step.name,
                                     parameters,
-                                    conf.devices.samplerate,
-                                    conf.devices.chunksize,
+                                    conf.devices.samplerate(),
+                                    conf.devices.chunksize(),
                                 );
                                 Box::new(comp) as Box<dyn Processor>
                             }
@@ -522,8 +523,8 @@ impl Pipeline {
                                 let gate = processors::noisegate::NoiseGate::from_config(
                                     &step.name,
                                     parameters,
-                                    conf.devices.samplerate,
-                                    conf.devices.chunksize,
+                                    conf.devices.samplerate(),
+                                    conf.devices.chunksize(),
                                 );
                                 Box::new(gate) as Box<dyn Processor>
                             }
@@ -532,8 +533,8 @@ impl Pipeline {
                                     processors::lookahead_limiter::LookaheadLimiter::from_config(
                                         &step.name,
                                         parameters,
-                                        conf.devices.samplerate,
-                                        conf.devices.chunksize,
+                                        conf.devices.samplerate(),
+                                        conf.devices.chunksize(),
                                     );
                                 Box::new(limiter) as Box<dyn Processor>
                             }
@@ -541,7 +542,7 @@ impl Pipeline {
                                 let race = processors::race::RACE::from_config(
                                     &step.name,
                                     parameters,
-                                    conf.devices.samplerate,
+                                    conf.devices.samplerate(),
                                 );
                                 Box::new(race) as Box<dyn Processor>
                             }
@@ -559,12 +560,12 @@ impl Pipeline {
             conf.devices.volume_limit(),
             current_volume,
             mute,
-            conf.devices.chunksize,
-            conf.devices.samplerate,
+            conf.devices.chunksize(),
+            conf.devices.samplerate(),
             processing_params.clone(),
             0,
         );
-        let secs_per_chunk = conf.devices.chunksize as f32 / conf.devices.samplerate as f32;
+        let secs_per_chunk = conf.devices.chunksize() as f32 / conf.devices.samplerate() as f32;
         // When a rayon pool is available, merge the per-channel filter
         // steps into parallel steps that run on it. With no pool the
         // filters run sequentially.
@@ -845,7 +846,7 @@ devices:
         conf: &crate::config::Configuration,
         name: &str,
     ) -> Vec<crate::filters::biquad::Biquad> {
-        let fs = conf.devices.samplerate;
+        let fs = conf.devices.samplerate();
         super::biquad_stages(name, &conf.filters.as_ref().unwrap()[name], fs).unwrap()
     }
 
@@ -1143,12 +1144,12 @@ parameters:
         multithreaded: bool,
         channels: usize,
     ) -> Vec<Vec<CamillaFloat>> {
-        let chunksize = conf.devices.chunksize;
+        let chunksize = conf.devices.chunksize();
         let pool = crate::processing::build_processing_threadpool(
             multithreaded,
             conf.devices.worker_threads(),
             chunksize,
-            conf.devices.samplerate,
+            conf.devices.samplerate(),
         );
         let params = Arc::new(ProcessingParameters::default());
         let mut pipeline = Pipeline::from_config(conf, params, pool);
@@ -1329,7 +1330,7 @@ devices:
     format: S16_LE
 ";
         let conf: crate::config::Configuration = yaml_serde::from_str(CONFIG).unwrap();
-        let chunksize = conf.devices.chunksize;
+        let chunksize = conf.devices.chunksize();
         let channels = conf.devices.capture.channels();
 
         let params = Arc::new(ProcessingParameters::default());

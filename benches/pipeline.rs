@@ -5,8 +5,10 @@ use camillalib::CamillaFloat;
 use camillalib::ProcessingParameters;
 use camillalib::audiochunk::AudioChunk;
 use camillalib::config;
+use camillalib::config::FiniteF64;
 use camillalib::pipeline::Pipeline;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1024;
@@ -73,9 +75,9 @@ fn build_biquad_filter(freq: f64, q: f64) -> config::Filter {
     config::Filter::Biquad {
         description: None,
         parameters: config::BiquadParameters::Peaking(config::PeakingWidth::Q {
-            freq,
-            q,
-            gain: 1.5,
+            freq: config::FiniteF64::expect_finite(freq),
+            q: config::FiniteF64::expect_finite(q),
+            gain: config::FiniteF64::expect_finite(1.5),
         }),
     }
 }
@@ -90,7 +92,7 @@ fn build_conv_filter(length: usize) -> config::Filter {
         } else {
             (pi * x).sin() / (pi * x)
         };
-        values.push(sinc);
+        values.push(FiniteF64::expect_finite(sinc));
     }
     config::Filter::Conv {
         description: None,
@@ -126,21 +128,24 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
 
     let mixer = config::Mixer {
         description: None,
-        channels: config::MixerChannels { r#in: 4, out: 2 },
+        channels: config::MixerChannels {
+            r#in: NonZeroUsize::new(4).unwrap(),
+            out: NonZeroUsize::new(2).unwrap(),
+        },
         mapping: vec![
             config::MixerMapping {
                 dest: 0,
                 sources: vec![
                     config::MixerSource {
                         channel: 0,
-                        gain: Some(0.0),
+                        gain: Some(FiniteF64::expect_finite(0.0)),
                         inverted: Some(false),
                         mute: Some(false),
                         scale: Some(config::GainScale::Decibel),
                     },
                     config::MixerSource {
                         channel: 2,
-                        gain: Some(-6.0),
+                        gain: Some(FiniteF64::expect_finite(-6.0)),
                         inverted: Some(false),
                         mute: Some(false),
                         scale: Some(config::GainScale::Decibel),
@@ -153,14 +158,14 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
                 sources: vec![
                     config::MixerSource {
                         channel: 1,
-                        gain: Some(0.0),
+                        gain: Some(FiniteF64::expect_finite(0.0)),
                         inverted: Some(false),
                         mute: Some(false),
                         scale: Some(config::GainScale::Decibel),
                     },
                     config::MixerSource {
                         channel: 3,
-                        gain: Some(-6.0),
+                        gain: Some(FiniteF64::expect_finite(-6.0)),
                         inverted: Some(false),
                         mute: Some(false),
                         scale: Some(config::GainScale::Decibel),
@@ -179,13 +184,13 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
         title: None,
         description: None,
         devices: config::Devices {
-            samplerate: 48000,
-            chunksize,
+            samplerate: NonZeroUsize::new(48000).unwrap(),
+            chunksize: NonZeroUsize::new(chunksize).unwrap(),
             queuelimit: None,
             silence_threshold: None,
             silence_timeout_s: None,
             capture: config::CaptureDevice::Stdin(config::CaptureDeviceStdin {
-                channels: 4,
+                channels: NonZeroUsize::new(4).unwrap(),
                 format: config::BinarySampleFormat::F32_LE,
                 extra_samples: None,
                 skip_bytes: None,
@@ -193,7 +198,7 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
                 labels: None,
             }),
             playback: config::PlaybackDevice::Stdout {
-                channels: 2,
+                channels: NonZeroUsize::new(2).unwrap(),
                 format: config::BinarySampleFormat::F32_LE,
                 wav_header: None,
             },
@@ -237,8 +242,8 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
     let filter_pool = camillalib::processing::build_processing_threadpool(
         multithreaded,
         conf.devices.worker_threads(),
-        conf.devices.chunksize,
-        conf.devices.samplerate,
+        conf.devices.chunksize(),
+        conf.devices.samplerate(),
     );
     Pipeline::from_config(conf, processing_params, filter_pool)
 }
@@ -266,13 +271,13 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
         title: None,
         description: None,
         devices: config::Devices {
-            samplerate: 48000,
-            chunksize,
+            samplerate: NonZeroUsize::new(48000).unwrap(),
+            chunksize: NonZeroUsize::new(chunksize).unwrap(),
             queuelimit: None,
             silence_threshold: None,
             silence_timeout_s: None,
             capture: config::CaptureDevice::Stdin(config::CaptureDeviceStdin {
-                channels: WIDE_CHANNELS,
+                channels: NonZeroUsize::new(WIDE_CHANNELS).unwrap(),
                 format: config::BinarySampleFormat::F32_LE,
                 extra_samples: None,
                 skip_bytes: None,
@@ -280,7 +285,7 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
                 labels: None,
             }),
             playback: config::PlaybackDevice::Stdout {
-                channels: WIDE_CHANNELS,
+                channels: NonZeroUsize::new(WIDE_CHANNELS).unwrap(),
                 format: config::BinarySampleFormat::F32_LE,
                 wav_header: None,
             },
@@ -313,8 +318,8 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
     let filter_pool = camillalib::processing::build_processing_threadpool(
         multithreaded,
         conf.devices.worker_threads(),
-        conf.devices.chunksize,
-        conf.devices.samplerate,
+        conf.devices.chunksize(),
+        conf.devices.samplerate(),
     );
     Pipeline::from_config(conf, processing_params, filter_pool)
 }

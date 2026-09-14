@@ -126,7 +126,7 @@ pub fn new_async_sinc_parameters(
             };
             SincInterpolationParameters {
                 sinc_len: *sinc_len,
-                f_cutoff: *f_cutoff,
+                f_cutoff: f_cutoff.map(|cutoff| cutoff.get()),
                 oversampling_factor: *oversampling_factor,
                 interpolation,
                 window: wind,
