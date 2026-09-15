@@ -1,5 +1,10 @@
 # 5.0.0
 New features:
+- Config validation already reads and checks every coefficient file, so what it read is now kept
+  and reused when the config is applied, rather than being thrown away and read a second time.
+  Applying a config with large FIR filters no longer reads or transforms anything on the processing
+  thread, so it no longer stalls the audio. Not reading the files twice also removes the chance of
+  the second read failing on a file that has moved since.
 - Websocket commands for streaming signal level and state change events.
 - Websocket commands for audio spectrum data (single read & streaming).
 - Websocket command for getting device capabilities.

@@ -118,6 +118,10 @@ name = "pipeline"
 harness = false
 
 [[bench]]
+name = "pipeline_build"
+harness = false
+
+[[bench]]
 name = "biquad_canon"
 harness = false
 

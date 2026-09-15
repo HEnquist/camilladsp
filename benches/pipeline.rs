@@ -6,6 +6,7 @@ use camillalib::ProcessingParameters;
 use camillalib::audiochunk::AudioChunk;
 use camillalib::config;
 use camillalib::config::FiniteF64;
+use camillalib::filters::fftconv::ConvCoeffCache;
 use camillalib::pipeline::Pipeline;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -245,7 +246,12 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
         conf.devices.chunksize(),
         conf.devices.samplerate(),
     );
-    Pipeline::from_config(conf, processing_params, filter_pool)
+    Pipeline::from_config(
+        conf,
+        processing_params,
+        filter_pool,
+        &mut ConvCoeffCache::new(),
+    )
 }
 
 /// A large multi-way active system: many channels, a handful of biquads on
@@ -321,7 +327,12 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
         conf.devices.chunksize(),
         conf.devices.samplerate(),
     );
-    Pipeline::from_config(conf, processing_params, filter_pool)
+    Pipeline::from_config(
+        conf,
+        processing_params,
+        filter_pool,
+        &mut ConvCoeffCache::new(),
+    )
 }
 
 fn make_chunk(channels: usize, frames: usize) -> AudioChunk {

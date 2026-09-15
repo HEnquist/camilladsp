@@ -246,9 +246,20 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<CamillaFloat>> {
 }
 
 /// Validate the filter config, to give a helpful message intead of a panic.
-pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
+///
+/// A convolution filter is validated by reading its impulse response, so the
+/// result of that read is kept in `impulses` rather than thrown away. See
+/// [`fftconv::ImpulseCache`].
+pub fn validate_filter(
+    fs: usize,
+    name: &str,
+    filter_config: &config::Filter,
+    impulses: &mut fftconv::ImpulseCache,
+) -> Res<()> {
     match filter_config {
-        config::Filter::Conv { parameters, .. } => fftconv::validate_config(parameters),
+        config::Filter::Conv { parameters, .. } => {
+            fftconv::validate_config(name, parameters, impulses)
+        }
         config::Filter::Biquad { parameters, .. } => biquad::validate_config(fs, parameters),
         config::Filter::Delay { parameters, .. } => basicfilters::validate_delay_config(parameters),
         config::Filter::Gain { parameters, .. } => basicfilters::validate_gain_config(parameters),

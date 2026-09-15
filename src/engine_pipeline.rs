@@ -19,16 +19,18 @@ use std::{
     thread,
 };
 
+use crate::filters::fftconv::{ConvCoeffCache, ImpulseCache};
 use crate::{
-    CommandMessage, ProcessingState, StatusMessage, StatusStructs, audiodevice, config, processing,
+    CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice, config,
+    processing,
 };
 
 /// Supervisory handles for the running capture/processing/playback threads.
 pub struct EnginePipeline {
     /// commands (set speed, exit) to the capture thread.
     tx_command_cap: crossbeam_channel::Sender<CommandMessage>,
-    /// config updates to the processing thread.
-    tx_pipeconf: crossbeam_channel::Sender<(config::ConfigChange, config::Configuration)>,
+    /// config updates to the processing thread, with the coefficients they need.
+    tx_pipeconf: crossbeam_channel::Sender<processing::PipelineConfig>,
     /// 4-way startup barrier (capture, playback, processing, supervisor).
     barrier: Arc<Barrier>,
     pb_handle: Box<thread::JoinHandle<()>>,
@@ -68,13 +70,32 @@ impl EnginePipeline {
         self.cap_handle.join().unwrap();
     }
 
-    /// Send a config update to the processing thread
+    /// Transform the convolution coefficients the change needs, then send it to
+    /// the processing thread.
+    ///
+    /// The transforms happen here, on the supervisor thread, rather than on the
+    /// processing thread as it applies the change. That thread has been
+    /// promoted to real time, so the work it used to do here stalled the audio
+    /// for as long as it took, which for a multichannel config of long FIR
+    /// filters is a sizeable fraction of the playback buffer. What it does now
+    /// is assemble filters from coefficients already in memory. See
+    /// `benches/pipeline_build.rs` for what the two cost on a given machine.
+    ///
+    /// `impulses` is what validating `configuration` read, so nothing is read
+    /// from the file system here either. An `Err` means the change was not
+    /// sent and the pipeline keeps running the config it has.
     pub fn update_processing_config(
         &self,
         change: config::ConfigChange,
         configuration: config::Configuration,
-    ) {
-        self.tx_pipeconf.send((change, configuration)).unwrap();
+        impulses: &ImpulseCache,
+    ) -> Res<()> {
+        let names = filters_to_build(&change, &configuration);
+        let coeff_cache = ConvCoeffCache::transformed(&configuration, &names, impulses)?;
+        self.tx_pipeconf
+            .send((change, configuration, coeff_cache))
+            .unwrap();
+        Ok(())
     }
 
     /// Set playback readiness state
@@ -160,4 +181,187 @@ pub fn start_pipeline(
         cap_ready: false,
     };
     (pipeline, rx_status)
+}
+
+/// The filters the processing thread is going to construct when it applies
+/// `change`, and therefore the ones whose coefficients have to be ready.
+fn filters_to_build(change: &config::ConfigChange, conf: &config::Configuration) -> Vec<String> {
+    match change {
+        // A parameter update only touches the filters it names, so preparing
+        // the rest would be work for nothing. `config_diff` compares every
+        // filter in the config, not just the ones the pipeline uses, so the
+        // names are narrowed to the pipeline here. An unused filter is never
+        // built, and it was never validated either, so reading one could fail
+        // over a file that nothing was ever going to open.
+        config::ConfigChange::FilterParameters { filters, .. } => pipeline_filter_names(conf)
+            .into_iter()
+            .filter(|name| filters.contains(name))
+            .collect(),
+        // A rebuild constructs every filter the pipeline names.
+        config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
+            pipeline_filter_names(conf)
+        }
+        // A device change restarts everything, and nothing else reaches the
+        // processing thread at all.
+        config::ConfigChange::Devices | config::ConfigChange::None => Vec::new(),
+    }
+}
+
+/// Every filter name the pipeline refers to, in the steps that are not
+/// bypassed.
+///
+/// Duplicates are harmless: transforming is idempotent per name, so a filter
+/// named by several steps is done once and hit from the cache after that.
+fn pipeline_filter_names(conf: &config::Configuration) -> Vec<String> {
+    let Some(pipeline) = conf.pipeline.as_ref() else {
+        return Vec::new();
+    };
+    pipeline
+        .iter()
+        .filter_map(|step| match step {
+            config::PipelineStep::Filter(step) if !step.is_bypassed() => Some(&step.names),
+            _ => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filters::fftconv::ImpulseCache;
+    use std::io::Write;
+
+    fn config_from_json(filters: &str, pipeline: &str) -> config::Configuration {
+        let json = format!(
+            r#"{{
+                "devices": {{
+                    "samplerate": 48000,
+                    "chunksize": 1024,
+                    "capture": {{"type": "Stdin", "channels": 2, "format": "F32_LE"}},
+                    "playback": {{"type": "Stdout", "channels": 2, "format": "F32_LE"}}
+                }},
+                "filters": {filters},
+                "pipeline": {pipeline}
+            }}"#
+        );
+        serde_json::from_str(&json).expect("the test config is valid")
+    }
+
+    const TWO_DUMMIES: &str = r#"{
+        "conv_a": {"type": "Conv", "parameters": {"type": "Dummy", "length": 16}},
+        "conv_b": {"type": "Conv", "parameters": {"type": "Dummy", "length": 16}}
+    }"#;
+
+    fn filter_change(names: &[&str]) -> config::ConfigChange {
+        config::ConfigChange::FilterParameters {
+            filters: names.iter().map(|n| n.to_string()).collect(),
+            processors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn bypassed_steps_are_not_built() {
+        let conf = config_from_json(
+            TWO_DUMMIES,
+            r#"[
+                {"type": "Filter", "names": ["conv_a"]},
+                {"type": "Filter", "names": ["conv_b"], "bypassed": true}
+            ]"#,
+        );
+        assert_eq!(pipeline_filter_names(&conf), vec!["conv_a".to_string()]);
+    }
+
+    #[test]
+    fn a_filter_named_by_several_steps_is_transformed_once() {
+        let conf = config_from_json(
+            TWO_DUMMIES,
+            r#"[
+                {"type": "Filter", "channels": [0], "names": ["conv_a"]},
+                {"type": "Filter", "channels": [1], "names": ["conv_a"]}
+            ]"#,
+        );
+        let names = pipeline_filter_names(&conf);
+        assert_eq!(names.len(), 2);
+        let cache = ConvCoeffCache::transformed(&conf, &names, &ImpulseCache::new())
+            .expect("dummy coefficients always load");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn a_parameter_change_builds_only_what_it_names() {
+        let conf = config_from_json(
+            TWO_DUMMIES,
+            r#"[{"type": "Filter", "names": ["conv_a", "conv_b"]}]"#,
+        );
+        assert_eq!(
+            filters_to_build(&filter_change(&["conv_b"]), &conf),
+            vec!["conv_b".to_string()]
+        );
+    }
+
+    /// A filter that is only defined, never used, is not validated and never
+    /// built, so a change that names it must not send anyone to read its file.
+    #[test]
+    fn a_changed_filter_outside_the_pipeline_is_not_built() {
+        let conf = config_from_json(TWO_DUMMIES, r#"[{"type": "Filter", "names": ["conv_a"]}]"#);
+        assert!(filters_to_build(&filter_change(&["conv_b"]), &conf).is_empty());
+    }
+
+    #[test]
+    fn a_device_change_builds_nothing() {
+        let conf = config_from_json(TWO_DUMMIES, r#"[{"type": "Filter", "names": ["conv_a"]}]"#);
+        assert!(filters_to_build(&config::ConfigChange::Devices, &conf).is_empty());
+    }
+
+    fn temp_coeff_file(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "camilladsp_test_coeffs_{}_{}.raw",
+            name,
+            std::process::id()
+        ));
+        let mut file = std::fs::File::create(&path).expect("can create the fixture");
+        for value in [1.0_f64, 0.5, 0.25, 0.125] {
+            file.write_all(&value.to_le_bytes()).expect("can write");
+        }
+        path
+    }
+
+    /// The point of the whole arrangement: validation reads the coefficient
+    /// files, and nothing reads them again. Proved by deleting the file after
+    /// validating and preparing the change anyway.
+    #[test]
+    fn validated_coefficients_are_not_read_a_second_time() {
+        let path = temp_coeff_file("once");
+        // Through serde rather than quoted by hand: a Windows temp path is full
+        // of backslashes, and those are not valid escapes in a JSON string.
+        let filename =
+            serde_json::to_string(path.to_str().unwrap()).expect("a path encodes as JSON");
+        let filters = format!(
+            r#"{{"conv_file": {{"type": "Conv", "parameters": {{
+                "type": "Raw", "filename": {filename}, "format": "F64_LE"
+            }}}}}}"#
+        );
+        let mut conf =
+            config_from_json(&filters, r#"[{"type": "Filter", "names": ["conv_file"]}]"#);
+
+        let impulses =
+            config::validate_config(&mut conf, None).expect("the fixture config is valid");
+        assert_eq!(impulses.len(), 1, "validation should keep what it read");
+
+        std::fs::remove_file(&path).expect("can remove the fixture");
+
+        let names = filters_to_build(&config::ConfigChange::Pipeline, &conf);
+        let cache = ConvCoeffCache::transformed(&conf, &names, &impulses)
+            .expect("the coefficients came from validation, not from the file");
+        assert_eq!(cache.len(), 1);
+
+        // And the same call without them has nowhere to go but the file.
+        assert!(
+            ConvCoeffCache::transformed(&conf, &names, &ImpulseCache::new()).is_err(),
+            "an empty impulse cache should fall back to reading, and fail"
+        );
+    }
 }

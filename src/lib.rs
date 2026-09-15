@@ -280,8 +280,12 @@ pub enum ExitState {
 /// Messages sent to the engine controller (WebSocket server or external caller).
 pub enum ControllerMessage {
     /// A new configuration has been loaded and should replace the active one.
+    ///
+    /// The [`ImpulseCache`](filters::fftconv::ImpulseCache) is what validating
+    /// the configuration read, carried along so that applying it does not have
+    /// to read the same coefficient files a second time.
     // Config must be boxed, to prevent "large size difference between variants" warning
-    ConfigChanged(Box<config::Configuration>),
+    ConfigChanged(Box<config::Configuration>, filters::fftconv::ImpulseCache),
     /// Stop processing but remain ready for a new configuration.
     Stop,
     /// Shut down the engine entirely.

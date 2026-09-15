@@ -16,6 +16,7 @@
 
 use crate::audiodevice::*;
 use crate::config;
+use crate::filters::fftconv::ConvCoeffCache;
 use crate::pipeline;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -42,13 +43,21 @@ fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: Aud
     }
 }
 
+/// A config change on its way to the processing thread, with the convolution
+/// coefficients it needs already read and transformed.
+///
+/// The cache travels with the configuration rather than being looked up here,
+/// because it is keyed by filter name and is only meaningful next to the config
+/// it was built from. Travelling together, the two can never be mismatched.
+pub type PipelineConfig = (config::ConfigChange, config::Configuration, ConvCoeffCache);
+
 /// Spawn the processing thread: builds the pipeline, runs the chunk loop, and handles config updates.
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
     tx_pb: crossbeam_channel::Sender<AudioMessage>,
     rx_cap: crossbeam_channel::Receiver<AudioMessage>,
-    rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
+    rx_pipeconf: crossbeam_channel::Receiver<PipelineConfig>,
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
@@ -71,7 +80,7 @@ fn processing(
     barrier_proc: Arc<Barrier>,
     tx_pb: crossbeam_channel::Sender<AudioMessage>,
     rx_cap: crossbeam_channel::Receiver<AudioMessage>,
-    rx_pipeconf: crossbeam_channel::Receiver<(config::ConfigChange, config::Configuration)>,
+    rx_pipeconf: crossbeam_channel::Receiver<PipelineConfig>,
     processing_params: Arc<ProcessingParameters>,
 ) {
     let chunksize = conf_proc.devices.chunksize();
@@ -100,10 +109,14 @@ fn processing(
     // The shared thread pool for this processing session's parallelizable tasks.
     let processing_pool =
         build_processing_threadpool(multithreaded, nbr_threads, chunksize, samplerate);
+    // Later changes arrive with their coefficients already transformed, but
+    // this first build happens before the barrier and before this thread is
+    // promoted, so it can do its own reading.
     let mut pipeline = pipeline::Pipeline::from_config(
         conf_proc,
         processing_params.clone(),
         processing_pool.clone(),
+        &mut ConvCoeffCache::new(),
     );
     debug!("build filters, waiting to start processing loop");
 
@@ -164,7 +177,7 @@ fn processing(
                 break;
             }
         }
-        if let Ok((diff, new_config)) = rx_pipeconf.try_recv() {
+        if let Ok((diff, new_config, mut coeff_cache)) = rx_pipeconf.try_recv() {
             trace!("Message received on config channel");
             match diff {
                 config::ConfigChange::Pipeline | config::ConfigChange::MixerParameters => {
@@ -174,6 +187,7 @@ fn processing(
                         new_config,
                         processing_params.clone(),
                         processing_pool.clone(),
+                        &mut coeff_cache,
                     );
                     pipeline = new_pipeline;
                 }
@@ -182,7 +196,7 @@ fn processing(
                     processors,
                 } => {
                     debug!("Updating parameters of filters: {filters:?}.");
-                    pipeline.update_parameters(new_config, &filters, &processors);
+                    pipeline.update_parameters(new_config, &filters, &processors, &mut coeff_cache);
                 }
                 config::ConfigChange::Devices => {
                     let msg = AudioMessage::EndOfStream;

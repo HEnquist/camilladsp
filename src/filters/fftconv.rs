@@ -290,6 +290,11 @@ impl SegmentedSpectrum {
 /// A cache is only valid for one build or update pass, where every name maps
 /// to exactly one configuration. Create one, use it for the pass, drop it;
 /// keeping it any longer risks handing out coefficients from a stale config.
+///
+/// [`transformed`](Self::transformed) fills one in before the pass rather than
+/// during it, so that the transforms happen off the processing thread. That is
+/// safe for the same reason: the cache is built from one configuration and
+/// travels with it to the pass that applies it, never alongside a later one.
 #[derive(Default)]
 pub struct ConvCoeffCache {
     /// Keyed by name and segment length together. The transformed spectra are
@@ -306,6 +311,87 @@ impl ConvCoeffCache {
         Self::default()
     }
 
+    /// Transform the impulse responses of the named convolution filters ahead
+    /// of the pass that builds them.
+    ///
+    /// Transforming an impulse response is the expensive half of building a
+    /// convolution filter, and it is all this needs to do: `impulses` holds
+    /// what config validation already read, so nothing is read from disk here.
+    /// A filter that is somehow not in there is read on the spot, which is why
+    /// this is fallible at all.
+    ///
+    /// Names that are not in the config, or that are not convolution filters,
+    /// are skipped. There is nothing to transform for them, and a name that
+    /// does not resolve is the build pass's problem to report, not this one's.
+    pub fn transformed(
+        conf: &config::Configuration,
+        names: &[String],
+        impulses: &ImpulseCache,
+    ) -> Res<Self> {
+        let mut cache = Self::new();
+        let Some(filters) = conf.filters.as_ref() else {
+            return Ok(cache);
+        };
+        let convs: Vec<(&String, &config::ConvParameters)> = names
+            .iter()
+            .filter_map(|name| match filters.get(name) {
+                Some(config::Filter::Conv { parameters, .. }) => Some((name, parameters)),
+                _ => None,
+            })
+            .collect();
+        if convs.is_empty() {
+            return Ok(cache);
+        }
+        // One plan and one scratch buffer for the whole pass. `plan_transforms`
+        // takes the lock on the shared planner, which the processing thread
+        // needs too whenever it constructs a filter, so this thread holds it
+        // once rather than once per filter. The inverse plan is not wanted
+        // here: nothing transforms back until the filter is running.
+        let npoints = conf.devices.chunksize();
+        let (fft, _) = plan_transforms(npoints);
+        let mut scratch = fft.make_scratch_vec();
+        for (name, parameters) in convs {
+            cache.transform(name, npoints, parameters, impulses, &*fft, &mut scratch)?;
+        }
+        Ok(cache)
+    }
+
+    fn transform(
+        &mut self,
+        name: &str,
+        npoints: usize,
+        conf: &config::ConvParameters,
+        impulses: &ImpulseCache,
+        fft: &dyn RealToComplex<CamillaFloat>,
+        scratch: &mut [Complex<CamillaFloat>],
+    ) -> Res<()> {
+        if self.entries.contains_key(&(name.to_string(), npoints)) {
+            return Ok(());
+        }
+        let read;
+        let coeffs = match impulses.get(name) {
+            Some(coeffs) => coeffs,
+            None => {
+                debug!("Conv {name} was not read during validation, reading it now");
+                read = coeffs_from_config(conf)?;
+                &read
+            }
+        };
+        let coeffs_f = transform_coeffs(coeffs, npoints, fft, scratch);
+        debug!("Conv {name} transformed into {} segments", coeffs_f.len());
+        self.insert(name, npoints, &coeffs_f);
+        Ok(())
+    }
+
+    /// How many distinct filters the cache holds coefficients for.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
     fn get(&self, name: &str, npoints: usize) -> Option<Arc<ConvCoeffs>> {
         self.entries.get(&(name.to_string(), npoints)).cloned()
     }
@@ -316,29 +402,84 @@ impl ConvCoeffCache {
     }
 }
 
+/// The impulse responses that validating a configuration read, keyed by filter
+/// name.
+///
+/// Validating a config already reads every coefficient file its pipeline refers
+/// to, since a file that cannot be read or that holds something other than
+/// finite numbers is exactly what validation is there to reject. Keeping what
+/// it read means no one has to read it a second time. The cache travels with
+/// the configuration it was built from, so the two can never be mismatched, and
+/// by the time the change reaches the processing thread there is no file system
+/// left in the path at all.
+#[derive(Default, Clone)]
+pub struct ImpulseCache {
+    entries: HashMap<String, Vec<CamillaFloat>>,
+}
+
+impl ImpulseCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Vec<CamillaFloat>> {
+        self.entries.get(name)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.entries.contains_key(name)
+    }
+
+    pub fn insert(&mut self, name: &str, coeffs: Vec<CamillaFloat>) {
+        self.entries.insert(name.to_string(), coeffs);
+    }
+
+    /// How many distinct filters the cache holds an impulse response for.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// Read the impulse response a configuration points at.
-fn coeffs_from_config(conf: config::ConvParameters) -> Vec<CamillaFloat> {
+fn coeffs_from_config(conf: &config::ConvParameters) -> Res<Vec<CamillaFloat>> {
     match conf {
         config::ConvParameters::Values { values } => {
             // Coefficients from the config are f64; file and wav readers
             // already deliver the processing precision.
-            values.into_iter().map(|v| v.to_camilla_float()).collect()
+            Ok(values.iter().map(|v| v.to_camilla_float()).collect())
         }
         config::ConvParameters::Raw(params) => filters::read_coeff_file(
             &params.filename,
             &params.format(),
             params.read_bytes_lines(),
             params.skip_bytes_lines(),
-        )
-        .unwrap(),
+        ),
         config::ConvParameters::Wav(params) => {
-            filters::read_wav(&params.filename, params.channel()).unwrap()
+            filters::read_wav(&params.filename, params.channel())
         }
         config::ConvParameters::Dummy { length } => {
             let mut values = vec![0.0; length.get()];
             values[0] = 1.0;
-            values
+            Ok(values)
         }
+    }
+}
+
+/// Read the impulse response for a filter that is being built as part of a
+/// live pipeline, where there is no way to report a failure and nothing
+/// sensible to do about one.
+///
+/// Every config change on its way to a running pipeline arrives with its
+/// impulse responses already read and transformed, so this is only reached by
+/// the first build of a session and by the public constructors.
+fn coeffs_for_pass(name: &str, conf: &config::ConvParameters) -> Vec<CamillaFloat> {
+    match coeffs_from_config(conf) {
+        Ok(coeffs) => coeffs,
+        Err(err) => panic!("Could not read coefficients for conv filter '{name}': {err}"),
     }
 }
 
@@ -424,7 +565,7 @@ impl FftConv {
     }
 
     pub fn from_config(name: &str, data_length: usize, conf: config::ConvParameters) -> Self {
-        FftConv::new(name, data_length, &coeffs_from_config(conf))
+        FftConv::new(name, data_length, &coeffs_for_pass(name, &conf))
     }
 
     /// Build from a configuration, reusing the transformed coefficients if
@@ -521,8 +662,9 @@ impl Filter for FftConv {
             Some(coeffs_f) => coeffs_f,
             None => {
                 // First channel to reach this filter does the reading and the
-                // transform; the rest take the result.
-                let coeffs = coeffs_from_config(conf);
+                // transform; the rest take the result. With a cache filled by
+                // `ConvCoeffCache::transformed` neither happens here at all.
+                let coeffs = coeffs_for_pass(&self.name, &conf);
                 let coeffs_f =
                     transform_coeffs(&coeffs, self.npoints, &*self.fft, &mut self.scratch_fw);
                 cache.insert(&self.name, self.npoints, &coeffs_f);
@@ -618,37 +760,29 @@ pub unsafe fn bench_multiply_add_elements_neon(
     CamillaFloat::multiply_add_elements(result, slice_a, slice_b);
 }
 
-/// Validate a FFT convolution config.
-pub fn validate_config(conf: &config::ConvParameters) -> Res<()> {
-    match conf {
-        config::ConvParameters::Values { values } => {
-            if values.is_empty() {
-                return Err(config::ConfigError::new("Conv coefficients are empty").into());
-            }
-            Ok(())
-        }
-        // `length` carries the nonzero validator, so a dummy always has a tap.
-        config::ConvParameters::Dummy { .. } => Ok(()),
-        config::ConvParameters::Raw(params) => {
-            let coeffs = filters::read_coeff_file(
-                &params.filename,
-                &params.format(),
-                params.read_bytes_lines(),
-                params.skip_bytes_lines(),
-            )?;
-            if coeffs.is_empty() {
-                return Err(config::ConfigError::new("Conv coefficients are empty").into());
-            }
-            config::check_all_finite("coefficients", &coeffs)
-        }
-        config::ConvParameters::Wav(params) => {
-            let coeffs = filters::read_wav(&params.filename, params.channel())?;
-            if coeffs.is_empty() {
-                return Err(config::ConfigError::new("Conv coefficients are empty").into());
-            }
-            config::check_all_finite("coefficients", &coeffs)
-        }
+/// Validate a FFT convolution config, keeping the impulse response it read.
+///
+/// Validating means reading the coefficients, so the read is where the answer
+/// comes from either way. Handing them to `impulses` is what stops them being
+/// read again, both by a later pipeline step naming the same filter and by the
+/// pass that eventually builds it.
+pub fn validate_config(
+    name: &str,
+    conf: &config::ConvParameters,
+    impulses: &mut ImpulseCache,
+) -> Res<()> {
+    // Filter names are unique within a config, so a name already in the cache
+    // was read from these same parameters and is already known to be valid.
+    if impulses.contains(name) {
+        return Ok(());
     }
+    let coeffs = coeffs_from_config(conf)?;
+    if coeffs.is_empty() {
+        return Err(config::ConfigError::new("Conv coefficients are empty").into());
+    }
+    config::check_all_finite("coefficients", &coeffs)?;
+    impulses.insert(name, coeffs);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -659,7 +793,7 @@ mod tests {
     use crate::config::ConvParameters;
     use crate::config::finite;
     use crate::filters::Filter;
-    use crate::filters::fftconv::{ConvCoeffCache, FftConv};
+    use crate::filters::fftconv::{ConvCoeffCache, FftConv, ImpulseCache};
     use num_complex::Complex;
     use std::sync::Arc;
 
@@ -734,7 +868,7 @@ mod tests {
     fn empty_inline_coefficients_are_rejected_and_harmless() {
         let conf = ConvParameters::Values { values: vec![] };
         assert!(
-            super::validate_config(&conf).is_err(),
+            super::validate_config("empty", &conf, &mut ImpulseCache::new()).is_err(),
             "empty coefficients should not validate"
         );
 

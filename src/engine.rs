@@ -113,7 +113,7 @@ pub fn run(
         select! {
             recv(ctrl_ch) -> msg  => {
                 match msg {
-                    Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                    Ok(ControllerMessage::ConfigChanged(new_conf, impulses)) => {
                         if !ctrl_ch.is_empty() {
                             debug!("Dropping config change command since there are more commands in the queue");
                             continue;
@@ -125,7 +125,18 @@ pub fn run(
                             config::ConfigChange::Pipeline
                             | config::ConfigChange::MixerParameters
                             | config::ConfigChange::FilterParameters { .. } => {
-                                pipeline.update_processing_config(comp, *new_conf.clone());
+                                // Transforming the coefficients happens here, so a
+                                // config whose files went missing since it was
+                                // validated fails before anything is changed, and
+                                // the pipeline keeps running what it has.
+                                if let Err(err) = pipeline.update_processing_config(
+                                    comp,
+                                    *new_conf.clone(),
+                                    &impulses,
+                                ) {
+                                    error!("Could not prepare the new configuration, keeping the current one. Reason: {err}");
+                                    continue;
+                                }
                                 active_config = *new_conf;
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
@@ -301,10 +312,10 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
     let (tx_command, rx_command) = crossbeam_channel::bounded(10);
     if let Some(path) = &configname {
         match config::load_validate_config(path) {
-            Ok(conf) => {
+            Ok((conf, impulses)) => {
                 debug!("Config is valid");
                 tx_command
-                    .send(ControllerMessage::ConfigChanged(Box::new(conf)))
+                    .send(ControllerMessage::ConfigChanged(Box::new(conf), impulses))
                     .unwrap();
             }
             Err(err) => {
@@ -413,8 +424,14 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
             }
             debug!("Waiting to receive a command");
             match rx_command.recv() {
-                Ok(ControllerMessage::ConfigChanged(new_conf)) => {
+                Ok(ControllerMessage::ConfigChanged(new_conf, _impulses)) => {
                     debug!("Config change command received");
+                    // The impulse responses are dropped rather than parked with
+                    // the config. Nothing says how long it will sit here before
+                    // a device opens, and the first build of a session happens
+                    // before the processing thread is promoted to real time, so
+                    // reading the files again there costs no audio and picks up
+                    // whatever they hold by then.
                     *active_config.lock() = Some(*new_conf);
                 }
                 Ok(ControllerMessage::Stop) => {
