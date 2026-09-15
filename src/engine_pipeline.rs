@@ -335,11 +335,14 @@ mod tests {
     #[test]
     fn validated_coefficients_are_not_read_a_second_time() {
         let path = temp_coeff_file("once");
+        // Through serde rather than quoted by hand: a Windows temp path is full
+        // of backslashes, and those are not valid escapes in a JSON string.
+        let filename =
+            serde_json::to_string(path.to_str().unwrap()).expect("a path encodes as JSON");
         let filters = format!(
             r#"{{"conv_file": {{"type": "Conv", "parameters": {{
-                "type": "Raw", "filename": "{}", "format": "F64_LE"
-            }}}}}}"#,
-            path.to_str().unwrap()
+                "type": "Raw", "filename": {filename}, "format": "F64_LE"
+            }}}}}}"#
         );
         let mut conf =
             config_from_json(&filters, r#"[{"type": "Filter", "names": ["conv_file"]}]"#);
