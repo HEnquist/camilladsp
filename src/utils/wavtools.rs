@@ -14,61 +14,20 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use std::convert::TryInto;
+// Thin adapter around the `waveadapter` crate, which handles the actual wav
+// header parsing and writing. This module only bridges between the crate's
+// `SampleFormat` and the CamillaDSP `BinarySampleFormat` config type.
+
 use std::fs::File;
-use std::io::BufReader;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::mem;
+use std::io::{Read, Seek, Write};
+
+use waveadapter::SampleFormat;
+use waveadapter::header::read_wav_header;
 
 use crate::Res;
 use crate::config::{BinarySampleFormat, ConfigError};
 
-const RIFF: &[u8] = "RIFF".as_bytes();
-const WAVE: &[u8] = "WAVE".as_bytes();
-const DATA: &[u8] = "data".as_bytes();
-const FMT: &[u8] = "fmt ".as_bytes();
-
-/// Windows Guid
-/// Used to give sample format in the extended WAVEFORMATEXTENSIBLE wav header
-#[derive(Debug, PartialEq, Eq)]
-struct Guid {
-    data1: u32,
-    data2: u16,
-    data3: u16,
-    data4: [u8; 8],
-}
-
-impl Guid {
-    fn from_slice(data: &[u8; 16]) -> Guid {
-        let data1 = read_u32(data, 0);
-        let data2 = read_u16(data, 4);
-        let data3 = read_u16(data, 6);
-        let data4 = data[8..16].try_into().unwrap_or([0; 8]);
-        Guid {
-            data1,
-            data2,
-            data3,
-            data4,
-        }
-    }
-}
-
-/// KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
-const SUBTYPE_FLOAT: Guid = Guid {
-    data1: 3,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
-/// KSDATAFORMAT_SUBTYPE_PCM
-const SUBTYPE_PCM: Guid = Guid {
-    data1: 1,
-    data2: 0,
-    data3: 16,
-    data4: [128, 0, 0, 170, 0, 56, 155, 113],
-};
-
+/// The subset of wav header parameters used by CamillaDSP.
 #[derive(Debug)]
 pub struct WavParams {
     pub sample_format: BinarySampleFormat,
@@ -78,75 +37,33 @@ pub struct WavParams {
     pub channels: usize,
 }
 
-fn read_u32(buffer: &[u8], start_index: usize) -> u32 {
-    u32::from_le_bytes(
-        buffer[start_index..start_index + mem::size_of::<u32>()]
-            .try_into()
-            .unwrap_or_default(),
-    )
-}
-
-fn read_u16(buffer: &[u8], start_index: usize) -> u16 {
-    u16::from_le_bytes(
-        buffer[start_index..start_index + mem::size_of::<u16>()]
-            .try_into()
-            .unwrap_or_default(),
-    )
-}
-
-fn compare_4cc(buffer: &[u8], bytes: &[u8]) -> bool {
-    buffer.iter().take(4).zip(bytes).all(|(a, b)| *a == *b)
-}
-
-fn look_up_format(
-    data: &[u8],
-    formatcode: u16,
-    bits: u16,
-    bytes_per_sample: u16,
-    chunk_length: u32,
-) -> Res<BinarySampleFormat> {
-    match (formatcode, bits, bytes_per_sample) {
-        (1, 16, 2) => Ok(BinarySampleFormat::S16_LE),
-        (1, 24, 3) => Ok(BinarySampleFormat::S24_3_LE),
-        (1, 24, 4) => Ok(BinarySampleFormat::S24_4_LJ_LE),
-        (1, 32, 4) => Ok(BinarySampleFormat::S32_LE),
-        (3, 32, 4) => Ok(BinarySampleFormat::F32_LE),
-        (3, 64, 8) => Ok(BinarySampleFormat::F64_LE),
-        (0xFFFE, _, _) => look_up_extended_format(data, bits, bytes_per_sample, chunk_length),
-        (_, _, _) => Err(ConfigError::new("Unsupported wav format").into()),
+/// Map a `waveadapter` sample format to the CamillaDSP config format.
+/// Returns `None` for formats CamillaDSP does not support.
+fn to_binary_format(format: SampleFormat) -> Option<BinarySampleFormat> {
+    match format {
+        SampleFormat::I16 => Some(BinarySampleFormat::S16_LE),
+        SampleFormat::I24_3 => Some(BinarySampleFormat::S24_3_LE),
+        SampleFormat::I24_4 => Some(BinarySampleFormat::S24_4_LJ_LE),
+        SampleFormat::I32 => Some(BinarySampleFormat::S32_LE),
+        SampleFormat::F32 => Some(BinarySampleFormat::F32_LE),
+        SampleFormat::F64 => Some(BinarySampleFormat::F64_LE),
+        // CamillaDSP has no unsigned 8-bit sample format.
+        SampleFormat::U8 => None,
     }
 }
 
-fn look_up_extended_format(
-    data: &[u8],
-    bits: u16,
-    bytes_per_sample: u16,
-    chunk_length: u32,
-) -> Res<BinarySampleFormat> {
-    if chunk_length != 40 {
-        return Err(ConfigError::new("Invalid extended header").into());
-    }
-    let cb_size = read_u16(data, 16);
-    let valid_bits_per_sample = read_u16(data, 18);
-    let channel_mask = read_u32(data, 20);
-    let subformat = &data[24..40];
-    let subformat_guid = Guid::from_slice(subformat.try_into().unwrap());
-    trace!(
-        "Found extended wav fmt chunk: subformatcode: {subformat_guid:?}, cb_size: {cb_size}, channel_mask: {channel_mask}, valid bits per sample: {valid_bits_per_sample}"
-    );
-    match (
-        subformat_guid,
-        bits,
-        bytes_per_sample,
-        valid_bits_per_sample,
-    ) {
-        (SUBTYPE_PCM, 16, 2, 16) => Ok(BinarySampleFormat::S16_LE),
-        (SUBTYPE_PCM, 24, 3, 24) => Ok(BinarySampleFormat::S24_3_LE),
-        (SUBTYPE_PCM, 24, 4, 24) => Ok(BinarySampleFormat::S24_4_LJ_LE),
-        (SUBTYPE_PCM, 32, 4, 32) => Ok(BinarySampleFormat::S32_LE),
-        (SUBTYPE_FLOAT, 32, 4, 32) => Ok(BinarySampleFormat::F32_LE),
-        (SUBTYPE_FLOAT, 64, 8, 64) => Ok(BinarySampleFormat::F64_LE),
-        (_, _, _, _) => Err(ConfigError::new("Unsupported extended wav format").into()),
+/// Map a CamillaDSP config format to a `waveadapter` sample format.
+pub fn to_wave_format(format: BinarySampleFormat) -> Res<SampleFormat> {
+    match format {
+        BinarySampleFormat::S16_LE => Ok(SampleFormat::I16),
+        BinarySampleFormat::S24_3_LE => Ok(SampleFormat::I24_3),
+        BinarySampleFormat::S24_4_LJ_LE => Ok(SampleFormat::I24_4),
+        BinarySampleFormat::S32_LE => Ok(SampleFormat::I32),
+        BinarySampleFormat::F32_LE => Ok(SampleFormat::F32),
+        BinarySampleFormat::F64_LE => Ok(SampleFormat::F64),
+        BinarySampleFormat::S24_4_RJ_LE => {
+            Err(ConfigError::new("Wav files do not support the S24_4_RJ_LE sample format").into())
+        }
     }
 }
 
@@ -160,127 +77,34 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
     })
 }
 
-pub fn find_data_in_wav_stream(mut f: impl Read + Seek) -> Res<WavParams> {
-    let filesize = f.seek(SeekFrom::End(0))?;
-    f.seek(SeekFrom::Start(0))?;
-    let mut file = BufReader::new(f);
-    let mut header = [0; 12];
-    file.read_exact(&mut header)?;
-
-    // The file must start with RIFF
-    let riff_err = !compare_4cc(&header, RIFF);
-    // Bytes 8 to 12 must be WAVE
-    let wave_err = !compare_4cc(&header[8..], WAVE);
-    if riff_err || wave_err {
-        return Err(ConfigError::new("Invalid wav header").into());
-    }
-
-    let mut next_chunk_location = 12;
-    let mut found_fmt = false;
-    let mut found_data = false;
-    let mut buffer = [0; 8];
-
-    // Dummy values until we have found the real ones
-    let mut sample_format = BinarySampleFormat::S16_LE;
-    let mut sample_rate = 0;
-    let mut channels = 0;
-    let mut data_offset = 0;
-    let mut data_length = 0;
-
-    // Analyze each chunk to find format and data
-    while (!found_fmt || !found_data) && next_chunk_location < filesize {
-        file.seek(SeekFrom::Start(next_chunk_location))?;
-        file.read_exact(&mut buffer)?;
-        let chunk_length = read_u32(&buffer, 4);
-        trace!("Analyzing wav chunk of length: {chunk_length}");
-        let is_data = compare_4cc(&buffer, DATA);
-        let is_fmt = compare_4cc(&buffer, FMT);
-        if is_fmt && (chunk_length == 16 || chunk_length == 18 || chunk_length == 40) {
-            found_fmt = true;
-            let mut data = vec![0; chunk_length as usize];
-            file.read_exact(&mut data).unwrap();
-            let formatcode: u16 = read_u16(&data, 0);
-            channels = read_u16(&data, 2);
-            sample_rate = read_u32(&data, 4);
-            let bytes_per_frame = read_u16(&data, 12);
-            let bits = read_u16(&data, 14);
-            let bytes_per_sample = bytes_per_frame / channels;
-            sample_format =
-                look_up_format(&data, formatcode, bits, bytes_per_sample, chunk_length)?;
-            trace!(
-                "Found wav fmt chunk: formatcode: {formatcode}, channels: {channels}, samplerate: {sample_rate}, bits: {bits}, bytes_per_frame: {bytes_per_frame}"
-            );
-        } else if is_data {
-            found_data = true;
-            data_offset = next_chunk_location + 8;
-            data_length = chunk_length;
-            trace!("Found wav data chunk, start: {data_offset}, length: {data_length}")
-        }
-        next_chunk_location += 8 + chunk_length as u64;
-    }
-    if found_data && found_fmt {
-        trace!(
-            "Wav file with parameters: format: {sample_format:?},  samplerate: {sample_rate}, channels: {channels}, data_length: {data_length}, data_offset: {data_offset}"
-        );
-        return Ok(WavParams {
-            sample_format,
-            sample_rate: sample_rate as usize,
-            channels: channels as usize,
-            data_length: data_length as usize,
-            data_offset: data_offset as usize,
-        });
-    }
-    Err(ConfigError::new("Unable to parse as wav").into())
+pub fn find_data_in_wav_stream(f: impl Read + Seek) -> Res<WavParams> {
+    let params = read_wav_header(f)
+        .map_err(|err| ConfigError::new(&format!("Unable to parse as wav: {err}")))?;
+    let sample_format = match params.sample_format.and_then(to_binary_format) {
+        Some(format) => format,
+        None => return Err(ConfigError::new("Unsupported wav format").into()),
+    };
+    Ok(WavParams {
+        sample_format,
+        sample_rate: params.sample_rate,
+        data_offset: params.data_offset,
+        data_length: params.data_length,
+        channels: params.channels,
+    })
 }
 
 // Write a wav header.
-// We don't know the final length so we set the file size and data length to u32::MAX.
+// The final length is unknown when streaming, so the RIFF and data chunk sizes
+// are set to the u32::MAX placeholder.
 pub fn write_wav_header(
     dest: &mut impl Write,
     channels: usize,
     sample_format: BinarySampleFormat,
     samplerate: usize,
-) -> std::io::Result<()> {
-    // Header
-    dest.write_all(RIFF)?;
-    // file size, 4 bytes, unknown so set to max
-    dest.write_all(&u32::MAX.to_le_bytes())?;
-    dest.write_all(WAVE)?;
-
-    let (formatcode, bits_per_sample, bytes_per_sample) = match sample_format {
-        BinarySampleFormat::S16_LE => (1, 16, 2),
-        BinarySampleFormat::S24_3_LE => (1, 24, 3),
-        BinarySampleFormat::S24_4_LJ_LE => (1, 24, 4),
-        BinarySampleFormat::S32_LE => (1, 32, 4),
-        BinarySampleFormat::F32_LE => (3, 32, 4),
-        BinarySampleFormat::F64_LE => (3, 64, 8),
-        _ => (0, 0, 0),
-    };
-
-    // format block
-    dest.write_all(FMT)?;
-    // size of fmt block, 4 bytes
-    dest.write_all(&16_u32.to_le_bytes())?;
-    // format code, 2 bytes
-    dest.write_all(&(formatcode as u16).to_le_bytes())?;
-    // number of channels, 2 bytes
-    dest.write_all(&(channels as u16).to_le_bytes())?;
-    // samplerate, 4 bytes
-    dest.write_all(&(samplerate as u32).to_le_bytes())?;
-    // bytes per second, 4 bytes
-    dest.write_all(&((channels * samplerate * bytes_per_sample) as u32).to_le_bytes())?;
-    // block alignment, 2 bytes
-    dest.write_all(&((channels * bytes_per_sample) as u16).to_le_bytes())?;
-    // bits per sample, 2 bytes
-    dest.write_all(&(bits_per_sample as u16).to_le_bytes())?;
-
-    // data block
-    dest.write_all(DATA)?;
-    // data length, 4 bytes, unknown so set to max
-    dest.write_all(&u32::MAX.to_le_bytes())?;
-
-    // audio data starts from here
-    Ok(())
+) -> Res<()> {
+    let format = to_wave_format(sample_format)?;
+    waveadapter::header::write_wav_header(dest, channels, format, samplerate, u32::MAX, u32::MAX)
+        .map_err(|err| ConfigError::new(&format!("Failed to write wav header: {err}")).into())
 }
 
 #[cfg(test)]
@@ -308,6 +132,19 @@ mod tests {
         println!("{info:?}");
         assert_eq!(info.sample_format, BinarySampleFormat::F32_LE);
         assert_eq!(info.data_offset, 104);
+        assert_eq!(info.data_length, 20);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.sample_rate, 44100);
+    }
+
+    #[test]
+    pub fn test_analyze_rf64() {
+        // The data chunk size field is the 0xFFFFFFFF placeholder; the real
+        // length is resolved from the ds64 chunk.
+        let info = find_data_in_wav("testdata/int32_rf64.wav").unwrap();
+        println!("{info:?}");
+        assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
+        assert_eq!(info.data_offset, 138);
         assert_eq!(info.data_length, 20);
         assert_eq!(info.channels, 1);
         assert_eq!(info.sample_rate, 44100);

@@ -3,11 +3,17 @@
 //
 // This file is part of CamillaDSP.
 //
-// This file is licensed under the GNU General Public License version 3 only.
-// It links against the ASIO SDK, which is licensed under GPLv3.
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
 //
-// You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 pub mod device;
+pub mod driver;
 pub mod utils;

@@ -81,7 +81,9 @@ processors:
     parameters:
       channels: 4
       attack: 0.1
+      attack_unit: s
       release: 1.0
+      release_unit: s
       threshold: -20
       factor: 4.0
       makeup_gain: 0

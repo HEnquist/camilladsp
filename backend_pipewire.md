@@ -4,6 +4,26 @@ The PipeWire backend creates filter nodes in the PipeWire graph.
 Unlike other backends that connect directly to devices,
 PipeWire nodes are meant to be connected via WirePlumber rules or tools like Helvum.
 
+## Sources and sinks
+
+PipeWire describes every node by the direction the audio flows,
+not by whether the node is a piece of hardware or an application.
+
+- A *source* produces audio and feeds it into the graph.
+  Microphones and line inputs are sources, and so is a music player sending out its audio.
+- A *sink* consumes audio from the graph.
+  Speakers and headphones are sinks, and so is an application that is recording.
+
+The CamillaDSP capture device takes audio from a source,
+and the CamillaDSP playback device sends audio to a sink.
+
+Every sink additionally has a set of *monitor* ports that carry whatever that sink is receiving.
+Capturing from those is how to process audio that something else is playing,
+see [Loopback capture](#loopback-capture).
+
+`wpctl status` lists the sources and sinks on the system,
+with applications shown under "Streams".
+
 ## Build requirements
 
 The PipeWire backend requires the PipeWire development libraries:
@@ -30,6 +50,7 @@ capture:
   node_description: CamillaDSP Capture (*)
   node_group_name: camilladsp (*)
   autoconnect_to: null (*)
+  loopback: false (*)
 ```
 
 ### Playback device
@@ -55,6 +76,7 @@ These are used if the parameters are set to `null` or left out from the configur
 | `node_description` | PipeWire node description, shown in tools such as Helvum (optional, defaults to `CamillaDSP Capture` or `CamillaDSP Playback`) |
 | `node_group_name` | PipeWire node group name (optional, defaults to `camilladsp`) |
 | `autoconnect_to`| PipeWire name or serial (given as a string with quotes, `"123"`) of a node to autoconnect to (optional) |
+| `loopback` | Capture from a sink instead of from a source, capture only (optional, defaults to `false`) |
 
 #### Node groups
 
@@ -73,6 +95,14 @@ If given, CamillaDSP will ask PipeWire to try connect the CamillaDSP capture or 
 This enables basic routing to be set up without any additional tools,
 and is useful when both the source and sink nodes already exist.
 
+A capture device connects to a source, and a playback device to a sink.
+To capture the output of a sink instead, see [Loopback capture](#loopback-capture).
+
+If the target node does not exist, the CamillaDSP node is left unconnected
+instead of being connected to the default device,
+and gets connected automatically if the target appears later.
+This means that a wrong or misspelled name gives silence rather than audio from an unexpected device.
+
 For anything more advanced, it is recommended to leave this parameter at the default `null`,
 and instead set up routing with WirePlumber rules.
 
@@ -84,6 +114,33 @@ pw-cli ls Node
 Example of node names for audio playback devices:
 - Intel HD Audio headphone output: `alsa_output.pci-0000_00_1f.3-platform-skl_hda_dsp_generic.HiFi__Headphones__sink`
 - MOTU M4: `alsa_output.hw_M4_0`
+
+
+#### Loopback capture
+
+A capture device normally connects to a source.
+Setting `loopback` to `true` makes it capture from the output of a sink instead,
+via the monitor ports that PipeWire provides for every sink.
+This is how to process the audio that some other application is playing,
+and corresponds to loopback capture in the WASAPI backend.
+
+Combine it with `autoconnect_to` to pick which sink to capture from:
+```yaml
+capture:
+  type: PipeWire
+  channels: 2
+  autoconnect_to: alsa_output.pci-0000_00_1f.3.analog-stereo
+  loopback: true
+```
+
+The flag is needed even when the sink is named explicitly.
+WirePlumber only considers sources when it looks up an `autoconnect_to` name for a capture device,
+so without `loopback: true` a sink name matches nothing and the node stays unconnected.
+This does not apply when the sink is given as a serial number,
+but a name is usually the better choice since serial numbers change when a node is recreated.
+
+Sinks are the nodes with a `media.class` of `Audio/Sink`.
+`wpctl status` lists them under "Sinks".
 
 
 ## WirePlumber routing
