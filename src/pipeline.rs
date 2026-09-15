@@ -415,17 +415,21 @@ impl Pipeline {
     ///
     /// `filter_pool` is the thread pool to use for parallel filter processing.
     /// `None` means single-threaded processing.
+    ///
+    /// `coeff_cache` holds the convolution coefficients for this build, so that
+    /// channels sharing a filter share its transformed coefficients. Pass one
+    /// that [`ConvCoeffCache::transformed`] already filled from `conf` and the
+    /// build reads nothing and transforms nothing; pass an empty one and it
+    /// does both as it goes.
     pub fn from_config(
         conf: config::Configuration,
         processing_params: Arc<ProcessingParameters>,
         filter_pool: Option<Arc<rayon::ThreadPool>>,
+        coeff_cache: &mut ConvCoeffCache,
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
-        // One cache for the whole build, so channels sharing a convolution
-        // filter share its transformed coefficients.
-        let mut coeff_cache = ConvCoeffCache::new();
         let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
             match step {
@@ -498,7 +502,7 @@ impl Pipeline {
                                     conf.devices.chunksize(),
                                     conf.devices.samplerate(),
                                     processing_params.clone(),
-                                    &mut coeff_cache,
+                                    coeff_cache,
                                 );
                                 steps.push(PipelineStep::FilterStep(fltgrp));
                             }
@@ -582,17 +586,19 @@ impl Pipeline {
     }
 
     /// Hot-reload changed filters and processors without rebuilding the pipeline.
+    ///
+    /// `coeff_cache` carries the convolution coefficients for this pass, on the
+    /// same terms as [`from_config`](Self::from_config): filled, and nothing is
+    /// read or transformed here; empty, and a changed convolution filter is
+    /// read and transformed on the spot.
     pub fn update_parameters(
         &mut self,
         conf: config::Configuration,
         filters: &[String],
         processors: &[String],
+        coeff_cache: &mut ConvCoeffCache,
     ) {
         debug!("Updating parameters");
-        // One cache for the whole pass, so a convolution filter used on
-        // several channels is read and transformed once. It is dropped at the
-        // end of the pass, before any later config can reuse a name.
-        let mut coeff_cache = ConvCoeffCache::new();
         for mut step in &mut self.steps {
             match &mut step {
                 // Mixer changes always trigger a pipeline rebuild, never a parameter update.
@@ -601,14 +607,14 @@ impl Pipeline {
                     flt.update_parameters(
                         conf.filters.as_ref().unwrap().clone(),
                         filters,
-                        &mut coeff_cache,
+                        coeff_cache,
                     );
                 }
                 PipelineStep::ParallelFiltersStep(flt) => {
                     flt.update_parameters(
                         conf.filters.as_ref().unwrap().clone(),
                         filters,
-                        &mut coeff_cache,
+                        coeff_cache,
                     );
                 }
                 PipelineStep::BiquadStep(flt) => {
@@ -760,7 +766,7 @@ fn parallelize_filters(
 
 #[cfg(test)]
 mod tests {
-    use super::{Pipeline, PipelineStep};
+    use super::{ConvCoeffCache, Pipeline, PipelineStep};
     use crate::CamillaFloat;
     use crate::ProcessingParameters;
     use crate::audiochunk::AudioChunk;
@@ -883,7 +889,8 @@ pipeline:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf.clone(), params, None);
+        let mut pipeline =
+            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
         assert!(
             matches!(pipeline.steps[0], PipelineStep::BiquadStep(_)),
             "an all-biquad step should compile"
@@ -924,7 +931,8 @@ pipeline:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf.clone(), params, None);
+        let mut pipeline =
+            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
 
         // Only 0 and 2 carry audio, as they would ahead of a mixer that reads
         // just those two of four capture channels.
@@ -975,7 +983,8 @@ pipeline:
             CHUNK,
         );
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf.clone(), params, None);
+        let mut pipeline =
+            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
 
         // Run a chunk so every stage has state worth preserving.
         let waveforms: Vec<Vec<CamillaFloat>> = (0..2).map(|c| test_signal(CHUNK, c)).collect();
@@ -1010,7 +1019,12 @@ parameters:
             )
             .unwrap(),
         );
-        pipeline.update_parameters(newconf, &["geq".to_string()], &[]);
+        pipeline.update_parameters(
+            newconf,
+            &["geq".to_string()],
+            &[],
+            &mut ConvCoeffCache::new(),
+        );
 
         let PipelineStep::BiquadStep(step) = &pipeline.steps[0] else {
             panic!("expected a compiled step");
@@ -1090,7 +1104,8 @@ parameters:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf.clone(), params, None);
+        let mut pipeline =
+            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
 
         // Two biquads either side of the gain compile; the gain does not.
         let shape: Vec<&str> = pipeline
@@ -1152,7 +1167,7 @@ parameters:
             conf.devices.samplerate(),
         );
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf, params, pool);
+        let mut pipeline = Pipeline::from_config(conf, params, pool, &mut ConvCoeffCache::new());
         let waveforms: Vec<Vec<CamillaFloat>> =
             (0..channels).map(|c| test_signal(chunksize, c)).collect();
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
@@ -1250,7 +1265,7 @@ parameters:
         let pool = crate::processing::build_processing_threadpool(true, 2, 64, 44100);
         assert!(pool.is_some(), "the test needs a pool to be built");
         let params = Arc::new(ProcessingParameters::default());
-        let pipeline = Pipeline::from_config(conf, params, pool);
+        let pipeline = Pipeline::from_config(conf, params, pool, &mut ConvCoeffCache::new());
 
         let shape: Vec<&str> = pipeline
             .steps
@@ -1337,7 +1352,7 @@ devices:
         params.set_target_volume(0, -100.0);
         params.sync_volumes_to_target();
 
-        let mut pipeline = Pipeline::from_config(conf, params, None);
+        let mut pipeline = Pipeline::from_config(conf, params, None, &mut ConvCoeffCache::new());
 
         let waveforms = vec![vec![1.0 as CamillaFloat; chunksize]; channels];
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);

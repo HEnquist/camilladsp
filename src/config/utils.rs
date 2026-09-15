@@ -16,6 +16,7 @@
 
 use crate::config::*;
 use crate::filters;
+use crate::filters::fftconv::ImpulseCache;
 use crate::mixer;
 use crate::processors::compressor;
 use crate::processors::lookahead_limiter;
@@ -460,10 +461,10 @@ fn check_and_replace_relative_path(path_str: &mut String, config_path: &Path) {
 }
 
 /// Parse, apply overrides, and fully validate a configuration file.
-pub fn load_validate_config(configname: &str) -> Res<Configuration> {
+pub fn load_validate_config(configname: &str) -> Res<(Configuration, ImpulseCache)> {
     let mut configuration = load_config(configname)?;
-    validate_config(&mut configuration, Some(configname))?;
-    Ok(configuration)
+    let impulses = validate_config(&mut configuration, Some(configname))?;
+    Ok((configuration, impulses))
 }
 
 /// Compare two configurations and return the most significant [`ConfigChange`] between them.
@@ -539,7 +540,14 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 }
 
 /// Validate the loaded configuration, stop on errors and print a helpful message.
-pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<()> {
+///
+/// Returns the impulse responses of the convolution filters the pipeline uses,
+/// read as part of validating them. Pass it along with the configuration to
+/// whatever applies it and nothing has to read a coefficient file again; drop
+/// it if the configuration is only being checked. See
+/// [`ImpulseCache`](crate::filters::fftconv::ImpulseCache).
+pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<ImpulseCache> {
+    let mut impulses = ImpulseCache::new();
     // pre-process by applying overrides and replacing tokens
     apply_overrides(conf)?;
     replace_tokens_in_config(conf);
@@ -737,7 +745,12 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                     let msg = format!("Use of missing filter '{name}'");
                                     return Err(ConfigError::new(&msg).into());
                                 }
-                                match filters::validate_filter(fs, filters.get(name).unwrap()) {
+                                match filters::validate_filter(
+                                    fs,
+                                    name,
+                                    filters.get(name).unwrap(),
+                                    &mut impulses,
+                                ) {
                                     Ok(_) => {}
                                     Err(err) => {
                                         let msg = format!("Invalid filter '{name}'. Reason: {err}");
@@ -860,7 +873,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         );
         return Err(ConfigError::new(&msg).into());
     }
-    Ok(())
+    Ok(impulses)
 }
 
 /// Get a vector telling which channels are actually used in the pipeline
