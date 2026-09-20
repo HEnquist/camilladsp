@@ -369,6 +369,14 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
+    /// Test-only paced capture device, see `src/dummy_backend`.
+    #[cfg(feature = "dummy-backend")]
+    Dummy {
+        channels: NonZeroUsize,
+        signal: Signal,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
+    },
 }
 
 impl CaptureDevice {
@@ -390,6 +398,8 @@ impl CaptureDevice {
             #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.channels.get(),
             CaptureDevice::SignalGenerator { channels, .. } => channels.get(),
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 
@@ -409,6 +419,8 @@ impl CaptureDevice {
             #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.labels.clone(),
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { labels, .. } => labels.clone(),
         }
     }
 }
@@ -602,6 +614,9 @@ pub enum PlaybackDevice {
     Wasapi(PlaybackDeviceWasapi),
     #[cfg(target_os = "windows")]
     Asio(PlaybackDeviceAsio),
+    /// Test-only paced playback device, see `src/dummy_backend`.
+    #[cfg(feature = "dummy-backend")]
+    Dummy { channels: NonZeroUsize },
 }
 
 impl PlaybackDevice {
@@ -619,6 +634,8 @@ impl PlaybackDevice {
             PlaybackDevice::Wasapi(dev) => dev.channels.get(),
             #[cfg(target_os = "windows")]
             PlaybackDevice::Asio(dev) => dev.channels.get(),
+            #[cfg(feature = "dummy-backend")]
+            PlaybackDevice::Dummy { channels } => channels.get(),
         }
     }
 }

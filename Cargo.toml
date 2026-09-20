@@ -18,6 +18,9 @@ threaded-alsa = []
 rtkit = ["audio_thread_priority/with_dbus"]
 pipewire-backend = ["pipewire", "rtkit"]
 bench = []
+# Test-only paced capture and playback devices that need no hardware, used by the
+# end-to-end test suite. Never enable this in a release build.
+dummy-backend = []
 secure-websocket = ["native-tls", "tungstenite/native-tls"]
 debug = []
 

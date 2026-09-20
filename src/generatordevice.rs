@@ -38,7 +38,7 @@ use crate::ToCamillaFloat;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::stash::{container_from_stash, vec_from_stash};
 
-struct SineGenerator {
+pub(crate) struct SineGenerator {
     time: f64,
     freq: f64,
     delta_t: f64,
@@ -46,7 +46,7 @@ struct SineGenerator {
 }
 
 impl SineGenerator {
-    fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
+    pub(crate) fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
         SineGenerator {
             time: 0.0,
             freq,
@@ -65,7 +65,7 @@ impl Iterator for SineGenerator {
     }
 }
 
-struct SquareGenerator {
+pub(crate) struct SquareGenerator {
     time: f64,
     freq: f64,
     delta_t: f64,
@@ -73,7 +73,7 @@ struct SquareGenerator {
 }
 
 impl SquareGenerator {
-    fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
+    pub(crate) fn new(freq: f64, fs: usize, amplitude: CamillaFloat) -> Self {
         SquareGenerator {
             time: 0.0,
             freq,
@@ -93,13 +93,13 @@ impl Iterator for SquareGenerator {
     }
 }
 
-struct NoiseGenerator {
+pub(crate) struct NoiseGenerator {
     rng: SmallRng,
     distribution: Uniform<CamillaFloat>,
 }
 
 impl NoiseGenerator {
-    fn new(amplitude: CamillaFloat) -> Self {
+    pub(crate) fn new(amplitude: CamillaFloat) -> Self {
         let rng = SmallRng::from_os_rng();
         let distribution = Uniform::new_inclusive(-amplitude, amplitude).unwrap();
         NoiseGenerator { rng, distribution }
@@ -110,6 +110,78 @@ impl Iterator for NoiseGenerator {
     type Item = CamillaFloat;
     fn next(&mut self) -> Option<CamillaFloat> {
         Some(self.distribution.sample(&mut self.rng))
+    }
+}
+
+/// The signal generator selected by a `Signal` config block, as one type.
+///
+/// Both the signal generator capture device and the dummy capture device build
+/// chunks from this, so the rule that keeps the channels correct lives in one place.
+pub(crate) enum SignalSource {
+    Sine(SineGenerator),
+    Square(SquareGenerator),
+    Noise(NoiseGenerator),
+}
+
+impl SignalSource {
+    pub(crate) fn new(signal: &config::Signal, samplerate: usize) -> Self {
+        match signal {
+            config::Signal::Sine { freq, level } => SignalSource::Sine(SineGenerator::new(
+                freq.get(),
+                samplerate,
+                db_to_linear(level.get()).to_camilla_float(),
+            )),
+            config::Signal::Square { freq, level } => SignalSource::Square(SquareGenerator::new(
+                freq.get(),
+                samplerate,
+                db_to_linear(level.get()).to_camilla_float(),
+            )),
+            config::Signal::WhiteNoise { level } => SignalSource::Noise(NoiseGenerator::new(
+                db_to_linear(level.get()).to_camilla_float(),
+            )),
+        }
+    }
+
+    /// Build one chunk worth of waveforms.
+    ///
+    /// White noise must be generated independently per channel so the channels are
+    /// uncorrelated. Periodic signals (sine, square) are generated once and copied to
+    /// keep all channels in phase.
+    pub(crate) fn waveforms(
+        &mut self,
+        channels: usize,
+        chunksize: usize,
+    ) -> Vec<Vec<CamillaFloat>> {
+        let independent = matches!(self, SignalSource::Noise(_));
+        let mut first = vec_from_stash(chunksize);
+        for (sample, value) in first.iter_mut().zip(&mut *self) {
+            *sample = value;
+        }
+        let mut waveforms = container_from_stash(channels);
+        waveforms.push(first);
+        for _ in 1..channels {
+            let mut waveform = vec_from_stash(chunksize);
+            if independent {
+                for (sample, value) in waveform.iter_mut().zip(&mut *self) {
+                    *sample = value;
+                }
+            } else {
+                waveform.copy_from_slice(&waveforms[0]);
+            }
+            waveforms.push(waveform);
+        }
+        waveforms
+    }
+}
+
+impl Iterator for SignalSource {
+    type Item = CamillaFloat;
+    fn next(&mut self) -> Option<CamillaFloat> {
+        match self {
+            SignalSource::Sine(g) => g.next(),
+            SignalSource::Square(g) => g.next(),
+            SignalSource::Noise(g) => g.next(),
+        }
     }
 }
 
@@ -142,32 +214,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
-    let mut sine_gen;
-    let mut square_gen;
-    let mut noise_gen;
-
-    let mut generator: &mut dyn Iterator<Item = CamillaFloat> = match params.signal {
-        config::Signal::Sine { freq, level } => {
-            sine_gen = SineGenerator::new(
-                freq.get(),
-                params.samplerate,
-                db_to_linear(level.get()).to_camilla_float(),
-            );
-            &mut sine_gen as &mut dyn Iterator<Item = CamillaFloat>
-        }
-        config::Signal::Square { freq, level } => {
-            square_gen = SquareGenerator::new(
-                freq.get(),
-                params.samplerate,
-                db_to_linear(level.get()).to_camilla_float(),
-            );
-            &mut square_gen as &mut dyn Iterator<Item = CamillaFloat>
-        }
-        config::Signal::WhiteNoise { level } => {
-            noise_gen = NoiseGenerator::new(db_to_linear(level.get()).to_camilla_float());
-            &mut noise_gen as &mut dyn Iterator<Item = CamillaFloat>
-        }
-    };
+    let mut generator = SignalSource::new(&params.signal, params.samplerate);
 
     crate::set_capture_state(&params.capture_status, ProcessingState::Running);
     loop {
@@ -191,27 +238,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
                 break;
             }
         };
-        // White noise must be generated independently per channel so the channels are
-        // uncorrelated. Periodic signals (sine, square) are generated once and copied to
-        // keep all channels in phase.
-        let independent = matches!(params.signal, config::Signal::WhiteNoise { .. });
-        let mut first = vec_from_stash(params.chunksize);
-        for (sample, value) in first.iter_mut().zip(&mut generator) {
-            *sample = value;
-        }
-        let mut waveforms = container_from_stash(params.channels);
-        for _ in 1..params.channels {
-            let mut waveform = vec_from_stash(params.chunksize);
-            if independent {
-                for (sample, value) in waveform.iter_mut().zip(&mut generator) {
-                    *sample = value;
-                }
-            } else {
-                waveform.copy_from_slice(&first);
-            }
-            waveforms.push(waveform);
-        }
-        waveforms.push(first);
+        let waveforms = generator.waveforms(params.channels, params.chunksize);
 
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
 

@@ -24,6 +24,8 @@ use crate::asio_backend::device as asiodevice;
 use crate::config;
 #[cfg(target_os = "macos")]
 use crate::coreaudio_backend::device as coreaudiodevice;
+#[cfg(feature = "dummy-backend")]
+use crate::dummy_backend::device as dummydevice;
 use crate::file_backend::device as filedevice;
 use crate::generatordevice;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
@@ -200,6 +202,13 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             enable_rate_adjust: conf.rate_adjust(),
             polling: dev.is_polling(),
         }),
+        #[cfg(feature = "dummy-backend")]
+        config::PlaybackDevice::Dummy { channels } => Box::new(dummydevice::DummyPlaybackDevice {
+            samplerate,
+            chunksize,
+            channels: channels.get(),
+            target_level: conf.target_level(),
+        }),
         #[cfg(target_os = "windows")]
         config::PlaybackDevice::Asio(ref dev) => {
             let full_duplex = if let config::CaptureDevice::Asio(ref cap_dev) = conf.capture {
@@ -365,6 +374,15 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         config::CaptureDevice::SignalGenerator {
             signal, channels, ..
         } => Box::new(generatordevice::GeneratorDevice {
+            signal,
+            samplerate: conf.samplerate(),
+            channels: channels.get(),
+            chunksize: conf.chunksize(),
+        }),
+        #[cfg(feature = "dummy-backend")]
+        config::CaptureDevice::Dummy {
+            signal, channels, ..
+        } => Box::new(dummydevice::DummyCaptureDevice {
             signal,
             samplerate: conf.samplerate(),
             channels: channels.get(),
