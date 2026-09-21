@@ -27,6 +27,7 @@ use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
 use crate::utils::countertimer;
+use crate::utils::rate_controller::PIRateController;
 use crate::utils::stash::recycle_chunk;
 use crate::{CamillaFloat, ToCamillaFloat};
 
@@ -41,6 +42,11 @@ use crate::StatusMessage;
 /// How far a dummy device is allowed to fall behind the clock before it gives up on
 /// catching up, expressed in chunks. See `Pacer::resync_if_behind`.
 const MAX_DEFICIT_CHUNKS: usize = 8;
+
+/// The rate a device runs at once its clock is taken off nominal.
+fn drifted_rate(samplerate: usize, drift_ppm: i32) -> f64 {
+    samplerate as f64 * (1.0 + f64::from(drift_ppm) / 1.0e6)
+}
 
 /// Convert a measured value into the processing precision.
 fn camilla_float(value: f32) -> CamillaFloat {
@@ -62,6 +68,8 @@ pub struct DummyPlaybackDevice {
     pub samplerate: usize,
     pub channels: usize,
     pub target_level: usize,
+    pub adjust_period: f32,
+    pub enable_rate_adjust: bool,
     pub control_port: Option<u16>,
 }
 
@@ -87,6 +95,8 @@ struct PlaybackParams {
     chunksize: usize,
     samplerate: usize,
     target_level: usize,
+    adjust_period: f32,
+    enable_rate_adjust: bool,
     playback_status: Arc<RwLock<PlaybackStatus>>,
     control: Arc<DummyControl>,
 }
@@ -112,6 +122,10 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
     let chunk_duration =
         Duration::from_secs_f64(params.chunksize as f64 / params.samplerate as f64);
     let mut state = ProcessingState::Running;
+    let mut drift_ppm = 0;
+    // Stays at zero until the first SetSpeed arrives, the same as the file backend, so a
+    // run without rate adjust reports no adjustment rather than a nominal one.
+    let mut rate_adjust = 0.0;
 
     crate::set_capture_state(&params.capture_status, state);
     loop {
@@ -126,9 +140,13 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
                     .unwrap_or(());
                 break;
             }
-            Ok(CommandMessage::SetSpeed { .. }) => {
-                // Round one has no resampler and no drift, so there is nothing to adjust.
-                warn!("Dummy capture device does not support rate adjust. Ignoring request.");
+            Ok(CommandMessage::SetSpeed { speed: new_speed }) => {
+                // There is no resampler here, so the device does what a clock-slave
+                // device does and runs its own clock faster or slower. That is the same
+                // shape as the ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
+                trace!("Dummy capture setting speed to {new_speed}");
+                rate_adjust = new_speed;
+                pacer.set_rate(rate_adjust * drifted_rate(params.samplerate, drift_ppm));
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
@@ -154,6 +172,14 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             }
             thread::sleep(chunk_duration);
             continue;
+        }
+
+        let requested_drift = params.control.drift_ppm();
+        if requested_drift != drift_ppm {
+            drift_ppm = requested_drift;
+            debug!("Dummy capture clock set to {drift_ppm} ppm off nominal");
+            let speed = if rate_adjust > 0.0 { rate_adjust } else { 1.0 };
+            pacer.set_rate(speed * drifted_rate(params.samplerate, drift_ppm));
         }
 
         // A real device hands over a chunk once it has captured every frame in it,
@@ -200,6 +226,7 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             trace!("Measured sample rate is {measured_rate:.1} Hz");
             capture_status.measured_samplerate = measured_rate as usize;
             capture_status.signal_range = value_range;
+            capture_status.rate_adjust = rate_adjust as f32;
         }
 
         let silence_state = silence_counter.update(camilla_float(value_range));
@@ -231,6 +258,7 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
 fn playback_loop(
     params: PlaybackParams,
     channel: crossbeam_channel::Receiver<AudioMessage>,
+    status_channel: &crossbeam_channel::Sender<StatusMessage>,
 ) -> Option<String> {
     debug!("starting dummy playback loop");
     let mut chunk_stats = ChunkStats {
@@ -240,11 +268,26 @@ fn playback_loop(
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
     let max_deficit = (MAX_DEFICIT_CHUNKS * params.chunksize) as f64;
+    // The target level is where the buffer should sit, not how big it is, so the device
+    // has room above it. Without that headroom the write below blocks as soon as the
+    // level reaches the target, the excess piles up in the queue until the capture
+    // blocks too, and the rate control loop has nothing left to control: the buffer is
+    // always exactly full whatever the capture clock does. Putting the target in the
+    // middle of the buffer is what a real device is configured to do.
+    let buffer_size = (2 * params.target_level) as f64;
     // A real device does not start draining until it is started, which happens once
     // `target_level` frames have been written to it. Until then the frames only pile up
     // in the buffer, so there is no pacer to run against.
     let mut pacer: Option<Pacer> = None;
     let mut prefilled = 0;
+    let mut drift_ppm = 0;
+    let mut rate_controller = PIRateController::new_with_default_gains(
+        params.samplerate,
+        f64::from(params.adjust_period),
+        params.target_level,
+    );
+    let mut timer = countertimer::Stopwatch::new();
+    let mut buffer_avg = countertimer::Averager::new();
 
     loop {
         match channel.recv() {
@@ -271,36 +314,72 @@ fn playback_loop(
                     &mut peak_values,
                     0,
                 );
+                // What is waiting behind this chunk is as much a part of the delay
+                // as what is already in the buffer, so it counts towards the level, as
+                // at `src/alsa_backend/device.rs:662`. Without it the level is blind to
+                // a capture running fast, since the wait below pins the buffer itself at
+                // the target and the excess piles up in the queue instead.
+                let queued = (params.chunksize * channel.len()) as f64;
                 // The chunk goes into the virtual buffer, and its frames are gone
                 // once it has drained.
                 let buffer_level = match &mut pacer {
                     Some(pacer) => {
-                        // Block until the buffer has drained back to the target level,
-                        // which is what a real device does when its buffer is full.
+                        // Measure as the chunk arrives, before it is written. Measured
+                        // after the wait below, the reading would only ever be the level
+                        // that wait stops at, whatever the device is really doing.
+                        let level = pacer.backlog().max(0.0) + queued;
+                        // Block until there is room in the buffer, which is what a
+                        // real device does when its own is full.
                         pacer.advance(chunk.frames);
-                        pacer.wait_for_backlog_below(params.target_level as f64);
+                        pacer.wait_for_backlog_below(buffer_size);
                         if pacer.resync_if_behind(max_deficit) {
                             params.control.count_resync();
                             warn!(
                                 "Dummy playback fell behind and dropped the backlog, as an underrun would"
                             );
                         }
-                        pacer.backlog().max(0.0) as usize
+                        level
                     }
                     None => {
                         prefilled += chunk.frames;
                         if prefilled >= params.target_level {
                             let mut started = Pacer::new(params.samplerate);
                             started.advance(prefilled);
+                            started.set_rate(drifted_rate(params.samplerate, drift_ppm));
                             pacer = Some(started);
                         }
-                        prefilled
+                        prefilled as f64
                     }
                 };
+                // Published every chunk rather than once per adjust period, so a test
+                // polling the getter does not have to wait one out. The controller below
+                // uses the average over the period, the way the real backends do.
                 if let Some(mut playback_status) = params.playback_status.try_write() {
-                    playback_status.buffer_level = buffer_level;
+                    playback_status.buffer_level = buffer_level as usize;
                 } else {
                     xtrace!("playback status blocked, skip buffer level update");
+                }
+                buffer_avg.add_value(buffer_level);
+                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
+                    && let Some(avg_level) = buffer_avg.average()
+                {
+                    timer.restart();
+                    buffer_avg.restart();
+                    if params.enable_rate_adjust {
+                        let capture_speed = rate_controller.next(avg_level);
+                        debug!("PB: buffer level {avg_level:.1}, SetSpeed {capture_speed}");
+                        status_channel
+                            .send(StatusMessage::SetSpeed(capture_speed))
+                            .unwrap_or(());
+                    }
+                }
+                let requested_drift = params.control.drift_ppm();
+                if requested_drift != drift_ppm {
+                    drift_ppm = requested_drift;
+                    debug!("Dummy playback clock set to {drift_ppm} ppm off nominal");
+                    if let Some(pacer) = &mut pacer {
+                        pacer.set_rate(drifted_rate(params.samplerate, drift_ppm));
+                    }
                 }
                 // The buffers themselves go back to the stash, the same way a real
                 // playback device returns them after converting a chunk. Without this
@@ -384,6 +463,8 @@ impl PlaybackDevice for DummyPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let target_level = self.target_level;
+        let adjust_period = self.adjust_period;
+        let enable_rate_adjust = self.enable_rate_adjust;
         let control_port = self.control_port;
 
         let handle = thread::Builder::new()
@@ -397,6 +478,8 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     chunksize,
                     samplerate,
                     target_level,
+                    adjust_period,
+                    enable_rate_adjust,
                     playback_status,
                     control: listener.control(),
                 };
@@ -404,7 +487,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     .send(StatusMessage::PlaybackReady)
                     .unwrap_or(());
                 barrier.wait();
-                match playback_loop(params, channel) {
+                match playback_loop(params, channel, &status_channel) {
                     Some(msg) => {
                         status_channel
                             .send(StatusMessage::PlaybackError(msg))

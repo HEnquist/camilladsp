@@ -56,6 +56,7 @@ build, for example a release one.
 - `test_subscriptions.py` — the pushed level, VU and state event streams
 - `test_dummy_control.py` — the dummy devices' control socket: protocol, counters, lifetime
 - `test_dummy_states.py` — stalled and paused processing, driven from that socket
+- `test_rate_control.py` — the PI controller, the buffer level, and clocks that disagree
 - `*.yml` — the configs the tests load
 - `pytest.ini` — the global timeout, which makes every test a hang check as well
 
@@ -79,6 +80,13 @@ hands back a `capture_control` and a `playback_control`. The protocol is one lin
 out, `stall:1` to write and `stall` to read, and the counters `frames`, `pauses` and `resyncs`
 are readable keys like any other. The listener is owned by the device, so it dies on a config
 reload and nothing carries over between tests.
+
+Two things to know before writing more rate control tests. The buffer level is sampled as a chunk
+arrives and drains by a chunk before the next one does, so single readings are points on a sawtooth
+and the ones in between differ by a whole chunk: average a handful of them, as `average_level` does.
+And a short `adjust_interval_s` converges faster, not slower, since the controller works on the
+error relative to the frames in one interval, so at the 10 s default a buffer error of a chunk or
+two is a rounding error. The tests run at 0.2 s.
 
 Poll, do not sleep. The status snapshot only refreshes once per update interval, so every status
 getter reads back as zero for the first fraction of a second after the devices start, and a fixed

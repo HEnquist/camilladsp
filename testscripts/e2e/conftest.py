@@ -74,11 +74,13 @@ class CamillaDsp:
     def send_text(self, text):
         return self.client.send_text(text)
 
-    def poll_until(self, command, expected, timeout=10.0):
-        return self.client.poll_until(command, expected, timeout=timeout)
+    def poll_until(self, command, expected, timeout=10.0, interval=0.02):
+        return self.client.poll_until(command, expected, timeout=timeout, interval=interval)
 
-    def poll_until_true(self, command, predicate, timeout=10.0):
-        return self.client.poll_until_true(command, predicate, timeout=timeout)
+    def poll_until_true(self, command, predicate, timeout=10.0, interval=0.02):
+        return self.client.poll_until_true(
+            command, predicate, timeout=timeout, interval=interval
+        )
 
     def is_running(self):
         return self.process.poll() is None
