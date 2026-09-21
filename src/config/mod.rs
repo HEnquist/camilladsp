@@ -975,6 +975,11 @@ pub enum Filter {
         description: Option<String>,
         parameters: BiquadComboParameters,
     },
+    Crossover {
+        #[serde(default)]
+        description: Option<String>,
+        parameters: CrossoverParameters,
+    },
     Delay {
         #[serde(default)]
         description: Option<String>,
@@ -1170,6 +1175,15 @@ pub enum BiquadParameters {
         freq_target: PrcFmt,
         q_target: PrcFmt,
     },
+}
+
+/// Linear-phase FIR crossover, slope in dB/octave (12..96, step 6).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type")]
+#[serde(deny_unknown_fields)]
+pub enum CrossoverParameters {
+    Lowpass { freq: PrcFmt, slope: usize },
+    Highpass { freq: PrcFmt, slope: usize },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

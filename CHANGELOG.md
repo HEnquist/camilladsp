@@ -1,3 +1,8 @@
+# Unreleased
+New features:
+- New filter type "Crossover", a linear-phase FIR crossover
+  defined by frequency and slope, with automatic latency alignment between channels.
+
 # 4.1.3
 Bugfixes:
 - Increased capture ringbuffer sizes in CoreAudio, WASAPI, ASIO, and threaded ALSA

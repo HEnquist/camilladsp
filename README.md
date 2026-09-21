@@ -1770,7 +1770,8 @@ This is then detected, and no format conversion, resampling or processing will b
 ## Filters
 The filters section defines the filter configurations to use in the pipeline.
 It's enough to define each filter once even if it should be applied on several channels.
-The supported filter types are Biquad, BiquadCombo and DiffEq for IIR and Conv for FIR.
+The supported filter types are Biquad, BiquadCombo and DiffEq for IIR,
+and Conv and Crossover for FIR.
 There are also filters just providing gain and delay.
 The last filter type is Dither, which is used to add dither when quantizing the output.
 
@@ -2051,6 +2052,60 @@ The other possible formats are raw data:
 - [S32_LE](sample_formats.md#s32_le)
 - [F32_LE](sample_formats.md#f32_le)
 - [F64_LE](sample_formats.md#f64_le)
+
+
+### Crossover
+The "Crossover" filter is a linear-phase FIR crossover filter.
+Unlike the "Conv" filter it does not use a file with coefficients.
+Instead the coefficients are calculated when the configuration is loaded,
+from the crossover frequency and the desired slope.
+
+Parameters:
+* `type`: `Lowpass` or `Highpass`.
+* `freq`: crossover frequency in Hz.
+* `slope`: slope in dB per octave.
+  Must be a multiple of 6, from 12 to 96.
+
+Example:
+```yaml
+filters:
+  crossover_low:
+    type: Crossover
+    parameters:
+      type: Lowpass
+      freq: 2000
+      slope: 48
+  crossover_high:
+    type: Crossover
+    parameters:
+      type: Highpass
+      freq: 2000
+      slope: 48
+```
+
+A lowpass and a highpass with the same `freq` and `slope` are complementary.
+The magnitude of each band is -6 dB at the crossover frequency,
+and the two bands add up to a pure delay with a completely flat magnitude response.
+
+The number of coefficients is chosen automatically,
+so that the deviation from the ideal response stays below -100 dB.
+A low crossover frequency and a steep slope require more coefficients,
+which increases both the latency and the cpu usage.
+The latency of the filter is half the number of coefficients,
+and it is written to the log when the configuration is loaded.
+
+Since the latency depends on the settings,
+a pipeline may end up with different latencies on different channels.
+CamillaDSP compensates for this automatically,
+by delaying the channels that have less crossover latency than the others.
+This is done before every Mixer and Processor step, and at the end of the pipeline,
+so that the channels always stay aligned in time.
+Delay filters added manually are not affected.
+
+Note that a linear-phase filter is not causal,
+meaning that its impulse response is symmetric around the peak.
+For a low crossover frequency combined with a steep slope,
+this gives a considerable delay, in the range of tens or hundreds of milliseconds.
 
 
 ### IIR

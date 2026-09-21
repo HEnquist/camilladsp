@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::PrcFmt;
 use crate::ProcessingParameters;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
@@ -59,6 +60,14 @@ impl FilterGroup {
                         name,
                         sample_freq,
                         filters::biquad::BiquadCoefficients::from_config(sample_freq, parameters),
+                    ))
+                }
+                config::Filter::Crossover { parameters, .. } => {
+                    Box::new(filters::crossover::Crossover::from_config(
+                        name,
+                        waveform_length,
+                        sample_freq,
+                        parameters,
                     ))
                 }
                 config::Filter::BiquadCombo { parameters, .. } => Box::new(
@@ -186,11 +195,16 @@ impl Pipeline {
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
         let mut num_channels = conf.devices.capture.channels();
+        // Latency added by crossover filters, per channel, in samples.
+        let mut latencies = vec![0; num_channels];
         for step in conf.pipeline.unwrap_or_default() {
             match step {
                 config::PipelineStep::Mixer(step) => {
                     if !step.is_bypassed() {
+                        align_latencies(&mut steps, &mut latencies, &conf.devices);
                         let mixconf = conf.mixers.as_ref().unwrap()[&step.name].clone();
+                        latencies =
+                            vec![latencies.first().copied().unwrap_or(0); mixconf.channels.out];
                         num_channels = mixconf.channels.out;
                         debug!(
                             "Add Mixer step with mixer {}, pipeline becomes {} channels wide",
@@ -218,6 +232,11 @@ impl Pipeline {
                             Box::new(0..num_channels) as Box<dyn Iterator<Item = usize>>
                         };
                         for channel in channels_iter {
+                            latencies[channel] += crossover_latency(
+                                &step.names,
+                                conf.filters.as_ref().unwrap(),
+                                conf.devices.samplerate,
+                            );
                             let fltgrp = FilterGroup::from_config(
                                 channel,
                                 &step.names,
@@ -232,6 +251,7 @@ impl Pipeline {
                 }
                 config::PipelineStep::Processor(step) => {
                     if !step.is_bypassed() {
+                        align_latencies(&mut steps, &mut latencies, &conf.devices);
                         debug!("Add Processor step with processor {}", step.name);
                         let procconf = conf.processors.as_ref().unwrap()[&step.name].clone();
                         let proc = match procconf {
@@ -266,6 +286,14 @@ impl Pipeline {
                     }
                 }
             }
+        }
+        align_latencies(&mut steps, &mut latencies, &conf.devices);
+        if let Some(latency) = latencies.first().filter(|l| **l > 0) {
+            info!(
+                "Crossover filters add a latency of {} samples ({:.1} ms)",
+                latency,
+                1000.0 * *latency as f32 / conf.devices.samplerate as f32
+            );
         }
         let current_volume = processing_params.current_volume(0);
         let mute = processing_params.is_mute(0);
@@ -366,6 +394,50 @@ impl Pipeline {
 
 // Loop trough the pipeline to merge individual filter steps,
 // in order use rayon to apply them in parallel.
+/// Total latency in samples of the crossover filters in a list of filter names.
+fn crossover_latency(
+    names: &[String],
+    filter_configs: &HashMap<String, config::Filter>,
+    samplerate: usize,
+) -> usize {
+    names
+        .iter()
+        .map(|name| match &filter_configs[name] {
+            config::Filter::Crossover { parameters, .. } => {
+                filters::crossover::latency(samplerate, parameters)
+            }
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Delay the channels that have less crossover latency than the others,
+/// so that all channels are aligned in time.
+fn align_latencies(
+    steps: &mut Vec<PipelineStep>,
+    latencies: &mut [usize],
+    devices: &config::Devices,
+) {
+    let max_latency = latencies.iter().copied().max().unwrap_or(0);
+    for (channel, latency) in latencies.iter_mut().enumerate() {
+        if *latency < max_latency {
+            let delay = max_latency - *latency;
+            debug!("Delay channel {channel} by {delay} samples to align crossover latency");
+            let filter = filters::basicfilters::Delay::new(
+                &format!("crossover_alignment_{channel}"),
+                devices.samplerate,
+                delay as PrcFmt,
+                false,
+            );
+            steps.push(PipelineStep::FilterStep(FilterGroup {
+                channel,
+                filters: vec![Box::new(filter)],
+            }));
+            *latency = max_latency;
+        }
+    }
+}
+
 fn parallelize_filters(steps: &mut Vec<PipelineStep>, nbr_channels: usize) -> Vec<PipelineStep> {
     debug!("Merging filter steps to enable parallel processing");
     let mut new_steps: Vec<PipelineStep> = Vec::new();

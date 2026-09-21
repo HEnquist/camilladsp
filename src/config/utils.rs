@@ -452,6 +452,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             if let Some(current_filter) = oldfilters.get(filter) {
                 // Did the filter change type?
                 match (params, current_filter) {
+                    (Filter::Crossover { .. }, Filter::Crossover { .. }) => {
+                        // The latency may change, the pipeline must be rebuilt to realign channels
+                        if params != current_filter {
+                            return ConfigChange::Pipeline;
+                        }
+                    }
                     (Filter::Biquad { .. }, Filter::Biquad { .. })
                     | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
                     | (Filter::Conv { .. }, Filter::Conv { .. })
