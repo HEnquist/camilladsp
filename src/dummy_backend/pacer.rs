@@ -79,6 +79,11 @@ impl Pacer {
         }
     }
 
+    /// Drop any accumulated deficit, so the device carries on from the current time.
+    pub fn resync(&mut self) {
+        self.start = Instant::now() - Duration::from_secs_f64(self.frames_moved as f64 / self.rate);
+    }
+
     /// Drop the accumulated deficit if the device has fallen more than `limit` frames
     /// behind the clock, returning whether it did.
     ///
@@ -89,7 +94,7 @@ impl Pacer {
         if self.backlog() >= -limit {
             return false;
         }
-        self.start = Instant::now() - Duration::from_secs_f64(self.frames_moved as f64 / self.rate);
+        self.resync();
         true
     }
 }

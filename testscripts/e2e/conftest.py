@@ -212,6 +212,9 @@ def control_cdsp(start_cdsp, config_file):
         cdsp = start_cdsp(config=config_file(edits, base=base), **kwargs)
         cdsp.capture_control = Control(ports["capture"])
         cdsp.playback_control = Control(ports["playback"])
+        # A test that builds a second config has to keep the same ports, or the change
+        # restarts the devices and the sockets move out from under it.
+        cdsp.control_edits = edits
         return cdsp
 
     return _start

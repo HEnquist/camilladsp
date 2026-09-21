@@ -55,6 +55,7 @@ build, for example a release one.
 - `test_spectrum.py` — `GetSpectrum` and `SubscribeSpectrum` against a known tone
 - `test_subscriptions.py` — the pushed level, VU and state event streams
 - `test_dummy_control.py` — the dummy devices' control socket: protocol, counters, lifetime
+- `test_dummy_states.py` — stalled and paused processing, driven from that socket
 - `*.yml` — the configs the tests load
 - `pytest.ini` — the global timeout, which makes every test a hang check as well
 

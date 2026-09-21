@@ -13,7 +13,7 @@ Each test starts `camilladsp` as a child process with a config, controls it over
 and shuts it down again.
 It covers the lifecycle and exit codes, the config command surface including rapid config churn,
 volume, mute and the faders, the signal level getters, the spectrum analysis, the pushed event
-subscriptions, the state file, and the error paths.
+subscriptions, the state file, the error paths, and the stalled and paused states.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.

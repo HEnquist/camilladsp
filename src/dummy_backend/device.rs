@@ -16,6 +16,7 @@
 
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Duration;
 
 use parking_lot::RwLock;
 
@@ -27,6 +28,7 @@ use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
 use crate::utils::countertimer;
 use crate::utils::stash::recycle_chunk;
+use crate::{CamillaFloat, ToCamillaFloat};
 
 use crate::CaptureStatus;
 use crate::CommandMessage;
@@ -40,11 +42,18 @@ use crate::StatusMessage;
 /// catching up, expressed in chunks. See `Pacer::resync_if_behind`.
 const MAX_DEFICIT_CHUNKS: usize = 8;
 
+/// Convert a measured value into the processing precision.
+fn camilla_float(value: f32) -> CamillaFloat {
+    f64::from(value).to_camilla_float()
+}
+
 pub struct DummyCaptureDevice {
     pub chunksize: usize,
     pub samplerate: usize,
     pub channels: usize,
     pub signal: config::Signal,
+    pub silence_threshold: f64,
+    pub silence_timeout: f64,
     pub control_port: Option<u16>,
 }
 
@@ -67,6 +76,8 @@ struct CaptureParams {
     chunksize: usize,
     samplerate: usize,
     signal: config::Signal,
+    silence_threshold: f64,
+    silence_timeout: f64,
     capture_status: Arc<RwLock<CaptureStatus>>,
     control: Arc<DummyControl>,
 }
@@ -91,9 +102,18 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
     let mut generator = SignalSource::new(&params.signal, params.samplerate);
     let mut pacer = Pacer::new(params.samplerate);
     let mut averager = countertimer::TimeAverage::new();
+    let mut silence_counter = countertimer::SilenceCounter::new(
+        params.silence_threshold,
+        params.silence_timeout,
+        params.samplerate,
+        params.chunksize,
+    );
     let max_deficit = (MAX_DEFICIT_CHUNKS * params.chunksize) as f64;
+    let chunk_duration =
+        Duration::from_secs_f64(params.chunksize as f64 / params.samplerate as f64);
+    let mut state = ProcessingState::Running;
 
-    crate::set_capture_state(&params.capture_status, ProcessingState::Running);
+    crate::set_capture_state(&params.capture_status, state);
     loop {
         match msg_channels.command.try_recv() {
             Ok(CommandMessage::Exit) => {
@@ -117,6 +137,25 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             }
         };
 
+        if params.control.stalled() {
+            // A stalled device hands over nothing at all. Keep the pacer anchored to the
+            // current time while that lasts, or the deficit built up during the stall
+            // comes back as a burst of chunks at full speed once it clears.
+            pacer.resync();
+            if state != ProcessingState::Stalled {
+                debug!("Dummy capture is stalled");
+                state = ProcessingState::Stalled;
+                crate::set_capture_state(&params.capture_status, state);
+            }
+            params.control.count_pause();
+            if msg_channels.audio.send(AudioMessage::Pause).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+            thread::sleep(chunk_duration);
+            continue;
+        }
+
         // A real device hands over a chunk once it has captured every frame in it,
         // so wait until the whole chunk is due before generating it.
         pacer.advance(params.chunksize);
@@ -126,7 +165,14 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             warn!("Dummy capture fell behind and dropped the backlog, as an overrun would");
         }
 
-        let waveforms = generator.waveforms(params.channels, params.chunksize);
+        let mut waveforms = generator.waveforms(params.channels, params.chunksize);
+        if params.control.silenced() {
+            // Zero the samples rather than skipping generation, so the phase carries on
+            // where it left off when the signal comes back.
+            for waveform in waveforms.iter_mut() {
+                waveform.fill(0.0);
+            }
+        }
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
         params.control.add_frames(params.chunksize);
 
@@ -138,6 +184,10 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             &mut rms_values,
             &mut peak_values,
         );
+        // The chunk is generated with a nominal range of +/- 1.0, so the peak is what
+        // says whether there is a signal in it.
+        let peak = chunk_stats.peak.iter().copied().fold(0.0f32, f32::max);
+        let value_range = 2.0 * peak;
 
         averager.add_value(params.chunksize);
         if let Some(mut capture_status) = params.capture_status.try_write()
@@ -149,8 +199,24 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             averager.restart();
             trace!("Measured sample rate is {measured_rate:.1} Hz");
             capture_status.measured_samplerate = measured_rate as usize;
-            let peak = chunk_stats.peak.iter().copied().fold(0.0f32, f32::max);
-            capture_status.signal_range = 2.0 * peak;
+            capture_status.signal_range = value_range;
+        }
+
+        let silence_state = silence_counter.update(camilla_float(value_range));
+        if silence_state != state {
+            state = silence_state;
+            crate::set_capture_state(&params.capture_status, state);
+        }
+        if state != ProcessingState::Running {
+            // Paused, so the chunk is not sent. Its buffers go back to the stash the way
+            // the playback device returns them, instead of being dropped.
+            recycle_chunk(chunk);
+            params.control.count_pause();
+            if msg_channels.audio.send(AudioMessage::Pause).is_err() {
+                info!("Processing thread has already stopped.");
+                break;
+            }
+            continue;
         }
 
         let msg = AudioMessage::Audio(chunk);
@@ -184,6 +250,18 @@ fn playback_loop(
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 params.control.add_frames(chunk.frames);
+                if params.control.stalled() {
+                    // A stalled device keeps taking chunks and throws them away, the way
+                    // a real one does once it has been reset, so the queue does not back
+                    // up behind it. Its buffer level and signal levels say nothing while
+                    // that lasts, so they are left alone, as at
+                    // `src/alsa_backend/device.rs:650`.
+                    if let Some(pacer) = &mut pacer {
+                        pacer.resync();
+                    }
+                    recycle_chunk(chunk);
+                    continue;
+                }
                 chunk.update_stats(&mut chunk_stats);
                 crate::push_playback_audio_buffer(&params.playback_status, &chunk);
                 crate::update_playback_signal_status(
@@ -258,6 +336,8 @@ impl CaptureDevice for DummyCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let signal = self.signal;
+        let silence_threshold = self.silence_threshold;
+        let silence_timeout = self.silence_timeout;
         let control_port = self.control_port;
 
         let handle = thread::Builder::new()
@@ -271,6 +351,8 @@ impl CaptureDevice for DummyCaptureDevice {
                     chunksize,
                     samplerate,
                     signal,
+                    silence_threshold,
+                    silence_timeout,
                     capture_status,
                     control: listener.control(),
                 };
