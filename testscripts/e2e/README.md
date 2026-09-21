@@ -24,6 +24,7 @@ build, for example a release one.
 - `test_dummy_smoke.py` — the dummy devices themselves: pacing, rates, chunk sizes, channels
 - `test_lifecycle.py` — startup, shutdown, exit codes and signals
 - `test_config_commands.py` — reading, writing, patching and validating configs
+- `test_config_churn.py` — the ported reload suite: rapid config changes over every route
 - `test_volume.py` — volume, mute and the five faders, including their effect on the audio
 - `test_signal_levels.py` — the level getters, against computed values
 - `test_statefile.py` — what survives a restart

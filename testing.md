@@ -7,32 +7,26 @@ These tests are run via cargo:
 cargo test
 ```
 
-## Config update tests
-A set of tests for testing that changing the running configuration works correctly
-is implemeted as a Python test script.
-This requires the Python packages `pytest` and `pycamilladsp` to run.
+## End-to-end tests
+A pytest suite drives the real binary.
+Each test starts `camilladsp` as a child process with a config, controls it over the websocket,
+and shuts it down again.
+It covers the lifecycle and exit codes, the config command surface including rapid config churn,
+volume, mute and the faders, the signal level getters, the state file, and the error paths.
 
-Some tests trigger a config reload by sending SIGHUP to the camilladsp process.
-This is not available on Windows.
-It uses the `pgrep` command for getting the PID of the running camilladsp process,
-and it assumes that only one camilladsp instance is running.
+The tests run on the test-only dummy capture and playback devices,
+so they need a build with the `dummy-backend` feature.
+They also need the Python packages `pytest` and `websocket-client`.
 
-To run the tests, prepare four valid config files, named "conf1.yml" to "conf4.yml".
-Example files are available in `testscripts/config_load_test`.
-Place the new config files in that folder.
-
-Start camilladsp in wait mode, with the websocket server listening on port 1234:
 ```sh
-camilladsp -w -v -p1234
+cargo build --features dummy-backend
+pip install pytest websocket-client
+pytest -v testscripts/e2e
 ```
 
-Now start the tests:
-```sh
-cd testscripts/config_load_test
-pytest -v
-```
-
-A complete run takes a couple of minutes.
+A complete run takes about a minute.
+The tests look for `target/debug/camilladsp`, set `CAMILLADSP_BIN` to test another build.
+See `testscripts/e2e/README.md` for the layout and for what to know before adding tests.
 
 # Benchmarks
 

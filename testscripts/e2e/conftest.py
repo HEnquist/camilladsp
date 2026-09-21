@@ -14,8 +14,8 @@ import pytest
 
 from wsclient import Client
 
-# The configs live next to the tests, as in testscripts/config_load_test. A `configs/`
-# subdirectory would be nicer, but the repo .gitignore excludes that name everywhere.
+# The configs live next to the tests. A `configs/` subdirectory would be nicer, but the
+# repo .gitignore excludes that name everywhere.
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 
