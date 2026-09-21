@@ -29,6 +29,8 @@ build, for example a release one.
 - `test_signal_levels.py` — the level getters, against computed values
 - `test_statefile.py` — what survives a restart
 - `test_errors.py` — malformed input and the other unhappy paths
+- `test_spectrum.py` — `GetSpectrum` and `SubscribeSpectrum` against a known tone
+- `test_subscriptions.py` — the pushed level, VU and state event streams
 - `*.yml` — the configs the tests load
 
 ## Writing more
@@ -37,6 +39,12 @@ Two fixtures do most of the work. `start_cdsp` spawns the binary on a free port 
 handle that can `send` commands and `poll_until` a getter changes. `config_file` writes an edited
 copy of one of the configs above, which is how a test gets a variant without another near
 duplicate `.yml` landing here.
+
+A subscribed connection accepts nothing but `StopSubscription`, so a test that watches a stream
+and drives the engine at the same time needs two connections. `cdsp.new_client()` opens the second
+one, and the subscription goes on that so `cdsp.send` keeps working. On the client side,
+`recv_events` reads pushed events with the time each arrived, and `stop_subscription` ends the
+stream, skipping past any events still in flight ahead of the reply.
 
 Poll, do not sleep. The status snapshot only refreshes once per update interval, so every status
 getter reads back as zero for the first fraction of a second after the devices start, and a fixed

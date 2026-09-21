@@ -46,6 +46,18 @@ class CamillaDsp:
         self.client = client
         self.port = port
         self.pid = process.pid
+        self.extra_clients = []
+
+    def new_client(self):
+        """Open a second connection to the same process.
+
+        A subscribed connection accepts nothing but StopSubscription, so a test that
+        wants to both watch a stream and drive the engine needs two. Subscribing on this
+        one rather than on `self.client` also keeps the teardown's Exit working.
+        """
+        client = Client(self.port)
+        self.extra_clients.append(client)
+        return client
 
     def send(self, command, value=None, **fields):
         return self.client.send(command, value, **fields)
@@ -195,7 +207,8 @@ def _teardown(cdsp):
         except Exception:
             cdsp.process.kill()
             cdsp.process.wait(timeout=SHUTDOWN_TIMEOUT)
-    try:
-        cdsp.client.close()
-    except Exception:
-        pass
+    for client in [cdsp.client, *cdsp.extra_clients]:
+        try:
+            client.close()
+        except Exception:
+            pass
