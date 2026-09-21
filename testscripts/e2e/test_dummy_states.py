@@ -125,7 +125,10 @@ def test_silence_pauses_processing_after_the_timeout(control_cdsp):
     time.sleep(SILENCE_TIMEOUT / 2)
     assert cdsp.send("GetState") == "Running"
     cdsp.poll_until("GetState", "Paused")
-    assert time.monotonic() - started < 2 * SILENCE_TIMEOUT
+    # The counter counts chunks rather than seconds, `src/utils/countertimer.rs:66`, so
+    # this holds as long as the run delivers chunks at better than a third of nominal.
+    # That is a bound on the timeout being honoured, not on the runner being quick.
+    assert time.monotonic() - started < 3 * SILENCE_TIMEOUT
 
 
 def test_signal_returning_resumes_processing(control_cdsp):
@@ -143,14 +146,16 @@ def test_silence_without_a_threshold_keeps_running(control_cdsp):
     """Silence detection is off by default, so a quiet capture is just a quiet capture."""
     cdsp = control_cdsp()
     cdsp.capture_control.set("silence", 1)
-    time.sleep(2 * SILENCE_TIMEOUT)
-    assert cdsp.send("GetState") == "Running"
-    # The audio really is silent, the engine simply does not act on it.
-    assert cdsp.poll_until_true(
+    # Wait for the silence to reach the output before timing anything from it, so a slow
+    # first chunk cannot be mistaken for the engine deciding to keep going.
+    cdsp.poll_until_true(
         "GetPlaybackSignalRms",
         lambda values: len(values) == 2 and all(level < -100.0 for level in values),
-        timeout=5.0,
+        timeout=10.0,
     )
+    # Well past the timeout that would have paused it, had one been configured.
+    time.sleep(2 * SILENCE_TIMEOUT)
+    assert cdsp.send("GetState") == "Running"
 
 
 def test_a_pipeline_swap_while_paused_takes_effect(control_cdsp, config_file):

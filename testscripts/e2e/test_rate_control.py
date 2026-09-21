@@ -19,6 +19,11 @@ import time
 
 import pytest
 
+# Every assertion here is about a control loop settling, which needs the clock kept
+# accurately enough for the buffer level to mean something, so CI runs this file on
+# Linux only. See pytest.ini.
+pytestmark = pytest.mark.pacing
+
 TARGET_LEVEL = 2048
 CHUNKSIZE = 512
 # A drift the controller can correct, comfortably inside its +/- 5000 ppm clamp.

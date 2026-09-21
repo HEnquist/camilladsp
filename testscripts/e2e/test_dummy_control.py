@@ -90,6 +90,7 @@ def test_frames_advance_at_the_nominal_rate(controlled, device):
     assert (second - first) / elapsed == pytest.approx(SAMPLERATE, rel=0.05)
 
 
+@pytest.mark.pacing
 @pytest.mark.parametrize("device", ["capture", "playback"])
 def test_a_normal_run_has_no_pauses_and_no_resyncs(controlled, device):
     """Nothing should be dropped or paused when the devices are left alone.

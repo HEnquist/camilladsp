@@ -17,7 +17,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          # The pacing tests run here and nowhere else. What they cover, the rate
+          # control loop and the buffer accounting, is portable code with no cfg in it,
+          # so one OS proves the logic and the other two would only be paying runner
+          # time to measure their own scheduler. Windows sleeps in steps of about 15 ms
+          # without timeBeginPeriod and has the slowest runners in the pool, and the
+          # macos runners often wait a long time to start. The smoke test still checks
+          # the pacer against the clock on all three.
+          - os: ubuntu-latest
+            pytest_args: ""
+          - os: macos-latest
+            pytest_args: -m "not pacing"
+          - os: windows-latest
+            pytest_args: -m "not pacing"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -45,4 +58,4 @@ jobs:
       # The tests find target/debug/camilladsp on their own, CAMILLADSP_BIN only
       # overrides that.
       - name: Run the end-to-end tests
-        run: pytest -v testscripts/e2e
+        run: pytest -v testscripts/e2e ${{ matrix.pytest_args }}

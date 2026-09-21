@@ -81,6 +81,13 @@ out, `stall:1` to write and `stall` to read, and the counters `frames`, `pauses`
 are readable keys like any other. The listener is owned by the device, so it dies on a config
 reload and nothing carries over between tests.
 
+Tests that assert on timing accuracy, rather than merely taking time, carry the `pacing` marker,
+and CI runs them on Linux only. The rate control loop and the buffer accounting are portable code
+with no `cfg` in them, so a second and third runner would only be measuring their own schedulers,
+and the Windows one sleeps in steps of about 15 ms. Everything unmarked runs on all three, and
+`test_dummy_smoke.py` checks the pacer against the clock everywhere. Run them locally with
+`pytest testscripts/e2e`, which selects everything; `-m "not pacing"` is what CI passes elsewhere.
+
 Two things to know before writing more rate control tests. The buffer level is sampled as a chunk
 arrives and drains by a chunk before the next one does, so single readings are points on a sawtooth
 and the ones in between differ by a whole chunk: average a handful of them, as `average_level` does.
