@@ -25,6 +25,7 @@ use crate::config;
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
 use crate::utils::countertimer;
+use crate::utils::stash::recycle_chunk;
 
 use crate::CaptureStatus;
 use crate::CommandMessage;
@@ -184,7 +185,8 @@ fn playback_loop(
                     &mut peak_values,
                     0,
                 );
-                // The chunk goes into the virtual buffer and is then discarded.
+                // The chunk goes into the virtual buffer, and its frames are gone
+                // once it has drained.
                 let buffer_level = match &mut pacer {
                     Some(pacer) => {
                         // Block until the buffer has drained back to the target level,
@@ -213,6 +215,10 @@ fn playback_loop(
                 } else {
                     xtrace!("playback status blocked, skip buffer level update");
                 }
+                // The buffers themselves go back to the stash, the same way a real
+                // playback device returns them after converting a chunk. Without this
+                // the capture side allocates a new set for every chunk.
+                recycle_chunk(chunk);
             }
             Ok(AudioMessage::Pause) => {
                 trace!("Pause message received");
