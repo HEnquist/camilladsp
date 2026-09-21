@@ -127,20 +127,36 @@ def test_a_bad_vu_subscription_is_refused(cdsp, overrides, message):
     assert cdsp.send("GetState") == "Running"
 
 
+def wait_for_state(client, state, limit=10):
+    """Read state events until `state` arrives, and return it.
+
+    The way back up from Inactive goes through Starting, `src/engine_pipeline.rs:157`,
+    and whether the state monitor catches that intermediate depends on how fast the
+    devices open, so a slow runner sees it and a fast one does not. Waiting for the
+    state asked for, rather than asserting on the next event, is what keeps this from
+    depending on the runner.
+    """
+    seen = []
+    for _ in range(limit):
+        _, value = client.recv_events(1)[0]
+        seen.append(value["state"])
+        if value["state"] == state:
+            return value
+    raise AssertionError(f"{state} never arrived, saw {seen}")
+
+
 def test_state_events_follow_the_engine(start_cdsp):
     """Driven from the other connection, since a subscribed one takes no commands."""
     cdsp = start_cdsp(extra_args=["--wait"])
     client = subscribed(cdsp, "SubscribeState")
 
     cdsp.send("Stop")
-    _, stopped = client.recv_events(1)[0]
-    assert stopped["state"] == "Inactive"
+    stopped = wait_for_state(client, "Inactive")
     # The stop reason rides along on the event, and only when Inactive.
     assert stopped["stop_reason"] == "None"
 
     cdsp.send("Reload")
-    _, started = client.recv_events(1)[0]
-    assert started["state"] == "Running"
+    started = wait_for_state(client, "Running")
     assert "stop_reason" not in started
     client.stop_subscription()
 

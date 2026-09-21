@@ -1,24 +1,33 @@
 """Spectrum analysis, one shot and subscribed.
 
-The base config captures a 1 kHz sine at -6 dBFS and runs it through a -6 dB gain
-filter, so both halves of the assertion are sharp: the peak has to land in the bin that
-covers 1 kHz, and its magnitude has to be the level the generator was configured with.
+These run on a variant of the base config whose generator is moved from 1 kHz to
+984.375 Hz, and the exact frequency is the point. `min_freq: 20` at 48 kHz gives a 4096
+point FFT, `src/spectrum.rs:335`, so the bins are 11.71875 Hz apart and 984.375 Hz is
+bin 84 exactly. A tone on a bin centre has no scalloping loss, so the peak reads the
+generator's configured level to three decimals and every assertion below can be exact.
+
+At 1 kHz it is not exact and not stable either. That sits a third of a bin off centre,
+which costs 0.63 dB, and the loss varies with where the analysis window falls, so the
+peak wanders between -6.63 and -7.96 dB. Measured at idle, 8 % of reads land low, which
+is a flaky test rather than a bug: 1.4 dB is the Hann window's worst case scalloping
+loss and the analyser is behaving as designed. Moving the tone onto a bin centre is what
+makes the level assertable at all, so do not "simplify" this back to a round 1 kHz.
 """
 
 import time
 
 import pytest
 
-TONE_HZ = 1000.0
+TONE_HZ = 984.375
 CAPTURE_PEAK_DB = -6.0
 PLAYBACK_PEAK_DB = -12.0
-# The tone does not sit on an FFT bin centre, so the Hann window's scalloping loss puts
-# the reading a little over half a dB low. It is stable at that, not noisy.
-TOLERANCE = 1.0
+# Exact, now that the tone is bin centred. The slack is for f32 printing, not for drift.
+TOLERANCE = 0.05
 
 # 64 log spaced bins from 20 Hz to 20 kHz is a ratio of 1.116 between neighbours, so a
 # peak in the right bin is within 12 % of the tone and one bin out is already outside
-# this. Sharp, over a range spanning three decades.
+# this. Sharp, over a range spanning three decades. min_freq is also what sets the FFT
+# length, so leaving it at 20 is what keeps the tone bin centred.
 REQUEST = {
     "side": "capture",
     "channel": None,
@@ -27,6 +36,16 @@ REQUEST = {
     "n_bins": 64,
 }
 BIN_TOLERANCE = 0.15
+
+
+@pytest.fixture
+def cdsp(start_cdsp, config_file):
+    """Overrides the shared fixture with a generator on an FFT bin centre.
+
+    Only this module wants the odd frequency, and only for the reason in the module
+    docstring, so the config stays here rather than in a checked in .yml of its own.
+    """
+    return start_cdsp(config=config_file({"freq: 1000": f"freq: {TONE_HZ}"}))
 
 
 def spectrum(cdsp, **overrides):
@@ -78,7 +97,9 @@ def test_playback_spectrum_shows_the_pipeline_gain(cdsp):
     playback = peak_of(spectrum(cdsp, side="playback"))
     assert playback[0] == capture[0]
     assert playback[1] == pytest.approx(PLAYBACK_PEAK_DB, abs=TOLERANCE)
-    assert capture[1] - playback[1] == pytest.approx(6.0, abs=0.01)
+    # The two sides are read in separate calls, so this only holds because neither
+    # reading depends on where its window fell. At 1 kHz it would not.
+    assert capture[1] - playback[1] == pytest.approx(6.0, abs=2 * TOLERANCE)
 
 
 def test_nothing_else_is_in_the_signal(cdsp):
@@ -96,9 +117,13 @@ def test_nothing_else_is_in_the_signal(cdsp):
 
 def test_a_single_channel_matches_the_average(cdsp):
     """Both channels carry the same sine, so selecting one changes nothing."""
-    both = peak_of(spectrum(cdsp))
-    assert peak_of(spectrum(cdsp, channel=0)) == both
-    assert peak_of(spectrum(cdsp, channel=1)) == both
+    frequency, magnitude = peak_of(spectrum(cdsp))
+    for channel in (0, 1):
+        one = peak_of(spectrum(cdsp, channel=channel))
+        assert one[0] == frequency
+        # Not an exact comparison: averaging the channels and taking one of them are
+        # different sums, and they differ in the last f32 digit.
+        assert one[1] == pytest.approx(magnitude, abs=TOLERANCE)
 
 
 @pytest.mark.parametrize("n_bins", [2, 16, 64, 512])
@@ -130,6 +155,12 @@ def test_no_spectrum_without_a_running_pipeline(start_cdsp):
     cdsp = start_cdsp(extra_args=["--wait"])
     cdsp.send("Stop")
     cdsp.poll_until("GetState", "Inactive")
+    # Both spectrum commands decide this from the active config's sample rate, not from
+    # the state, and Stop clears the config only after the pipeline is down,
+    # `src/engine.rs:159`. So the state reaches Inactive first, and a request made in
+    # between still finds a rate and fails on the empty buffer instead. Gate on the
+    # config, which is the thing they actually read.
+    cdsp.poll_until_true("GetConfig", lambda text: text.strip() == "null")
     assert cdsp.send_raw("GetSpectrum", REQUEST)["result"] == "ProcessingNotRunningError"
     assert (
         cdsp.send_raw("SubscribeSpectrum", {**REQUEST, "max_rate": 20.0})["result"]
