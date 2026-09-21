@@ -12,7 +12,8 @@ A pytest suite drives the real binary.
 Each test starts `camilladsp` as a child process with a config, controls it over the websocket,
 and shuts it down again.
 It covers the lifecycle and exit codes, the config command surface including rapid config churn,
-volume, mute and the faders, the signal level getters, the state file, and the error paths.
+volume, mute and the faders, the signal level getters, the spectrum analysis, the pushed event
+subscriptions, the state file, and the error paths.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.
@@ -26,7 +27,8 @@ pytest -v testscripts/e2e
 
 A complete run takes about a minute.
 The tests look for `target/debug/camilladsp`, set `CAMILLADSP_BIN` to test another build.
-See `testscripts/e2e/README.md` for the layout and for what to know before adding tests.
+See `testscripts/e2e/README.md` for the layout, for why the suite is in Python rather than
+Rust, and for what to know before adding tests.
 
 # Benchmarks
 

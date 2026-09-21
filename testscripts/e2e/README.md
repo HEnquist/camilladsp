@@ -6,6 +6,28 @@ config, controls it over the websocket, and shuts it down again. Nothing is mock
 They run on the test-only dummy capture and playback devices, which move audio at a paced rate
 without touching any hardware. That needs a build with the `dummy-backend` feature.
 
+## Why Python and not Rust
+
+The obvious alternative is a Rust suite in `tests/`, and it was considered. It would need no new
+dependencies, since `tungstenite`, `serde_json`, `yaml_serde`, `waveadapter` and `realfft` are all
+in `[dependencies]` and therefore visible to `tests/` targets, and it would ride the existing
+feature matrix for free. Neither advantage outweighed the extra code to maintain.
+
+What these tests actually do is start a process, send it JSON, and compare numbers. The websocket
+protocol is request/reply JSON over text frames, see `websocket.md`, so a client covering every
+one of the ~80 commands is a handful of lines, and the whole of `wsclient.py`, subscriptions
+included, is 150. `parametrize` turns a sweep over sample rates or fader indices into one
+decorator. Nothing has to be recompiled to change a test.
+
+None of that makes Python better than Rust in general, it makes it cheaper here, and cheap is what
+decides whether the next test gets written. The split is the point: `cargo test` covers the DSP,
+this suite covers the binary.
+
+The client is deliberately not pyCamillaDSP either. That library is released separately and would
+lag, so a new websocket command would be untestable here until the client shipped support for it,
+and a pinned but lagging client would silently narrow what these tests cover. `wsclient.py`
+forwards whatever command name it is handed, so it cannot lag.
+
 ## Running them
 
 ```sh
