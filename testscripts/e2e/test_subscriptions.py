@@ -58,15 +58,32 @@ def test_subscribing_to_one_side_only(cdsp, side):
     client.stop_subscription()
 
 
-def test_signal_levels_are_pushed_once_per_chunk(cdsp):
-    """The stream follows the audio, so it cannot run faster than chunks arrive."""
+def test_signal_levels_cannot_outrun_the_audio(cdsp):
+    """The stream follows the audio, so it cannot run faster than chunks arrive.
+
+    This is the sharp half of the cadence claim, and it holds on any machine: a busy one
+    delivers the events later, never sooner.
+    """
     client = subscribed(cdsp, "SubscribeSignalLevels", "capture")
     times = [when for when, _ in client.recv_events(10)]
     # The pacer catches a backlog up in a burst, so a single gap can be half a chunk
-    # while the next is one and a half. Only the total over several is steady, and it is
-    # the lower bound that says the stream follows the audio instead of spinning.
+    # while the next is one and a half. Only the total over several is steady.
     elapsed = times[-1] - times[0]
     assert elapsed > (len(times) - 1) * CHUNK_S * 0.8
+    client.stop_subscription()
+
+
+@pytest.mark.pacing
+def test_signal_levels_keep_up_with_the_audio(cdsp):
+    """And the stream does not lag far behind the chunks either.
+
+    The other half, and the one that measures the machine as much as the code: a runner
+    that cannot keep up delivers the same events over a longer time. It failed on a macos
+    runner at 3.6 times the chunk cadence, so it is marked and runs on Linux only.
+    """
+    client = subscribed(cdsp, "SubscribeSignalLevels", "capture")
+    times = [when for when, _ in client.recv_events(10)]
+    elapsed = times[-1] - times[0]
     assert elapsed < (len(times) - 1) * CHUNK_S * 3
     client.stop_subscription()
 

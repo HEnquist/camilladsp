@@ -82,7 +82,9 @@ are readable keys like any other. The listener is owned by the device, so it die
 reload and nothing carries over between tests.
 
 Tests that assert on timing accuracy, rather than merely taking time, carry the `pacing` marker,
-and CI runs them on Linux only. The rate control loop and the buffer accounting are portable code
+and CI runs them on Linux only. Where a test makes two claims and only one of them is about the
+machine keeping up, split it rather than marking the pair: the level stream's cadence is two tests
+for that reason, a lower bound that holds anywhere and an upper bound that does not. The rate control loop and the buffer accounting are portable code
 with no `cfg` in them, so a second and third runner would only be measuring their own schedulers,
 and the Windows one sleeps in steps of about 15 ms. Everything unmarked runs on all three, and
 `test_dummy_smoke.py` checks the pacer against the clock everywhere. Run them locally with
