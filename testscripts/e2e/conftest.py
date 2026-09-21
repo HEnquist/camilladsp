@@ -47,11 +47,14 @@ class CamillaDsp:
         self.port = port
         self.pid = process.pid
 
-    def send(self, command, value=None):
-        return self.client.send(command, value)
+    def send(self, command, value=None, **fields):
+        return self.client.send(command, value, **fields)
 
-    def send_raw(self, command, value=None):
-        return self.client.send_raw(command, value)
+    def send_raw(self, command, value=None, **fields):
+        return self.client.send_raw(command, value, **fields)
+
+    def send_text(self, text):
+        return self.client.send_text(text)
 
     def poll_until(self, command, expected, timeout=10.0):
         return self.client.poll_until(command, expected, timeout=timeout)
@@ -81,18 +84,42 @@ def camilladsp_bin():
 
 
 @pytest.fixture
-def start_cdsp(camilladsp_bin):
-    """Factory that starts CamillaDSP and cleans it up when the test is done."""
+def spawn_cdsp(camilladsp_bin):
+    """Factory that starts CamillaDSP without waiting for anything.
+
+    Only needed by tests where the process is not expected to come up at all, such as
+    the bad config cases. Everything else wants start_cdsp.
+    """
     started = []
 
-    def _start(config="dummy_sine.yml", extra_args=(), wait_for_running=True):
+    def _spawn(config="dummy_sine.yml", extra_args=()):
         port = free_port()
         args = [camilladsp_bin, "-p", str(port), *extra_args]
         if config is not None:
+            # A config given as an absolute path is used as-is, which is what the tests
+            # that build a config in tmp_path rely on.
             args.append(os.path.join(HERE, config))
         # stdout and stderr are inherited, so pytest captures the log and prints it
         # when a test fails.
         process = subprocess.Popen(args)
+        started.append(process)
+        return process, port
+
+    yield _spawn
+
+    for process in started:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=SHUTDOWN_TIMEOUT)
+
+
+@pytest.fixture
+def start_cdsp(spawn_cdsp):
+    """Factory that starts CamillaDSP and cleans it up when the test is done."""
+    started = []
+
+    def _start(config="dummy_sine.yml", extra_args=(), wait_for_running=True):
+        process, port = spawn_cdsp(config, extra_args)
         client = _connect(process, port)
         cdsp = CamillaDsp(process, client, port)
         started.append(cdsp)
@@ -104,6 +131,38 @@ def start_cdsp(camilladsp_bin):
 
     for cdsp in started:
         _teardown(cdsp)
+
+
+@pytest.fixture
+def config_file(tmp_path):
+    """Factory that writes an edited copy of a test config and returns its path.
+
+    Tests that need a config variant build it from one of the checked in ones rather
+    than carrying a near duplicate file, so a change to the base config cannot leave a
+    variant behind. The replacements are asserted, so a typo fails loudly instead of
+    silently testing the unedited config.
+    """
+    count = [0]
+
+    def _write(replacements=None, base="dummy_sine.yml", path=None):
+        """Write an edited copy of `base`, to `path` if given, and return the path.
+
+        Passing a path that was handed out earlier rewrites that file in place, which is
+        what the tests that edit the config on disk under a running engine need.
+        """
+        with open(os.path.join(HERE, base)) as conf:
+            text = conf.read()
+        for old, new in (replacements or {}).items():
+            assert old in text, f"'{old}' is not in {base}"
+            text = text.replace(old, new)
+        if path is None:
+            count[0] += 1
+            path = str(tmp_path / f"config{count[0]}.yml")
+        with open(path, "w") as conf:
+            conf.write(text)
+        return str(path)
+
+    return _write
 
 
 @pytest.fixture

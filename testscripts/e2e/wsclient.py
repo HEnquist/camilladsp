@@ -32,26 +32,30 @@ class Client:
     def __init__(self, port, host="127.0.0.1", timeout=10.0):
         self._ws = create_connection(f"ws://{host}:{port}", timeout=timeout)
 
-    def send(self, command, value=None):
+    def send(self, command, value=None, **fields):
         """Send a command and return its value, or None for commands without one.
+
+        Extra named fields are passed straight through, which is what the fader commands
+        need: send("SetFaderVolume", -3.0, fader=1).
 
         Raises CommandError if the result is not Ok.
         """
-        message = {"command": command}
-        if value is not None:
-            message["value"] = value
-        self._ws.send(json.dumps(message))
-        reply = json.loads(self._ws.recv())
+        reply = self.send_raw(command, value, **fields)
         if reply.get("result") != "Ok":
             raise CommandError(command, reply)
         return reply.get("value")
 
-    def send_raw(self, command, value=None):
+    def send_raw(self, command, value=None, **fields):
         """Send a command and return the whole reply, without raising on an error result."""
-        message = {"command": command}
+        message = {"command": command, **fields}
         if value is not None:
             message["value"] = value
         self._ws.send(json.dumps(message))
+        return json.loads(self._ws.recv())
+
+    def send_text(self, text):
+        """Send a raw string and return the raw reply, for malformed input tests."""
+        self._ws.send(text)
         return json.loads(self._ws.recv())
 
     def poll_until_true(self, command, predicate, timeout=10.0, interval=0.02):

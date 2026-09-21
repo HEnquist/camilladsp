@@ -4,6 +4,9 @@ Start the real binary on a dummy to dummy config, let it run for a few seconds, 
 what it reports over the websocket, and shut it down. This is the cheapest end-to-end
 signal there is: it covers process startup, the supervisor, the engine loop, both
 devices, the pipeline and the whole control plane in one go.
+
+Lifecycle and shutdown live in test_lifecycle.py; what is left here is the devices
+themselves.
 """
 
 import time
@@ -48,19 +51,33 @@ def test_dummy_devices_are_supported(cdsp):
     assert "Dummy" in capture_types
 
 
-def test_exit_is_clean(cdsp):
-    """Exit should shut the process down with the clean exit code."""
-    assert cdsp.exit() == 0
+@pytest.mark.parametrize("samplerate", [44100, 48000, 96000, 192000])
+def test_capture_rate_is_measured_at_every_rate(start_cdsp, config_file, samplerate):
+    """The measured rate should follow the configured one, not just at 48 kHz."""
+    cdsp = start_cdsp(config=config_file({"samplerate: 48000": f"samplerate: {samplerate}"}))
+    # The first value published can come from a partial measurement window and read
+    # low, so this polls for the rate to arrive rather than for it to be nonzero. A
+    # rate that never gets there fails as a timeout naming the value it was stuck at.
+    cdsp.poll_until_true(
+        "GetCaptureRate", lambda rate: rate == pytest.approx(samplerate, rel=0.05), timeout=8.0
+    )
 
 
-def test_stop_returns_to_inactive(start_cdsp):
-    """With --wait, Stop should close the devices but leave the process alive.
+@pytest.mark.parametrize("chunksize", [128, 4096])
+def test_other_chunksizes_run(start_cdsp, config_file, chunksize):
+    """Chunk size changes the pacing granularity, so run the extremes of it."""
+    cdsp = start_cdsp(config=config_file({"chunksize: 1024": f"chunksize: {chunksize}"}))
+    cdsp.poll_until_true(
+        "GetCaptureRate", lambda rate: rate == pytest.approx(SAMPLERATE, rel=0.05), timeout=8.0
+    )
+    assert cdsp.send("GetState") == "Running"
 
-    Without --wait the supervisor exits once Stop clears the active config, so the
-    waiting behaviour only exists in this mode.
-    """
-    cdsp = start_cdsp(extra_args=["--wait"])
-    cdsp.send("Stop")
-    cdsp.poll_until("GetState", "Inactive")
-    assert cdsp.is_running()
-    assert cdsp.exit() == 0
+
+def test_eight_channels_through_a_mixer(start_cdsp):
+    """Two channels in, eight out, to prove the pipeline is not hardwired to stereo."""
+    cdsp = start_cdsp(config="dummy_mixer.yml")
+    assert cdsp.send("GetState") == "Running"
+    levels = cdsp.poll_until_true(
+        "GetPlaybackSignalPeak", lambda peaks: peaks and max(peaks) > -100.0
+    )
+    assert len(levels) == 8
