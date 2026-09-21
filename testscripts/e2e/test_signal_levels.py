@@ -5,6 +5,11 @@ computed value rather than against "something nonzero", so these are sharp tests
 
 The base config captures a 1 kHz sine at -6 dBFS and runs it through a -6 dB gain
 filter. A sine's RMS is 3.01 dB below its peak, which gives the four numbers below.
+
+Every level getter returns an empty list until the first record lands,
+`src/websocket_server/utils.rs:476`, not only the since-last ones. So a predicate here
+has to check the list before indexing it, and a predicate built on `all()` has to check
+it too, since `all([])` is True and would report silence as soon as the engine starts.
 """
 
 import pytest
@@ -93,7 +98,8 @@ def test_levels_since_the_last_call(cdsp, command, expected):
 def test_all_levels_in_one_request(cdsp):
     """GetSignalLevels has to agree with the four getters it bundles."""
     both = cdsp.poll_until_true(
-        "GetSignalLevels", lambda value: value["capture_peak"][0] > -100.0
+        "GetSignalLevels",
+        lambda value: value["capture_peak"] and value["capture_peak"][0] > -100.0,
     )
     assert_close(both["capture_peak"], CAPTURE_PEAK_DB)
     assert_close(both["capture_rms"], CAPTURE_RMS_DB)
@@ -124,7 +130,8 @@ def test_all_levels_since_the_last_call(cdsp):
 def test_peaks_since_start_are_amplitudes(cdsp):
     """This one reports linear amplitude, unlike every other level getter."""
     peaks = cdsp.poll_until_true(
-        "GetSignalPeaksSinceStart", lambda value: value["capture"][0] > 0.0
+        "GetSignalPeaksSinceStart",
+        lambda value: value["capture"] and value["capture"][0] > 0.0,
     )
     # -6 dBFS is an amplitude of 0.501, and -12 dBFS is 0.251.
     assert peaks["capture"] == pytest.approx([0.501, 0.501], abs=0.01)
@@ -133,18 +140,24 @@ def test_peaks_since_start_are_amplitudes(cdsp):
 
 def test_resetting_the_peaks_since_start(cdsp):
     """After a reset the peaks have to climb back up from silence."""
-    cdsp.poll_until_true("GetSignalPeaksSinceStart", lambda value: value["capture"][0] > 0.0)
+    cdsp.poll_until_true(
+        "GetSignalPeaksSinceStart",
+        lambda value: value["capture"] and value["capture"][0] > 0.0,
+    )
     cdsp.send("SetMute", True)
     # Wait out the volume ramp, otherwise the reset catches the tail of it.
     cdsp.poll_until_true(
-        "GetPlaybackSignalPeak", lambda peaks: all(peak < -100.0 for peak in peaks), timeout=5.0
+        "GetPlaybackSignalPeak",
+        lambda peaks: peaks and all(peak < -100.0 for peak in peaks),
+        timeout=5.0,
     )
     cdsp.send("ResetSignalPeaksSinceStart")
     peaks = cdsp.send("GetSignalPeaksSinceStart")
     assert max(peaks["playback"]) < 0.01
     # The capture side is upstream of the fader, so it keeps climbing.
     assert cdsp.poll_until_true(
-        "GetSignalPeaksSinceStart", lambda value: value["capture"][0] > 0.4
+        "GetSignalPeaksSinceStart",
+        lambda value: value["capture"] and value["capture"][0] > 0.4,
     )
 
 

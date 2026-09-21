@@ -36,7 +36,11 @@ def test_status_getters(cdsp):
     cdsp.poll_until_true("GetCaptureRate", lambda rate: rate > 0)
     assert cdsp.send("GetVersion")
     assert cdsp.send("GetStopReason") == "None"
-    assert 0.0 <= cdsp.send("GetProcessingLoad") < 1.0
+    # A percentage, not a fraction: 100 * chunk processing time / chunk duration,
+    # `src/pipeline.rs:658`, and not clamped, so a run that cannot keep up reads above
+    # 100. Two filters on 1024 frames is a fraction of a percent on any machine that
+    # can run this suite, but how small is a property of the runner, not of the code.
+    assert 0.0 <= cdsp.send("GetProcessingLoad") < 100.0
     # A sine at -6 dBFS swings between -0.5 and +0.5, so the range is 1.0.
     assert cdsp.send("GetSignalRange") == pytest.approx(1.0, abs=0.05)
     # The dummy playback device prefills to target_level, which defaults to chunksize,
