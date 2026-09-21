@@ -142,3 +142,13 @@ codegen-units = 1
 [profile.release-fast]
 inherits = "release"
 codegen-units = 16
+
+# What the end-to-end suite runs, see testscripts/e2e. It has to be optimised: an
+# unoptimised build spends over half a chunk period resampling, and a device that cannot
+# keep up invents underruns and missed deadlines that say nothing about the code. The debug
+# checks stay on, since they cost a few percent on a binary that is otherwise idle and are
+# exactly what a test build wants.
+[profile.e2e]
+inherits = "release-fast"
+debug-assertions = true
+overflow-checks = true

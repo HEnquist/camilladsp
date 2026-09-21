@@ -205,11 +205,13 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
         #[cfg(feature = "dummy-backend")]
         config::PlaybackDevice::Dummy {
             channels,
+            format,
             control_port,
         } => Box::new(dummydevice::DummyPlaybackDevice {
             samplerate,
             chunksize,
             channels: channels.get(),
+            sample_format: format,
             target_level: conf.target_level(),
             adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
@@ -394,6 +396,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         } => Box::new(dummydevice::DummyCaptureDevice {
             signal,
             samplerate: conf.samplerate(),
+            capture_samplerate,
+            resampler_config: conf.resampler,
             channels: channels.get(),
             chunksize: conf.chunksize(),
             silence_threshold: conf.silence_threshold(),

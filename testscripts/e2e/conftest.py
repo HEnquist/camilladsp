@@ -31,10 +31,24 @@ STARTUP_TIMEOUT = 20.0
 SHUTDOWN_TIMEOUT = 10.0
 
 
+# Where a dummy-backend build can end up, most appropriate first. The suite wants the e2e
+# profile, see Cargo.toml for why it is optimised, but a debug build is what someone
+# iterating on the Rust side will have to hand.
+BUILD_PROFILES = ("e2e", "release-fast", "release", "debug")
+
+
 def default_binary():
-    """The debug binary a plain `cargo build --features dummy-backend` produces."""
+    """The most recently built binary among the profiles, or the e2e one if there is none.
+
+    Whichever was built last is the one the caller just built, so both
+    `cargo build --profile e2e --features dummy-backend` and a plain debug build lead to
+    that build being tested rather than to a stale one from the other profile. Set
+    CAMILLADSP_BIN to override the choice entirely.
+    """
     name = "camilladsp.exe" if sys.platform == "win32" else "camilladsp"
-    return os.path.join(REPO_ROOT, "target", "debug", name)
+    paths = [os.path.join(REPO_ROOT, "target", profile, name) for profile in BUILD_PROFILES]
+    built = [path for path in paths if os.path.isfile(path)]
+    return max(built, key=os.path.getmtime) if built else paths[0]
 
 
 def free_port():
@@ -108,7 +122,8 @@ def camilladsp_bin():
     if not os.path.isfile(path):
         pytest.fail(
             f"CamillaDSP binary not found at '{path}'. Build it with "
-            "`cargo build --features dummy-backend`, or point CAMILLADSP_BIN at it."
+            "`cargo build --profile e2e --features dummy-backend`, or point "
+            "CAMILLADSP_BIN at one."
         )
     return path
 

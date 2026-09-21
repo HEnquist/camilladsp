@@ -31,13 +31,19 @@ forwards whatever command name it is handed, so it cannot lag.
 ## Running them
 
 ```sh
-cargo build --features dummy-backend
+cargo build --profile e2e --features dummy-backend
 pip install pytest pytest-timeout websocket-client
 pytest -v testscripts/e2e
 ```
 
-The tests look for `target/debug/camilladsp` by default. Set `CAMILLADSP_BIN` to test a different
-build, for example a release one.
+The `e2e` profile is optimised, and that matters more than it sounds: an unoptimised build spends
+over half a chunk period resampling, and a device that cannot keep up produces underruns and missed
+deadlines that are facts about the build rather than about the code. It keeps the debug assertions
+and overflow checks, which cost a few percent on a binary that is otherwise idle. See Cargo.toml.
+
+The tests find the most recently built binary among the `e2e`, `release-fast`, `release` and `debug`
+profiles, so a plain `cargo build --features dummy-backend` while iterating on the Rust side is
+tested rather than a stale optimised one. `CAMILLADSP_BIN` overrides the choice.
 
 ## Layout
 
@@ -57,6 +63,8 @@ build, for example a release one.
 - `test_dummy_control.py` — the dummy devices' control socket: protocol, counters, lifetime
 - `test_dummy_states.py` — stalled and paused processing, driven from that socket
 - `test_rate_control.py` — the PI controller, the buffer level, and clocks that disagree
+- `test_resampling.py` — the capture side resampler: the types, the load, the rates
+- `test_clipping.py` — the playback's sample format conversion, which is where clipping happens
 - `*.yml` — the configs the tests load
 - `pytest.ini` — the global timeout, which makes every test a hang check, and the `pacing` marker
 
@@ -97,6 +105,15 @@ and the ones in between differ by a whole chunk: average a handful of them, as `
 And a short `adjust_interval_s` converges faster, not slower, since the controller works on the
 error relative to the frames in one interval, so at the 10 s default a buffer error of a chunk or
 two is a rounding error. The tests run at 0.2 s.
+
+A dummy device can also be given the two things a real one does to the audio itself. The capture
+resamples when `capture_samplerate` differs from `samplerate`, and the playback converts each chunk
+to a `format` when it is given one, rather than dropping the audio as it arrives. Those are what
+reach `GetResamplerLoad`, the resampler selection, the capture side of rate adjust and
+`GetClippedSamples`, all of which read as zero on a config without them. `dummy_resample.yml` uses
+the cheap AsyncPoly resampler on purpose: it is a tenth of a percent of a chunk period against a few
+percent for AsyncSinc, which leaves the timing assertions all the headroom there is to have on a
+runner shared with whatever else is on it.
 
 Poll, do not sleep. The status snapshot only refreshes once per update interval, so every status
 getter reads back as zero for the first fraction of a second after the devices start, and a fixed

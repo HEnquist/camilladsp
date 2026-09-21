@@ -13,21 +13,25 @@ Each test starts `camilladsp` as a child process with a config, controls it over
 and shuts it down again.
 It covers the lifecycle and exit codes, the config command surface including rapid config churn,
 volume, mute and the faders, the signal level getters, the spectrum analysis, the pushed event
-subscriptions, the state file, the error paths, the stalled and paused states, and the rate
-control loop.
+subscriptions, the state file, the error paths, the stalled and paused states, the rate
+control loop, the capture side resampler, and the clipping that comes with converting to a
+sample format.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.
 They also need the Python packages `pytest`, `pytest-timeout` and `websocket-client`.
 
 ```sh
-cargo build --features dummy-backend
+cargo build --profile e2e --features dummy-backend
 pip install pytest pytest-timeout websocket-client
 pytest -v testscripts/e2e
 ```
 
-A complete run takes about a minute.
-The tests look for `target/debug/camilladsp`, set `CAMILLADSP_BIN` to test another build.
+A complete run takes a couple of minutes.
+The `e2e` profile is optimised because the devices are paced in real time and an unoptimised
+build cannot keep up with itself, see Cargo.toml.
+The tests use the most recently built binary among the `e2e`, `release-fast`, `release` and
+`debug` profiles, and `CAMILLADSP_BIN` overrides that.
 See `testscripts/e2e/README.md` for the layout, for why the suite is in Python rather than
 Rust, and for what to know before adding tests.
 

@@ -40,8 +40,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The e2e profile is optimised, see Cargo.toml. An unoptimised build cannot
+      # resample a chunk inside a chunk period, and a device that cannot keep up
+      # produces underruns and missed deadlines that say nothing about the code.
       - name: Build with the dummy backend
-        run: cargo build --features dummy-backend
+        run: cargo build --profile e2e --features dummy-backend
 
       - name: Install Python
         uses: actions/setup-python@v6
@@ -51,7 +54,6 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pytest-timeout websocket-client
 
-      # The tests find target/debug/camilladsp on their own, CAMILLADSP_BIN only
-      # overrides that.
+      # The tests find the build above on their own, CAMILLADSP_BIN only overrides that.
       - name: Run the end-to-end tests
         run: pytest -v testscripts/e2e ${{ matrix.pytest_args }}

@@ -621,6 +621,13 @@ pub enum PlaybackDevice {
     #[cfg(feature = "dummy-backend")]
     Dummy {
         channels: NonZeroUsize,
+        /// Sample format to convert each chunk to before discarding it.
+        ///
+        /// Without one the audio is dropped as it arrives, which is cheaper. With one the
+        /// device converts the way a real one does on its way to the hardware, which is
+        /// where clipping happens and where `clipped_samples` comes from.
+        #[serde(default)]
+        format: Option<BinarySampleFormat>,
         /// Port of the test control socket, see `src/dummy_backend/control.rs`.
         #[serde(default)]
         control_port: Option<u16>,

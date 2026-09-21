@@ -26,8 +26,10 @@ use crate::config;
 use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
+use crate::utils::conversions::chunk_to_buffer_rawbytes;
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
+use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::stash::recycle_chunk;
 use crate::{CamillaFloat, ToCamillaFloat};
 
@@ -48,6 +50,25 @@ fn drifted_rate(samplerate: usize, drift_ppm: i32) -> f64 {
     samplerate as f64 * (1.0 + f64::from(drift_ppm) / 1.0e6)
 }
 
+/// The rate the capture device's own clock should run at.
+///
+/// A drift always moves the device clock. A rate adjust only does when there is no
+/// resampler, since with one it is the resample ratio that changes and the device clock
+/// stays where it is, which is the same split the real backends make.
+fn capture_clock_rate(
+    samplerate: usize,
+    drift_ppm: i32,
+    rate_adjust: f64,
+    resampling: bool,
+) -> f64 {
+    let speed = if resampling || rate_adjust <= 0.0 {
+        1.0
+    } else {
+        rate_adjust
+    };
+    speed * drifted_rate(samplerate, drift_ppm)
+}
+
 /// Convert a measured value into the processing precision.
 fn camilla_float(value: f32) -> CamillaFloat {
     f64::from(value).to_camilla_float()
@@ -56,6 +77,8 @@ fn camilla_float(value: f32) -> CamillaFloat {
 pub struct DummyCaptureDevice {
     pub chunksize: usize,
     pub samplerate: usize,
+    pub capture_samplerate: usize,
+    pub resampler_config: Option<config::Resampler>,
     pub channels: usize,
     pub signal: config::Signal,
     pub silence_threshold: f64,
@@ -67,6 +90,7 @@ pub struct DummyPlaybackDevice {
     pub chunksize: usize,
     pub samplerate: usize,
     pub channels: usize,
+    pub sample_format: Option<config::BinarySampleFormat>,
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
@@ -83,6 +107,8 @@ struct CaptureParams {
     channels: usize,
     chunksize: usize,
     samplerate: usize,
+    capture_samplerate: usize,
+    async_src: bool,
     signal: config::Signal,
     silence_threshold: f64,
     silence_timeout: f64,
@@ -94,6 +120,7 @@ struct PlaybackParams {
     channels: usize,
     chunksize: usize,
     samplerate: usize,
+    sample_format: Option<config::BinarySampleFormat>,
     target_level: usize,
     adjust_period: f32,
     enable_rate_adjust: bool,
@@ -101,7 +128,11 @@ struct PlaybackParams {
     control: Arc<DummyControl>,
 }
 
-fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
+fn capture_loop(
+    params: CaptureParams,
+    msg_channels: CaptureChannels,
+    mut resampler: Option<ChunkResampler>,
+) {
     debug!("starting dummy capture loop");
     let mut chunk_stats = ChunkStats {
         rms: vec![0.0; params.channels],
@@ -109,16 +140,23 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
-    let mut generator = SignalSource::new(&params.signal, params.samplerate);
-    let mut pacer = Pacer::new(params.samplerate);
+    // Everything on the device side of the resampler runs at the capture rate: the signal
+    // is generated at it, so the tone keeps its frequency in Hz, and the pacer counts the
+    // frames the device really produces rather than the ones it hands on.
+    let mut generator = SignalSource::new(&params.signal, params.capture_samplerate);
+    let mut pacer = Pacer::new(params.capture_samplerate);
     let mut averager = countertimer::TimeAverage::new();
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,
-        params.samplerate,
+        params.capture_samplerate,
         params.chunksize,
     );
-    let max_deficit = (MAX_DEFICIT_CHUNKS * params.chunksize) as f64;
+    // One chunk of frames measured on the capture side of the resampler, which is what the
+    // pacer counts, so the deficit limit means the same eight chunks of time either way.
+    let capture_chunk_frames =
+        params.chunksize as f64 * params.capture_samplerate as f64 / params.samplerate as f64;
+    let max_deficit = MAX_DEFICIT_CHUNKS as f64 * capture_chunk_frames;
     let chunk_duration =
         Duration::from_secs_f64(params.chunksize as f64 / params.samplerate as f64);
     let mut state = ProcessingState::Running;
@@ -141,12 +179,35 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed: new_speed }) => {
-                // There is no resampler here, so the device does what a clock-slave
-                // device does and runs its own clock faster or slower. That is the same
-                // shape as the ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
                 trace!("Dummy capture setting speed to {new_speed}");
                 rate_adjust = new_speed;
-                pacer.set_rate(rate_adjust * drifted_rate(params.samplerate, drift_ppm));
+                match &mut resampler {
+                    Some(resampl) => {
+                        if params.async_src {
+                            // The ratio is what changes, exactly as in the file backend
+                            // at `src/file_backend/device.rs:441`.
+                            if resampl
+                                .set_resample_ratio_relative(new_speed, true)
+                                .is_err()
+                            {
+                                debug!("Failed to set resampling speed to {new_speed}");
+                            }
+                        } else {
+                            warn!(
+                                "Requested rate adjust of synchronous resampler. Ignoring request."
+                            );
+                        }
+                    }
+                    // With no resampler the device does what a clock-slave device does and
+                    // runs its own clock faster or slower. That is the same shape as the
+                    // ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
+                    None => pacer.set_rate(capture_clock_rate(
+                        params.capture_samplerate,
+                        drift_ppm,
+                        rate_adjust,
+                        false,
+                    )),
+                }
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
@@ -178,20 +239,31 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
         if requested_drift != drift_ppm {
             drift_ppm = requested_drift;
             debug!("Dummy capture clock set to {drift_ppm} ppm off nominal");
-            let speed = if rate_adjust > 0.0 { rate_adjust } else { 1.0 };
-            pacer.set_rate(speed * drifted_rate(params.samplerate, drift_ppm));
+            pacer.set_rate(capture_clock_rate(
+                params.capture_samplerate,
+                drift_ppm,
+                rate_adjust,
+                resampler.is_some(),
+            ));
         }
 
+        // A resampler asks for however many frames it needs to fill one output chunk,
+        // and that count moves with the ratio, so it is read per iteration the way
+        // `nbr_capture_bytes` does in the file backend.
+        let capture_frames = match &resampler {
+            Some(resampl) => resampl.resampler.input_frames_next(),
+            None => params.chunksize,
+        };
         // A real device hands over a chunk once it has captured every frame in it,
         // so wait until the whole chunk is due before generating it.
-        pacer.advance(params.chunksize);
+        pacer.advance(capture_frames);
         pacer.wait_for_backlog_below(0.0);
         if pacer.resync_if_behind(max_deficit) {
             params.control.count_resync();
             warn!("Dummy capture fell behind and dropped the backlog, as an overrun would");
         }
 
-        let mut waveforms = generator.waveforms(params.channels, params.chunksize);
+        let mut waveforms = generator.waveforms(params.channels, capture_frames);
         if params.control.silenced() {
             // Zero the samples rather than skipping generation, so the phase carries on
             // where it left off when the signal comes back.
@@ -199,8 +271,8 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
                 waveform.fill(0.0);
             }
         }
-        let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
-        params.control.add_frames(params.chunksize);
+        let mut chunk = AudioChunk::new(waveforms, 1.0, -1.0, capture_frames, capture_frames);
+        params.control.add_frames(capture_frames);
 
         chunk.update_stats(&mut chunk_stats);
         crate::push_capture_audio_buffer(&params.capture_status, &chunk);
@@ -215,7 +287,9 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
         let peak = chunk_stats.peak.iter().copied().fold(0.0f32, f32::max);
         let value_range = 2.0 * peak;
 
-        averager.add_value(params.chunksize);
+        // Counted on the capture side too, so the measured rate is the rate the device
+        // is really running at and not the rate it feeds the pipeline at.
+        averager.add_value(capture_frames);
         if let Some(mut capture_status) = params.capture_status.try_write()
             && averager.larger_than_millis(capture_status.update_interval as u64)
         {
@@ -246,6 +320,9 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
             continue;
         }
 
+        if let Some(resampl) = &mut resampler {
+            resampl.resample_chunk(&mut chunk, params.chunksize, params.channels);
+        }
         let msg = AudioMessage::Audio(chunk);
         if msg_channels.audio.send(msg).is_err() {
             info!("Processing thread has already stopped.");
@@ -288,11 +365,18 @@ fn playback_loop(
     );
     let mut timer = countertimer::Stopwatch::new();
     let mut buffer_avg = countertimer::Averager::new();
+    // A real device converts every chunk to the format the hardware wants on its way out,
+    // which is where clipping happens. Without a format configured the audio is dropped as
+    // it arrives, which is what the rest of the suite wants and is one copy cheaper.
+    let mut convert_buffer = params
+        .sample_format
+        .map(|format| vec![0u8; params.chunksize * params.channels * format.bytes_per_sample()]);
 
     loop {
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
-                params.control.add_frames(chunk.frames);
+                let frames = chunk.frames;
+                params.control.add_frames(frames);
                 if params.control.stalled() {
                     // A stalled device keeps taking chunks and throws them away, the way
                     // a real one does once it has been reset, so the queue does not back
@@ -307,12 +391,27 @@ fn playback_loop(
                 }
                 chunk.update_stats(&mut chunk_stats);
                 crate::push_playback_audio_buffer(&params.playback_status, &chunk);
+                // The conversion consumes the chunk and returns its buffers to the stash,
+                // the same way a real playback device does. Without a format there is
+                // nothing to convert, so the chunk is handed back here instead: either way
+                // the capture side reuses these buffers rather than allocating a fresh set
+                // for every chunk.
+                let nbr_clipped = match (&mut convert_buffer, &params.sample_format) {
+                    (Some(buffer), Some(format)) => {
+                        let (_bytes, clipped) = chunk_to_buffer_rawbytes(chunk, buffer, format);
+                        clipped
+                    }
+                    _ => {
+                        recycle_chunk(chunk);
+                        0
+                    }
+                };
                 crate::update_playback_signal_status(
                     &params.playback_status,
                     &chunk_stats,
                     &mut rms_values,
                     &mut peak_values,
-                    0,
+                    nbr_clipped,
                 );
                 // What is waiting behind this chunk is as much a part of the delay
                 // as what is already in the buffer, so it counts towards the level, as
@@ -330,7 +429,7 @@ fn playback_loop(
                         let level = pacer.backlog().max(0.0) + queued;
                         // Block until there is room in the buffer, which is what a
                         // real device does when its own is full.
-                        pacer.advance(chunk.frames);
+                        pacer.advance(frames);
                         pacer.wait_for_backlog_below(buffer_size);
                         if pacer.resync_if_behind(max_deficit) {
                             params.control.count_resync();
@@ -341,7 +440,7 @@ fn playback_loop(
                         level
                     }
                     None => {
-                        prefilled += chunk.frames;
+                        prefilled += frames;
                         if prefilled >= params.target_level {
                             let mut started = Pacer::new(params.samplerate);
                             started.advance(prefilled);
@@ -381,10 +480,6 @@ fn playback_loop(
                         pacer.set_rate(drifted_rate(params.samplerate, drift_ppm));
                     }
                 }
-                // The buffers themselves go back to the stash, the same way a real
-                // playback device returns them after converting a chunk. Without this
-                // the capture side allocates a new set for every chunk.
-                recycle_chunk(chunk);
             }
             Ok(AudioMessage::Pause) => {
                 params.control.count_pause();
@@ -409,9 +504,12 @@ impl CaptureDevice for DummyCaptureDevice {
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
         capture_status: Arc<RwLock<CaptureStatus>>,
-        _processing_params: Arc<ProcessingParameters>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let samplerate = self.samplerate;
+        let capture_samplerate = self.capture_samplerate;
+        let resampler_config = self.resampler_config;
+        let async_src = resampler_is_async(&resampler_config);
         let chunksize = self.chunksize;
         let channels = self.channels;
         let signal = self.signal;
@@ -422,6 +520,16 @@ impl CaptureDevice for DummyCaptureDevice {
         let handle = thread::Builder::new()
             .name("DummyCapture".to_string())
             .spawn(move || {
+                // Built here rather than in `start`, so the resampler lives on the thread
+                // that uses it, as in the other backends.
+                let resampler = new_resampler(
+                    &resampler_config,
+                    channels,
+                    samplerate,
+                    capture_samplerate,
+                    chunksize,
+                    processing_params,
+                );
                 // The listener lives for as long as the device does, and releases the
                 // port on every way out of the loop below.
                 let listener = ControlListener::start(control_port, "capture");
@@ -429,6 +537,8 @@ impl CaptureDevice for DummyCaptureDevice {
                     channels,
                     chunksize,
                     samplerate,
+                    capture_samplerate,
+                    async_src,
                     signal,
                     silence_threshold,
                     silence_timeout,
@@ -444,7 +554,7 @@ impl CaptureDevice for DummyCaptureDevice {
                     status: status_channel,
                     command: command_channel,
                 };
-                capture_loop(params, msg_channels);
+                capture_loop(params, msg_channels, resampler);
             })
             .unwrap();
         Ok(Box::new(handle))
@@ -462,6 +572,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
+        let sample_format = self.sample_format;
         let target_level = self.target_level;
         let adjust_period = self.adjust_period;
         let enable_rate_adjust = self.enable_rate_adjust;
@@ -477,6 +588,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     channels,
                     chunksize,
                     samplerate,
+                    sample_format,
                     target_level,
                     adjust_period,
                     enable_rate_adjust,
@@ -502,5 +614,41 @@ impl PlaybackDevice for DummyPlaybackDevice {
             })
             .unwrap();
         Ok(Box::new(handle))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::capture_clock_rate;
+
+    fn assert_rate(rate: f64, expected: f64) {
+        assert!(
+            (rate - expected).abs() < 1e-6,
+            "rate was {rate}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn a_drift_moves_the_device_clock() {
+        assert_rate(capture_clock_rate(48000, 0, 0.0, false), 48000.0);
+        assert_rate(capture_clock_rate(48000, 1000, 0.0, false), 48048.0);
+        // Also with a resampler, since the drift is the device's own clock running off
+        // nominal and not a request made of it.
+        assert_rate(capture_clock_rate(48000, 1000, 1.001, true), 48048.0);
+    }
+
+    #[test]
+    fn a_rate_adjust_moves_the_clock_only_without_a_resampler() {
+        // No resampler, so the device is its own clock slave and follows the request.
+        assert_rate(capture_clock_rate(48000, 0, 1.001, false), 48048.0);
+        // With one, the resample ratio absorbs the request and the clock stays put.
+        assert_rate(capture_clock_rate(48000, 0, 1.001, true), 48000.0);
+    }
+
+    #[test]
+    fn no_rate_adjust_yet_is_not_a_stopped_clock() {
+        // The adjust reads as exactly zero until the first SetSpeed arrives, which must
+        // not be taken for a request to stop the device.
+        assert_rate(capture_clock_rate(48000, 0, 0.0, false), 48000.0);
     }
 }

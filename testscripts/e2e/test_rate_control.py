@@ -37,6 +37,15 @@ RUNAWAY_PPM = 50000
 
 NO_RATE_ADJUST = {"enable_rate_adjust: true": "enable_rate_adjust: false"}
 
+# The resampler cases below run on dummy_resample.yml, which shares this file's chunk size
+# and target level so the tolerances above carry over unchanged. Its capture runs at 96 kHz
+# into a 48 kHz pipeline, which is what puts a resampler in the path.
+RESAMPLING = "dummy_resample.yml"
+SYNCHRONOUS = {"    type: AsyncPoly\n    interpolation: Cubic": "    type: Synchronous"}
+# Enough drift to empty the buffer inside a few seconds, and still comfortably inside the
+# controller's clamp, so a loop that could act on it would.
+SYNC_DRIFT_PPM = 4000
+
 
 def level_tolerance(target):
     """How far the averaged level may sit from the target and still count as settled.
@@ -48,8 +57,8 @@ def level_tolerance(target):
     return 0.15 * target + CHUNKSIZE
 
 
-def start(control_cdsp, replacements=None):
-    return control_cdsp(replacements=replacements, base="dummy_rate.yml")
+def start(control_cdsp, replacements=None, base="dummy_rate.yml"):
+    return control_cdsp(replacements=replacements, base=base)
 
 
 def average_level(cdsp, samples=8, interval=0.03):
@@ -205,3 +214,51 @@ def test_a_settled_session_recovers_from_a_disturbance(control_cdsp):
 
     wait_for_level(cdsp, TARGET_LEVEL, timeout=30.0)
     assert cdsp.send("GetState") == "Running"
+
+
+@pytest.mark.parametrize(
+    "device,drift_ppm",
+    [("playback", DRIFT_PPM), ("capture", DRIFT_PPM), ("capture", -DRIFT_PPM)],
+)
+def test_rate_adjust_through_an_async_resampler(control_cdsp, device, drift_ppm):
+    """The same loop, with an asynchronous resampler answering SetSpeed instead of a clock.
+
+    This is the case every real backend runs: the capture device's clock is not ours to
+    change, so the correction goes into the resample ratio,
+    `src/utils/resampling.rs:set_resample_ratio_relative`. The test above covers the other
+    shape, where there is no resampler and the device slews its own clock instead. Both have
+    to settle at the same correction, since what the controller sees is the same buffer.
+    """
+    cdsp = start(control_cdsp, base=RESAMPLING)
+    wait_for_level(cdsp, TARGET_LEVEL)
+    wait_for_adjust_to_start(cdsp)
+
+    controls = {"capture": cdsp.capture_control, "playback": cdsp.playback_control}
+    controls[device].set("drift", drift_ppm)
+    expected_ppm = drift_ppm if device == "playback" else -drift_ppm
+    wait_for_adjust(cdsp, expected_ppm)
+    wait_for_level(cdsp, TARGET_LEVEL)
+
+
+def test_a_synchronous_resampler_ignores_rate_adjust(control_cdsp):
+    """A synchronous resampler has a fixed ratio, so it warns and drops the request.
+
+    Nothing then closes the loop: the controller keeps seeing the same error, winds out to
+    its clamp and stays there, and the buffer goes wherever the clocks take it. The drift
+    here is well inside the clamp, so an async resampler would have corrected it and settled,
+    which is what makes the pegged correction the signature of the request being refused
+    rather than of a drift too large to answer.
+    """
+    cdsp = start(control_cdsp, SYNCHRONOUS, base=RESAMPLING)
+    wait_for_adjust_to_start(cdsp)
+    # There is nothing to settle at, so this starts from whatever the prefill left in the
+    # buffer rather than from the target. It only has to be enough to have something to lose.
+    assert average_level(cdsp) > TARGET_LEVEL // 2
+    cdsp.playback_control.set("drift", SYNC_DRIFT_PPM)
+    cdsp.poll_until_true(
+        "GetRateAdjust",
+        lambda speed: abs(speed - 1.0) == pytest.approx(0.005, abs=1e-4),
+        timeout=20.0,
+    )
+    # And the buffer empties anyway, since nothing acted on the request.
+    cdsp.poll_until_true("GetBufferLevel", lambda level: level < TARGET_LEVEL // 4, timeout=25.0)
