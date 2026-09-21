@@ -40,7 +40,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install test dependencies
-        run: pip install pytest websocket-client
+        run: pip install pytest pytest-timeout websocket-client
 
       # The tests find target/debug/camilladsp on their own, CAMILLADSP_BIN only
       # overrides that.

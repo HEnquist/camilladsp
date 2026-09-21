@@ -21,5 +21,6 @@
 //! module and no driver. They are not documented for users and must never be
 //! enabled in a release build.
 
+pub mod control;
 pub mod device;
 pub mod pacer;

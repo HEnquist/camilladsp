@@ -17,11 +17,11 @@ subscriptions, the state file, and the error paths.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.
-They also need the Python packages `pytest` and `websocket-client`.
+They also need the Python packages `pytest`, `pytest-timeout` and `websocket-client`.
 
 ```sh
 cargo build --features dummy-backend
-pip install pytest websocket-client
+pip install pytest pytest-timeout websocket-client
 pytest -v testscripts/e2e
 ```
 

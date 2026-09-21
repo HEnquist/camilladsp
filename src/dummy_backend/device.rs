@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
+use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
 use crate::utils::countertimer;
@@ -44,6 +45,7 @@ pub struct DummyCaptureDevice {
     pub samplerate: usize,
     pub channels: usize,
     pub signal: config::Signal,
+    pub control_port: Option<u16>,
 }
 
 pub struct DummyPlaybackDevice {
@@ -51,6 +53,7 @@ pub struct DummyPlaybackDevice {
     pub samplerate: usize,
     pub channels: usize,
     pub target_level: usize,
+    pub control_port: Option<u16>,
 }
 
 struct CaptureChannels {
@@ -65,6 +68,7 @@ struct CaptureParams {
     samplerate: usize,
     signal: config::Signal,
     capture_status: Arc<RwLock<CaptureStatus>>,
+    control: Arc<DummyControl>,
 }
 
 struct PlaybackParams {
@@ -73,6 +77,7 @@ struct PlaybackParams {
     samplerate: usize,
     target_level: usize,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+    control: Arc<DummyControl>,
 }
 
 fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
@@ -117,11 +122,13 @@ fn capture_loop(params: CaptureParams, msg_channels: CaptureChannels) {
         pacer.advance(params.chunksize);
         pacer.wait_for_backlog_below(0.0);
         if pacer.resync_if_behind(max_deficit) {
+            params.control.count_resync();
             warn!("Dummy capture fell behind and dropped the backlog, as an overrun would");
         }
 
         let waveforms = generator.waveforms(params.channels, params.chunksize);
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, params.chunksize, params.chunksize);
+        params.control.add_frames(params.chunksize);
 
         chunk.update_stats(&mut chunk_stats);
         crate::push_capture_audio_buffer(&params.capture_status, &chunk);
@@ -176,6 +183,7 @@ fn playback_loop(
     loop {
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
+                params.control.add_frames(chunk.frames);
                 chunk.update_stats(&mut chunk_stats);
                 crate::push_playback_audio_buffer(&params.playback_status, &chunk);
                 crate::update_playback_signal_status(
@@ -194,6 +202,7 @@ fn playback_loop(
                         pacer.advance(chunk.frames);
                         pacer.wait_for_backlog_below(params.target_level as f64);
                         if pacer.resync_if_behind(max_deficit) {
+                            params.control.count_resync();
                             warn!(
                                 "Dummy playback fell behind and dropped the backlog, as an underrun would"
                             );
@@ -221,6 +230,7 @@ fn playback_loop(
                 recycle_chunk(chunk);
             }
             Ok(AudioMessage::Pause) => {
+                params.control.count_pause();
                 trace!("Pause message received");
             }
             Ok(AudioMessage::EndOfStream) => {
@@ -248,16 +258,21 @@ impl CaptureDevice for DummyCaptureDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let signal = self.signal;
+        let control_port = self.control_port;
 
         let handle = thread::Builder::new()
             .name("DummyCapture".to_string())
             .spawn(move || {
+                // The listener lives for as long as the device does, and releases the
+                // port on every way out of the loop below.
+                let listener = ControlListener::start(control_port, "capture");
                 let params = CaptureParams {
                     channels,
                     chunksize,
                     samplerate,
                     signal,
                     capture_status,
+                    control: listener.control(),
                 };
                 status_channel
                     .send(StatusMessage::CaptureReady)
@@ -287,16 +302,21 @@ impl PlaybackDevice for DummyPlaybackDevice {
         let chunksize = self.chunksize;
         let channels = self.channels;
         let target_level = self.target_level;
+        let control_port = self.control_port;
 
         let handle = thread::Builder::new()
             .name("DummyPlayback".to_string())
             .spawn(move || {
+                // The listener lives for as long as the device does, and releases the
+                // port on every way out of the loop below.
+                let listener = ControlListener::start(control_port, "playback");
                 let params = PlaybackParams {
                     channels,
                     chunksize,
                     samplerate,
                     target_level,
                     playback_status,
+                    control: listener.control(),
                 };
                 status_channel
                     .send(StatusMessage::PlaybackReady)

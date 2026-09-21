@@ -60,6 +60,17 @@ impl Pacer {
         self.frames_moved += frames as u64;
     }
 
+    /// Change the rate the device runs at, keeping the current backlog.
+    ///
+    /// The position is derived from the clock, so the anchor has to move with the rate.
+    /// Without that, a drift or rate adjust change would make the virtual buffer jump.
+    pub fn set_rate(&mut self, rate: f64) {
+        let backlog = self.backlog();
+        self.rate = rate;
+        let frames_due = self.frames_moved as f64 - backlog;
+        self.start = Instant::now() - Duration::from_secs_f64(frames_due / rate);
+    }
+
     /// Sleep until the virtual buffer holds no more than `limit` frames.
     pub fn wait_for_backlog_below(&self, limit: f64) {
         let excess = self.backlog() - limit;
@@ -103,6 +114,18 @@ mod tests {
         pacer.advance(4410);
         pacer.wait_for_backlog_below(0.0);
         assert!(pacer.backlog() <= 0.0);
+    }
+
+    #[test]
+    fn changing_the_rate_keeps_the_backlog() {
+        let mut pacer = Pacer::new(44100);
+        pacer.advance(4410);
+        let before = pacer.backlog();
+        pacer.set_rate(48000.0);
+        assert!((pacer.backlog() - before).abs() < 10.0);
+        // The new rate is what the position now moves at.
+        pacer.advance(48000);
+        assert!((pacer.backlog() - before - 48000.0).abs() < 10.0);
     }
 
     #[test]

@@ -203,11 +203,15 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             polling: dev.is_polling(),
         }),
         #[cfg(feature = "dummy-backend")]
-        config::PlaybackDevice::Dummy { channels } => Box::new(dummydevice::DummyPlaybackDevice {
+        config::PlaybackDevice::Dummy {
+            channels,
+            control_port,
+        } => Box::new(dummydevice::DummyPlaybackDevice {
             samplerate,
             chunksize,
             channels: channels.get(),
             target_level: conf.target_level(),
+            control_port,
         }),
         #[cfg(target_os = "windows")]
         config::PlaybackDevice::Asio(ref dev) => {
@@ -381,12 +385,16 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
         }),
         #[cfg(feature = "dummy-backend")]
         config::CaptureDevice::Dummy {
-            signal, channels, ..
+            signal,
+            channels,
+            control_port,
+            ..
         } => Box::new(dummydevice::DummyCaptureDevice {
             signal,
             samplerate: conf.samplerate(),
             channels: channels.get(),
             chunksize: conf.chunksize(),
+            control_port,
         }),
         #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio(ref dev) => {

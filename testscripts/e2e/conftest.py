@@ -13,12 +13,17 @@ import time
 import pytest
 from websocket import WebSocketException
 
+from dummyctl import Control
 from wsclient import Client
 
 # The configs live next to the tests. A `configs/` subdirectory would be nicer, but the
 # repo .gitignore excludes that name everywhere.
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+# The control_port values in dummy_control.yml, which every test replaces with a free one.
+CAPTURE_PORT_PLACEHOLDER = "control_port: 11111"
+PLAYBACK_PORT_PLACEHOLDER = "control_port: 22222"
 
 # How long to wait for the websocket server to accept a connection after the spawn.
 STARTUP_TIMEOUT = 20.0
@@ -186,6 +191,30 @@ def config_file(tmp_path):
         return str(path)
 
     return _write
+
+
+@pytest.fixture
+def control_cdsp(start_cdsp, config_file):
+    """Factory for a CamillaDSP whose dummy devices have a control socket each.
+
+    The ports in the config are placeholders, replaced here with ports the OS says are
+    free so concurrent runs do not collide. The handle gets a `capture_control` and a
+    `playback_control`, see dummyctl.py.
+    """
+
+    def _start(replacements=None, base="dummy_control.yml", **kwargs):
+        ports = {"capture": free_port(), "playback": free_port()}
+        edits = {
+            CAPTURE_PORT_PLACEHOLDER: f"control_port: {ports['capture']}",
+            PLAYBACK_PORT_PLACEHOLDER: f"control_port: {ports['playback']}",
+        }
+        edits.update(replacements or {})
+        cdsp = start_cdsp(config=config_file(edits, base=base), **kwargs)
+        cdsp.capture_control = Control(ports["capture"])
+        cdsp.playback_control = Control(ports["playback"])
+        return cdsp
+
+    return _start
 
 
 @pytest.fixture

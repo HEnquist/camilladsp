@@ -376,6 +376,9 @@ pub enum CaptureDevice {
         signal: Signal,
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
+        /// Port of the test control socket, see `src/dummy_backend/control.rs`.
+        #[serde(default)]
+        control_port: Option<u16>,
     },
 }
 
@@ -616,7 +619,12 @@ pub enum PlaybackDevice {
     Asio(PlaybackDeviceAsio),
     /// Test-only paced playback device, see `src/dummy_backend`.
     #[cfg(feature = "dummy-backend")]
-    Dummy { channels: NonZeroUsize },
+    Dummy {
+        channels: NonZeroUsize,
+        /// Port of the test control socket, see `src/dummy_backend/control.rs`.
+        #[serde(default)]
+        control_port: Option<u16>,
+    },
 }
 
 impl PlaybackDevice {
@@ -635,7 +643,7 @@ impl PlaybackDevice {
             #[cfg(target_os = "windows")]
             PlaybackDevice::Asio(dev) => dev.channels.get(),
             #[cfg(feature = "dummy-backend")]
-            PlaybackDevice::Dummy { channels } => channels.get(),
+            PlaybackDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 }

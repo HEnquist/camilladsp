@@ -32,7 +32,7 @@ forwards whatever command name it is handed, so it cannot lag.
 
 ```sh
 cargo build --features dummy-backend
-pip install pytest websocket-client
+pip install pytest pytest-timeout websocket-client
 pytest -v testscripts/e2e
 ```
 
@@ -43,6 +43,7 @@ build, for example a release one.
 
 - `conftest.py` — the fixtures that spawn the binary, wait for its websocket, and tear it down
 - `wsclient.py` — a small raw JSON websocket client, deliberately not pyCamillaDSP
+- `dummyctl.py` — a client for the dummy devices' control socket, which is the fake hardware
 - `test_dummy_smoke.py` — the dummy devices themselves: pacing, rates, chunk sizes, channels
 - `test_lifecycle.py` — startup, shutdown, exit codes and signals
 - `test_config_commands.py` — reading, writing, patching and validating configs
@@ -53,7 +54,9 @@ build, for example a release one.
 - `test_errors.py` — malformed input and the other unhappy paths
 - `test_spectrum.py` — `GetSpectrum` and `SubscribeSpectrum` against a known tone
 - `test_subscriptions.py` — the pushed level, VU and state event streams
+- `test_dummy_control.py` — the dummy devices' control socket: protocol, counters, lifetime
 - `*.yml` — the configs the tests load
+- `pytest.ini` — the global timeout, which makes every test a hang check as well
 
 ## Writing more
 
@@ -67,6 +70,14 @@ and drives the engine at the same time needs two connections. `cdsp.new_client()
 one, and the subscription goes on that so `cdsp.send` keeps working. On the client side,
 `recv_events` reads pushed events with the time each arrived, and `stop_subscription` ends the
 stream, skipping past any events still in flight ahead of the reply.
+
+A dummy device can be made to misbehave while it is running, through a loopback TCP socket of
+its own, see `src/dummy_backend/control.rs`. A device gets one when its config block carries a
+`control_port`, and `control_cdsp` is the fixture that starts a pair of them on free ports and
+hands back a `capture_control` and a `playback_control`. The protocol is one line in and one line
+out, `stall:1` to write and `stall` to read, and the counters `frames`, `pauses` and `resyncs`
+are readable keys like any other. The listener is owned by the device, so it dies on a config
+reload and nothing carries over between tests.
 
 Poll, do not sleep. The status snapshot only refreshes once per update interval, so every status
 getter reads back as zero for the first fraction of a second after the devices start, and a fixed
