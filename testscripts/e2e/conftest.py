@@ -11,6 +11,7 @@ import sys
 import time
 
 import pytest
+from websocket import WebSocketException
 
 from wsclient import Client
 
@@ -78,8 +79,18 @@ class CamillaDsp:
         return self.process.poll() is None
 
     def exit(self, timeout=SHUTDOWN_TIMEOUT):
-        """Ask CamillaDSP to exit, and return the exit code it left behind."""
-        self.send("Exit")
+        """Ask CamillaDSP to exit, and return the exit code it left behind.
+
+        The reply to Exit can be lost rather than read. The process closes the socket on
+        its way out, and on Windows that arrives as a reset which discards anything
+        still in the receive buffer. The exit code is what this asserts on, so a dead
+        connection here is an expected outcome and not a failure. A command error still
+        propagates, since that means the process was in no state to be asked.
+        """
+        try:
+            self.send("Exit")
+        except (OSError, WebSocketException):
+            pass
         return self.process.wait(timeout=timeout)
 
 

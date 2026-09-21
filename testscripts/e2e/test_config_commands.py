@@ -203,4 +203,6 @@ def test_previous_config_is_kept_when_processing_stops(start_cdsp):
 
     cdsp.send("Stop")
     cdsp.poll_until("GetState", "Inactive")
-    assert "type: Dummy" in cdsp.send("GetPreviousConfig")
+    # Stop stores the previous config after the pipeline is down, `src/engine.rs:166`,
+    # so the state reaches Inactive first and reading it straight away still finds null.
+    cdsp.poll_until_true("GetPreviousConfig", lambda text: "type: Dummy" in text)

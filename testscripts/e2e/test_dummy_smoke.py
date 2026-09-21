@@ -39,8 +39,13 @@ def test_status_getters(cdsp):
     assert 0.0 <= cdsp.send("GetProcessingLoad") < 1.0
     # A sine at -6 dBFS swings between -0.5 and +0.5, so the range is 1.0.
     assert cdsp.send("GetSignalRange") == pytest.approx(1.0, abs=0.05)
-    # The dummy playback device prefills to target_level, which defaults to chunksize.
-    assert 0 < cdsp.send("GetBufferLevel") <= 4 * CHUNKSIZE
+    # The dummy playback device prefills to target_level, which defaults to chunksize,
+    # and then publishes `backlog().max(0.0)`, `src/dummy_backend/device.rs:203`. A
+    # runner loaded enough to make the playback run late drives the backlog negative and
+    # the reading to exactly 0, so only the upper bound is a property of the code rather
+    # than of the machine. Asserting the level sits near target_level needs the clock
+    # master, and belongs with the rate adjust tests when those exist.
+    assert 0 <= cdsp.send("GetBufferLevel") <= 4 * CHUNKSIZE
     assert cdsp.send("GetClippedSamples") == 0
 
 
