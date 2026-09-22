@@ -40,7 +40,15 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// How often the listener checks whether the device it belongs to has stopped.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
+///
+/// Also how long a client waits to be accepted, which is what decides how short it has to
+/// be. The accept loop is non-blocking, so a connection arriving just after a sleep starts
+/// waits out the rest of it, and at 50 ms that put a median of 56 ms on every counter read.
+/// Tests that measure a rate by reading a counter twice then carried a whole poll interval
+/// of asymmetry between the two, which is 4 % of a 1.5 s window and reads as a pacing error
+/// rather than as the harness latency it is. A test-only thread waking 500 times a second
+/// costs nothing, and this code is never in a release build.
+const POLL_INTERVAL: Duration = Duration::from_millis(2);
 
 /// How long to keep retrying the bind before giving up and running without control.
 ///

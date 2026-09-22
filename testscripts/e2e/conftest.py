@@ -132,6 +132,60 @@ class CamillaDsp:
         return thread
 
 
+def sample_counter(read):
+    """Read a counter, bracketed by the clock, and return the value, its instant and its error.
+
+    A reading is not an instant. Every counter here is read over a socket, and the dummy
+    control socket opens a fresh connection per command, so the value is sampled somewhere
+    inside a round trip rather than at the moment the test asked. The instant returned is
+    the end of the trip, because that is where the sample actually is: the device reads its
+    counter after accepting the connection and parsing the request, and the expensive part
+    of the trip is the accept in front of that. So the value is from at or before `after`,
+    by at most the width, and the width is what comes back as the error.
+
+    Measured rather than assumed: with the midpoint instead, the same measurement came out
+    twice as far from nominal, which is what says the sample is not in the middle.
+
+    The width is the point of this. The old shape of these tests timed the sleep between two
+    reads and had no way to tell a reading taken promptly from one taken after the machine
+    had been away for 200 ms, and those two produce the same numbers with a different answer.
+    """
+    before = time.monotonic()
+    value = read()
+    after = time.monotonic()
+    return value, after, after - before
+
+
+def measure_rate(read, seconds, tolerance, attempts=4):
+    """How fast a counter advances, measured well enough to be compared against `tolerance`.
+
+    Retries while the readings are too imprecise to say anything at that tolerance, which
+    is what makes this robust against a machine that is temporarily busy rather than
+    permanently slow: a stall during one read costs that attempt and nothing else.
+
+    Giving up raises with the uncertainty named. That is a statement about the runner and
+    reads like one, where the same run under the old shape produced a rate that was wrong
+    by an unknown amount and failed as though the pacing were broken.
+    """
+    uncertainty = None
+    for _ in range(attempts):
+        first, first_at, first_error = sample_counter(read)
+        time.sleep(seconds)
+        second, second_at, second_error = sample_counter(read)
+        span = second_at - first_at
+        # The window's own error, as a fraction of it. Held to a quarter of the tolerance
+        # so the reads contribute a corner of the band rather than most of it. Both reads
+        # count, since either one being late moves the span in its own direction.
+        uncertainty = (first_error + second_error) / span
+        if uncertainty <= tolerance / 4:
+            return (second - first) / span
+    raise AssertionError(
+        f"Could not read the counter promptly enough to measure a rate to {tolerance:.1%}: "
+        f"after {attempts} attempts the reads still bracketed the window to no better than "
+        f"{uncertainty:.1%}, so the machine was too busy to measure rather than too slow to keep up"
+    )
+
+
 @pytest.fixture(scope="session")
 def camilladsp_bin():
     """Path to the binary under test, overridable with CAMILLADSP_BIN."""

@@ -15,7 +15,10 @@ import time
 
 import pytest
 
+from conftest import measure_rate
+
 SAMPLERATE = 48000
+RATE_TOLERANCE = 0.05
 # Long enough for the frame counters to average out the chunk granularity.
 MEASURE_SECONDS = 1.5
 
@@ -80,14 +83,19 @@ def test_counters_are_read_only(controlled):
 
 @pytest.mark.parametrize("device", ["capture", "playback"])
 def test_frames_advance_at_the_nominal_rate(controlled, device):
-    """The frame counters should track real time, since that is what the pacer ties them to."""
+    """The frame counters should track real time, since that is what the pacer ties them to.
+
+    Measured through `measure_rate` rather than a sleep between two reads, because the
+    counter is read over a socket that opens a connection per command. Timing the sleep
+    instead of the reads puts a whole round trip on one end of the window and none on the
+    other, so a busy machine makes this read high or low by however long that trip took,
+    with nothing in the numbers to say it happened.
+    """
     control = both_controls(controlled)[device]
-    first = control.get_int("frames")
-    started = time.monotonic()
-    time.sleep(MEASURE_SECONDS)
-    second = control.get_int("frames")
-    elapsed = time.monotonic() - started
-    assert (second - first) / elapsed == pytest.approx(SAMPLERATE, rel=0.05)
+    rate = measure_rate(
+        lambda: control.get_int("frames"), MEASURE_SECONDS, RATE_TOLERANCE
+    )
+    assert rate == pytest.approx(SAMPLERATE, rel=RATE_TOLERANCE)
 
 
 @pytest.mark.pacing

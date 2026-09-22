@@ -134,6 +134,21 @@ second, the pipe holds 64 kB, and a playback device blocked inside a write never
 `cdsp.exit()` drains it while it waits, and `read_exactly` in `swdevices.py` is how a test takes a
 bounded amount of audio out of a device that never ends.
 
+Measuring a rate needs more care than timing a sleep. A counter here is read over a socket, and
+the dummy control socket opens a connection per command, so the value is sampled somewhere inside
+a round trip rather than when the test asked. `sample_counter` brackets a read with the clock and
+`measure_rate` builds a rate out of two of them, refusing to answer while the reads are too
+imprecise to say anything at the tolerance asked for and retrying instead. That is the difference
+between a reading taken promptly and one taken after the machine was away for 200 ms, which
+otherwise produce the same numbers with different answers. When it does give up, it says how wide
+the reads were, which is a statement about the runner rather than a pacing failure.
+
+The control socket's own latency used to be the largest term in that. Its accept loop is
+non-blocking and sleeps `POLL_INTERVAL` between tries, so a client arriving just after a sleep
+starts waits out the rest of it: at 50 ms that was a median of 56 ms on every counter read, which
+is 4 % of a 1.5 s measurement window before the machine does anything at all. It is 2 ms now, and
+a read is about 3 ms. Worth knowing before adding a test that reads a counter in a loop.
+
 Tests that assert on timing accuracy, rather than merely taking time, carry the `pacing` marker,
 and CI runs them on Linux only. The rate control loop and the buffer accounting are portable code
 with no `cfg` in them, so a second and third runner would only be measuring their own schedulers.

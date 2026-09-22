@@ -20,12 +20,25 @@ RUN_SECONDS = 3.0
 
 
 def test_runs_and_paces_audio(cdsp):
-    """Audio should keep flowing at roughly the nominal rate for the whole run."""
+    """Audio should keep flowing at roughly the nominal rate for the whole run.
+
+    Polled rather than read once. `GetCaptureRate` is measured by the engine over a window
+    of its own, so a machine that takes the CPU away mid-window leaves the pacer a deficit
+    to catch up and that one window reads high, by as much as 12 % on a loaded runner. The
+    next window is clean, because the devices anchor their frame position to the clock
+    rather than counting sleeps, which is exactly why a single reading is the wrong shape
+    and polling is the right one: a pacer that is genuinely off never gets there, and the
+    timeout names the value it was stuck at.
+    """
     time.sleep(RUN_SECONDS)
     assert cdsp.send("GetState") == "Running"
     # The dummy devices derive their frame position from the clock, so a measured rate
     # this close to nominal means the pacing really did track real time.
-    assert cdsp.send("GetCaptureRate") == pytest.approx(SAMPLERATE, rel=0.05)
+    cdsp.poll_until_true(
+        "GetCaptureRate",
+        lambda rate: rate == pytest.approx(SAMPLERATE, rel=0.05),
+        timeout=8.0,
+    )
     assert cdsp.is_running()
 
 
@@ -49,7 +62,11 @@ def test_status_getters(cdsp):
     # the reading to exactly 0, so only the upper bound is a property of the code rather
     # than of the machine. Asserting the level sits near target_level needs the clock
     # master, and belongs with the rate adjust tests when those exist.
-    assert 0 <= cdsp.send("GetBufferLevel") <= 4 * CHUNKSIZE
+    # Polled for the same reason as the rate above: catching a deficit up puts chunks
+    # into the buffer faster than the playback takes them out, so the level overshoots
+    # the bound for a moment on a runner that stalled. What the bound is about is where
+    # the level sits, not what it touches on the way back.
+    cdsp.poll_until_true("GetBufferLevel", lambda level: 0 <= level <= 4 * CHUNKSIZE)
     assert cdsp.send("GetClippedSamples") == 0
 
 

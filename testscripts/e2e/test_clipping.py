@@ -27,6 +27,8 @@ GAIN_DB = 12.0
 # below is a percent or two of it, and the fraction itself is exact.
 WINDOW_SECONDS = 1.0
 FRACTION_TOLERANCE = 0.03
+# How many times to retry a window the machine was too busy to measure. See `counts`.
+ATTEMPTS = 4
 
 # Every format that limits, and both of the 24 in 32 bit justifications. The limit differs
 # between them by a part in 32768 at most, which no sample of this tone lands inside, so
@@ -58,12 +60,24 @@ def start(control_cdsp, replacements=None):
 
 
 def counts(cdsp):
-    """The clipped sample count, and the frame count it was counted over.
+    """The clipped sample count, and the frame count at the instant it was read.
 
-    Read in this order at both ends of a window, so the gap between the two readings is the
-    same at each end and cancels in the difference.
+    The two come from different sockets, so they cannot be read at the same moment, and
+    the earlier version of this read them one after the other and assumed the gap between
+    them was the same at both ends of the window. It is not: the control socket opens a
+    connection per command, and on a loaded runner one gap is a millisecond and the next
+    is two hundred. The frame count then covers a different span to the clipped count and
+    the fraction comes out wrong, high or low depending on which end was slow.
+
+    So the clipped read is bracketed by two frame reads instead, and the frame count at
+    its instant is the midpoint. That makes the pairing as good as the two frame reads are
+    close together, and returns how close that was so the caller can refuse a reading
+    taken while the machine was away.
     """
-    return cdsp.send("GetClippedSamples"), cdsp.playback_control.get_int("frames")
+    before = cdsp.playback_control.get_int("frames")
+    clipped = cdsp.send("GetClippedSamples")
+    after = cdsp.playback_control.get_int("frames")
+    return clipped, (before + after) / 2, (after - before) / 2
 
 
 def wait_for_clipping(cdsp, timeout=10.0):
@@ -94,13 +108,30 @@ def test_clipping_is_counted(control_cdsp, sample_format):
     """
     cdsp = start(control_cdsp, {"format: S16_LE": f"format: {sample_format}"})
     wait_for_clipping(cdsp)
-    clipped, frames = counts(cdsp)
-    time.sleep(WINDOW_SECONDS)
-    clipped_later, frames_later = counts(cdsp)
-    samples = (frames_later - frames) * CHANNELS
-    assert samples > 0, "no audio was played during the window"
-    assert (clipped_later - clipped) / samples == pytest.approx(
-        clipped_fraction(), abs=FRACTION_TOLERANCE
+    for _ in range(ATTEMPTS):
+        clipped, frames, frames_error = counts(cdsp)
+        time.sleep(WINDOW_SECONDS)
+        clipped_later, frames_later, later_error = counts(cdsp)
+        samples = (frames_later - frames) * CHANNELS
+        assert samples > 0, "no audio was played during the window"
+        # What the pairing of the two counters puts on the fraction, in the fraction's own
+        # units: a relative error on the window is a relative error on the result. Held
+        # well under the tolerance so it is a corner of the band rather than most of it,
+        # and retried rather than tolerated, since a busy moment costs one attempt where a
+        # real miscount survives all of them.
+        uncertainty = (
+            clipped_fraction() * (frames_error + later_error) / (frames_later - frames)
+        )
+        if uncertainty <= FRACTION_TOLERANCE / 4:
+            assert (clipped_later - clipped) / samples == pytest.approx(
+                clipped_fraction(), abs=FRACTION_TOLERANCE
+            )
+            return
+    raise AssertionError(
+        f"Could not pair the clipped count with a frame count to better than "
+        f"{uncertainty:.4f} on the fraction in {ATTEMPTS} attempts, against a tolerance of "
+        f"{FRACTION_TOLERANCE}, so the machine was too busy to measure it rather than the "
+        f"count being wrong"
     )
 
 
