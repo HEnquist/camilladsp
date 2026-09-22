@@ -50,10 +50,28 @@ use waveadapter::read_wav_file;
 /// Trait implemented by all single-channel audio filters.
 pub trait Filter {
     /// Apply the filter to `waveform` in place.
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()>;
+    ///
+    /// Infallible. A filter that was accepted at construction cannot start
+    /// failing on a later chunk, and nothing could be done about it part way
+    /// through a chunk in the processing thread if it did.
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]);
 
     /// Hot-reload filter coefficients from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Filter);
+
+    /// Hot-reload as [`Filter::update_parameters`], reusing anything `cache`
+    /// already holds for this filter name.
+    ///
+    /// Only convolution filters have coefficients worth sharing between the
+    /// channels of a step, so every other filter keeps the default and ignores
+    /// the cache.
+    fn update_parameters_cached(
+        &mut self,
+        config: config::Filter,
+        _cache: &mut fftconv::ConvCoeffCache,
+    ) {
+        self.update_parameters(config);
+    }
 
     /// Return the filter's name as given in the configuration.
     fn name(&self) -> &str;
@@ -228,9 +246,20 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<CamillaFloat>> {
 }
 
 /// Validate the filter config, to give a helpful message intead of a panic.
-pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
+///
+/// A convolution filter is validated by reading its impulse response, so the
+/// result of that read is kept in `impulses` rather than thrown away. See
+/// [`fftconv::ImpulseCache`].
+pub fn validate_filter(
+    fs: usize,
+    name: &str,
+    filter_config: &config::Filter,
+    impulses: &mut fftconv::ImpulseCache,
+) -> Res<()> {
     match filter_config {
-        config::Filter::Conv { parameters, .. } => fftconv::validate_config(parameters),
+        config::Filter::Conv { parameters, .. } => {
+            fftconv::validate_config(name, parameters, impulses)
+        }
         config::Filter::Biquad { parameters, .. } => biquad::validate_config(fs, parameters),
         config::Filter::Delay { parameters, .. } => basicfilters::validate_delay_config(parameters),
         config::Filter::Gain { parameters, .. } => basicfilters::validate_gain_config(parameters),
@@ -239,7 +268,7 @@ pub fn validate_filter(fs: usize, filter_config: &config::Filter) -> Res<()> {
         config::Filter::Volume { parameters, .. } => {
             basicfilters::validate_volume_config(parameters)
         }
-        config::Filter::Loudness { parameters, .. } => loudness::validate_config(parameters),
+        config::Filter::Loudness { parameters, .. } => loudness::validate_config(fs, parameters),
         config::Filter::BiquadCombo { parameters, .. } => {
             biquadcombo::validate_config(fs, parameters)
         }

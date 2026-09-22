@@ -38,9 +38,9 @@ Platform-specific audio backends are selected at compile time via feature flags:
 |---------|---------|----------|
 | *(default)* | ALSA | Linux |
 | `pipewire-backend` | PipeWire | Linux |
-| `asio-backend` | ASIO | Windows |
 | *(default)* | CoreAudio | macOS |
 | *(default)* | WASAPI | Windows |
+| *(default)* | ASIO | Windows |
 
 ## Pipeline components
 

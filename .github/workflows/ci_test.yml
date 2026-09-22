@@ -31,17 +31,14 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install PipeWire development files
-        run: sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Install OpenSSL
         run: sudo apt-get install openssl libssl-dev -y
 
       - name: Run cargo check
         run: cargo check
-
-      - name: Run cargo check nodefault
-        run: cargo check --no-default-features
 
       - name: Run cargo test with all supported backends
         run: cargo test --features pipewire-backend
@@ -170,19 +167,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        run: cargo check --no-default-features
+        run: cargo check
 
       - name: Run cargo test
-        run: cargo test --no-default-features
+        run: cargo test
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
-
-      - name: Run cargo clippy with ASIO backend
-        run: cargo clippy --features asio-backend -- -D warnings
 
   check_test_macos:
     name: Check and test macOS Intel
@@ -197,10 +191,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        run: cargo check --no-default-features
+        run: cargo check
 
       - name: Run cargo test
-        run: cargo test --no-default-features
+        run: cargo test
 
   check_test_and_lint_macos_arm:
     name: Check and test macOS Arm
@@ -217,10 +211,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        run: cargo check --no-default-features
+        run: cargo check
 
       - name: Run cargo test
-        run: cargo test --no-default-features
+        run: cargo test
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check

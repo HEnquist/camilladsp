@@ -53,14 +53,34 @@ fn bench_biquad(c: &mut Criterion) {
 /// Bench diffew
 fn bench_diffeq(c: &mut Criterion) {
     let chunksize = 1024;
+    let mut group = c.benchmark_group("DiffEq");
+
     let mut de = DiffEq::new(
         "test",
         vec![1.0, -0.1462978543780541, 0.005350765548905586],
         vec![0.21476322779271284, 0.4295264555854257, 0.21476322779271284],
     );
     let mut waveform = vec![0.0 as CamillaFloat; chunksize];
+    group.bench_function(BenchmarkId::new("order", 2), |b| {
+        b.iter(|| de.process_waveform(&mut waveform))
+    });
 
-    c.bench_function("DiffEq", |b| b.iter(|| de.process_waveform(&mut waveform)));
+    // Higher orders, to also cover the runtime order version.
+    for order in [8, 16] {
+        let mut a = vec![1.0];
+        let mut b_coeffs = Vec::new();
+        for n in 0..order {
+            a.push(0.1 / (n as f64 + 2.0));
+            b_coeffs.push(0.3 / (n as f64 + 1.0));
+        }
+        b_coeffs.push(0.05);
+        let mut de = DiffEq::new("test", a, b_coeffs);
+        let mut waveform = vec![0.0 as CamillaFloat; chunksize];
+        group.bench_function(BenchmarkId::new("order", order), |b| {
+            b.iter(|| de.process_waveform(&mut waveform))
+        });
+    }
+    group.finish();
 }
 
 criterion_group!(benches, bench_conv, bench_biquad, bench_diffeq);

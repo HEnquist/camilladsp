@@ -27,9 +27,6 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install OpenSSL
-        run: sudo apt-get install openssl libssl-dev -y
-
       - name: Build with Alsa only
         run: cargo build --release
 
@@ -52,8 +49,8 @@ jobs:
           asset_name: camilladsp-linux-amd64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Install PipeWire development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Build with PipeWire
         run: cargo build --release --features pipewire-backend
@@ -97,9 +94,6 @@ jobs:
       - name: Install Alsa devel
         run: sudo apt-get install libasound2-dev -y
 
-      - name: Install OpenSSL
-        run: sudo apt-get install openssl libssl-dev -y
-
       - name: Build with Alsa only
         run: cargo build --release
 
@@ -122,8 +116,8 @@ jobs:
           asset_name: camilladsp-linux-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
-      - name: Install PipeWire development files
-        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev -y
+      - name: Install PipeWire and D-Bus development files
+        run: DEBIAN_FRONTEND="noninteractive" sudo apt-get install libpipewire-0.3-dev libdbus-1-dev -y
 
       - name: Build with PipeWire
         run: cargo build --release --features pipewire-backend
@@ -229,28 +223,6 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: camilladsp.zip
           asset_name: camilladsp-windows-amd64.zip
-          tag: ${{ github.event.release.tag_name }}
-
-      - name: Build with ASIO backend
-        run: cargo build --release --features asio-backend
-
-      - name: Compress with ASIO backend
-        run: powershell Compress-Archive target/release/camilladsp.exe camilladsp-asio.zip
-
-      - name: Upload binary artifact with ASIO backend
-        uses: actions/upload-artifact@v6
-        with:
-          name: camilladsp-windows-asio-amd64
-          path: camilladsp-asio.zip
-          retention-days: 14
-
-      - name: Upload binary with ASIO backend to release
-        if: github.event_name == 'release' && github.event.action == 'created'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: camilladsp-asio.zip
-          asset_name: camilladsp-windows-asio-amd64.zip
           tag: ${{ github.event.release.tag_name }}
 
   macos:

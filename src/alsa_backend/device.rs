@@ -20,15 +20,15 @@ use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::rt_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
 use alsa::{Direction, PCM, ValueOr};
 use alsa_sys;
-use audio_thread_priority::{
-    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
-};
 use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -280,10 +280,12 @@ fn capture_buffer(
         );
         pcmdevice.start()?;
     }
-    let millis_per_chunk = 1000 * frames_to_read / params.samplerate;
+    // `frames_to_read` is counted on the capture side, so the wait timeout must be
+    // derived from the capture rate and not the pipeline rate.
+    let millis_per_chunk = 1000.0 * frames_to_read as f32 / params.capture_samplerate as f32;
 
     loop {
-        let mut timeout_millis = 8 * millis_per_chunk as u32;
+        let mut timeout_millis = (8.0 * millis_per_chunk) as u32;
         if timeout_millis < 20 {
             timeout_millis = 20;
         }

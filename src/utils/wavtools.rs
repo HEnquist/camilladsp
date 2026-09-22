@@ -38,14 +38,17 @@ pub struct WavParams {
 }
 
 /// Map a `waveadapter` sample format to the CamillaDSP config format.
-fn to_binary_format(format: SampleFormat) -> BinarySampleFormat {
+/// Returns `None` for formats CamillaDSP does not support.
+fn to_binary_format(format: SampleFormat) -> Option<BinarySampleFormat> {
     match format {
-        SampleFormat::I16 => BinarySampleFormat::S16_LE,
-        SampleFormat::I24_3 => BinarySampleFormat::S24_3_LE,
-        SampleFormat::I24_4 => BinarySampleFormat::S24_4_LJ_LE,
-        SampleFormat::I32 => BinarySampleFormat::S32_LE,
-        SampleFormat::F32 => BinarySampleFormat::F32_LE,
-        SampleFormat::F64 => BinarySampleFormat::F64_LE,
+        SampleFormat::I16 => Some(BinarySampleFormat::S16_LE),
+        SampleFormat::I24_3 => Some(BinarySampleFormat::S24_3_LE),
+        SampleFormat::I24_4 => Some(BinarySampleFormat::S24_4_LJ_LE),
+        SampleFormat::I32 => Some(BinarySampleFormat::S32_LE),
+        SampleFormat::F32 => Some(BinarySampleFormat::F32_LE),
+        SampleFormat::F64 => Some(BinarySampleFormat::F64_LE),
+        // CamillaDSP has no unsigned 8-bit sample format.
+        SampleFormat::U8 => None,
     }
 }
 
@@ -77,8 +80,8 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
 pub fn find_data_in_wav_stream(f: impl Read + Seek) -> Res<WavParams> {
     let params = read_wav_header(f)
         .map_err(|err| ConfigError::new(&format!("Unable to parse as wav: {err}")))?;
-    let sample_format = match params.sample_format {
-        Some(format) => to_binary_format(format),
+    let sample_format = match params.sample_format.and_then(to_binary_format) {
+        Some(format) => format,
         None => return Err(ConfigError::new("Unsupported wav format").into()),
     };
     Ok(WavParams {

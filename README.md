@@ -54,13 +54,16 @@ under the terms of either of the following licenses:
    available at [www.mozilla.org](https://www.mozilla.org/en-US/MPL/),
    or [LICENSE_MPL2.0.txt](LICENSE_MPL2.0.txt).
 
-## ASIO backend and license implications
+## ASIO backend
 
-The optional ASIO backend (`asio-backend` feature) depends on the ASIO SDK,
-which is licensed under the GNU General Public License version 3.
-When CamillaDSP is built with the `asio-backend` feature enabled,
-the resulting binary is subject to the GPLv3 license only.
-The MPL 2.0 option does not apply to binaries that include ASIO SDK code.
+The ASIO backend, always included in Windows builds, does not use the ASIO SDK from Steinberg.
+It talks to the ASIO drivers directly through the COM interfaces they expose,
+via the permissively licensed [azo](https://crates.io/crates/azo) crate.
+Builds with the ASIO backend enabled are therefore covered by the same dual license
+as every other build, with no extra restrictions and no SDK to download.
+
+ASIO is a trademark of Steinberg Media Technologies GmbH.
+CamillaDSP is not affiliated with or endorsed by Steinberg.
 
 # Disclaimer
 
@@ -95,7 +98,7 @@ and the Mozilla Public License Version 2.0:
 - **[Customized build](#customized-build)**
 - **[Optimize for your system](#optimize-for-your-system)**
 - **[Building on Windows and macOS](#building-on-windows-and-macos)**
-- **[Building with ASIO backend (Windows)](#building-with-asio-backend-windows)**
+- **[ASIO support (Windows)](#asio-support-windows)**
 
 **[How to run](#how-to-run)**
 - **[Command line options](#command-line-options)**
@@ -270,7 +273,7 @@ These are the key dependencies for CamillaDSP.
 * https://crates.io/crates/alsa - ALSA bindings
 * https://crates.io/crates/coreaudio-rs - CoreAudio bindings
 * https://crates.io/crates/pipewire - PipeWire bindings
-* https://crates.io/crates/asio-sys
+* https://crates.io/crates/azo - ASIO driver access
 * https://crates.io/crates/wasapi
 * https://crates.io/crates/clap - Command line argument parsing
 * https://crates.io/crates/realfft - Wrapper for RustFFT that speeds up FFTs of real-valued data
@@ -396,8 +399,7 @@ This tool works on all supported platforms (Linux, macOS and Windows). Get it he
 For Windows you also need the "Build Tools for Visual Studio". Get them from here: https://aka.ms/buildtools
 
 When building on Linux the ALSA backend is always enabled.
-Similarly, building on Windows always enables the Wasapi backend.
-The optional ASIO backend can be enabled with the `asio-backend` feature (see [Customized build](#customized-build)).
+Similarly, building on Windows always enables the Wasapi and ASIO backends.
 And building on macOS always enables the CoreAudio backend.
 
 By default the internal processing is done using 64-bit floats.
@@ -407,8 +409,7 @@ but the actual speed advantage has not been evaluated.
 Note that the reduction in precision increases the numerical noise.
 
 CamillaDSP includes a Websocket server that can be used to pass commands to the running process.
-This feature is enabled by default, but can be left out. The feature name is "websocket".
-For usage see the section "Controlling via websocket".
+It is always built in. For usage see the section "Controlling via websocket".
 
 ## Building in Linux with standard features
 These instructions assume that the Linux distribution used is one of Fedora, Debian, Ubuntu or Arch.
@@ -428,10 +429,6 @@ If possible, it's recommended to use a pre-built binary on these systems.
 - - Fedora: ```sudo dnf install alsa-lib-devel```
 - - Debian/Ubuntu etc: ```sudo apt-get install libasound2-dev```
 - - Arch: ```sudo pacman -S alsa-lib```
-- Install OpenSSL dependency:
-- - Fedora: ```sudo dnf install openssl openssl-devel```
-- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
-- - Arch:  ```sudo pacman -S openssl```
 - Clone the repository
 - Build with standard options: ```cargo build --release```
 - - see below for other options
@@ -442,31 +439,22 @@ If possible, it's recommended to use a pre-built binary on these systems.
 ## Customized build
 All the available options, or "features" are:
 - `pipewire-backend`: Native PipeWire support (Linux only).
-- `asio-backend`: ASIO support (Windows only, requires the ASIO SDK).
 - `threaded-alsa`: Experimental ALSA backend implementation (Linux only). When enabled, it replaces the legacy ALSA backend.
-- `websocket`: Websocket server for control.
-- `secure-websocket`: Enable secure websocket, also enables the `websocket` feature.
+- `secure-websocket`: Enable TLS for the websocket server. Needs the OpenSSL development files:
+- - Fedora: ```sudo dnf install openssl openssl-devel```
+- - Debian/Ubuntu etc: ```sudo apt-get install openssl libssl-dev```
+- - Arch:  ```sudo pacman -S openssl```
 - `debug`: Enable extra logging, useful for debugging.
 
 
-The `websocket` feature is included in the default features, meaning it will be enabled if you don't specify anything.
+None of these are enabled by default, so a plain build gets none of them.
+Add the ones you want with `--features`, separated by commas.
 
-Cargo doesn't allow disabling a single default feature,
-but you can disable the whole group with the `--no-default-features` flag.
-Then you have to manually add all the ones you want.
-
-Example 1: You want `websocket` and `pipewire-backend`. The first one is included by default so you only need to add `pipewire-backend`:
+Example: You want `pipewire-backend` and `debug`:
 ```
-cargo build --release --features pipewire-backend
+cargo build --release --features pipewire-backend,debug
 (or)
-cargo install --path . --features pipewire-backend
-```
-
-Example 2: You want only `debug`. Since you don't want `websocket` you have to disable the defaults:
-```
-cargo build --release --no-default-features --features debug
-(or)
-cargo install --path . --no-default-features --features debug
+cargo install --path . --features pipewire-backend,debug
 ```
 
 ### Sample precision
@@ -534,26 +522,12 @@ $env:RUSTFLAGS="-C target-cpu=native"
 cargo build --release
 ```
 
-## Building with ASIO backend (Windows)
-To build CamillaDSP with ASIO support, enable the `asio-backend` feature.
-This uses the `asio-sys` crate, which generates bindings via `bindgen`.
-The ASIO SDK is downloaded/extracted automatically during the build,
-so you normally do not need to download it manually.
-
-Before building, ensure `bindgen` requirements are met:
-- Install LLVM/Clang (Clang 9.0+). On Windows with winget:
-  - `winget install LLVM.LLVM`
-- In most setups you do **not** need to set `LIBCLANG_PATH` manually.
-  Keep this as a reference in case `bindgen` cannot find `libclang`:
-  - PowerShell: `$env:LIBCLANG_PATH="C:\\Program Files\\LLVM\\bin"`
-  - cmd.exe: `set LIBCLANG_PATH=C:\Program Files\LLVM\bin`
-
-Reference: [rust-bindgen requirements](https://rust-lang.github.io/rust-bindgen/requirements.html)
-
-Build command:
-- `cargo build --release --features asio-backend`
-
-After a successful build, the binary is available at `target/release/camilladsp.exe`.
+## ASIO support (Windows)
+The ASIO backend is always included in Windows builds, and needs no extra build steps.
+It uses the [azo](https://crates.io/crates/azo) crate, which is pure Rust,
+so there is no ASIO SDK to download and no C++ toolchain or `bindgen` setup required.
+The resulting binary also runs on systems without any ASIO drivers installed;
+it simply reports no available ASIO devices.
 
 
 # How to run
@@ -576,7 +550,7 @@ CamillaDSP v3.0.0
 Henrik Enquist <henrik.enquist@gmail.com>
 A flexible tool for processing audio
 
-Built with features: websocket
+Built with features: none
 
 Supported device types:
 Capture: RawFile, WavFile, Stdin, SignalGenerator, CoreAudio
@@ -1145,6 +1119,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   However, Mixers and Processors, which work on all channels in the pipeline,
   cannot be parallelized and are processed in the main thread.
   Therefore, only the filters between mixers and/or processors can be parallelized.
+
+  Biquad filters are also not sent to the thread pool.
+  They are run several channels and several cascade positions at a time on the main thread,
+  which already keeps the processor busy, so a thread pool on top only adds the cost of
+  handing the work over.
+  A pipeline of biquads measured about 5.7 times faster this way than the same pipeline
+  on the thread pool.
 
   Multithreaded processing is beneficial for configurations that require significant processing power,
   such as using very long FIR filters, high sample rates, or a large number of channels.
@@ -1781,6 +1762,8 @@ That makes the loudness filter attenuate the midband instead of boosting the ext
 The method is the same as the one implemented by the [RME ADI-2 DAC FS](https://www.rme-audio.de/adi-2-dac.html).
 The loudness correction is done as shelving filters that boost the high (above 3500 Hz) and low (below 70 Hz) frequencies.
 The amount of boost is adjustable with the `high_boost` and `low_boost` parameters. If left out, they default to 10 dB.
+The corner frequencies and the Q of the two shelves can be changed with `high_freq`, `low_freq`,
+`high_q` and `low_q`. The defaults give the same shelves as earlier versions, which had them fixed.
 - When the volume is above the `reference_level`, only gain is applied.
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
@@ -1802,12 +1785,20 @@ filters:
       reference_level: -25.0
       high_boost: 7.0 (*)
       low_boost: 7.0 (*)
+      high_freq: 3500.0 (*)
+      low_freq: 70.0 (*)
+      high_q: 0.707 (*)
+      low_q: 0.707 (*)
       attenuate_mid: false (*)
 ```
 Allowed ranges:
 - reference_level: -100 to +20
 - high_boost: 0 to 20
 - low_boost: 0 to 20
+- high_freq: above `low_freq`, and below half the samplerate
+- low_freq: above 0
+- high_q: 0.1 to 2.0
+- low_q: 0.1 to 2.0
 
 ### Delay
 The delay filter provides a delay in seconds, milliseconds, microseconds, millimetres or samples.
@@ -1879,6 +1870,14 @@ If the filename includes the tokens `$samplerate$` or `$channels$`,
 these will be replaced by the corresponding values from the config.
 For example, if samplerate is 44100,
 the filename `/path/to/filter_$samplerate$.raw` will be updated to `/path/to/filter_44100.raw`.
+
+When several channels need the same impulse response, refer to the same filter by name for each
+of them rather than defining one filter per channel.
+CamillaDSP then reads and prepares the impulse response once, and the channels share a single copy
+of it.
+Separate filters are never shared, even if their coefficients are identical,
+so defining one per channel uses more memory and makes processing slower.
+The difference grows with the filter length and the number of channels.
 
 #### Generating FIR coefficients
 There are many ways to generate impulse responses for FIR filters.
@@ -2144,19 +2143,45 @@ The available types are:
 
   The `gain` value is limited to +- 100 dB.
 
-* FivePointPeq
+* NPointPeq
 
+  A parametric equalizer with a free number of bands.
   This filter combo is mainly meant to be created by guis.
-  It defines a 5-point (or band) parametric equalizer by combining a Lowshelf, a Highshelf and three Peaking filters.
 
-  Each individual filter is defined by frequency, gain and q. The parameter names are:
-  * Lowshelf: `fls`, `gls`, `qls`
-  * Peaking 1: `fp1`, `gp1`, `qp1`
-  * Peaking 2: `fp2`, `gp2`, `qp2`
-  * Peaking 3: `fp3`, `gp3`, `qp3`
-  * Highshelf: `fhs`, `ghs`, `qhs`
+  It takes a single parameter `bands`, a list of at least two bands.
+  Every band has the same three parameters, `freq`, `gain` and `q`,
+  and its role follows its position in the list:
+  the first band is a Lowshelf, the last is a Highshelf,
+  and the ones in between are Peaking filters.
+  A list of two bands is therefore just the two shelves.
 
-  All 15 parameters must be included in the config.
+  The bands are applied in the order listed, and their frequencies must not decrease along the way.
+
+  A band with a `gain` of zero, or smaller than 0.001 dB, is left out when the filter is built,
+  since it does nothing.
+  This is how a band is disabled without removing it, and it does not change the role of any
+  other band, since the roles are decided before the zero gain bands are dropped.
+  An equalizer with every gain at zero passes the signal through unchanged.
+
+  ```yaml
+  MyEqualizer:
+    type: BiquadCombo
+    parameters:
+      type: NPointPeq
+      bands:
+        - freq: 125     # Lowshelf
+          gain: 1.0
+          q: 0.7
+        - freq: 400     # Peaking
+          gain: -0.5
+          q: 0.7
+        - freq: 1000    # Peaking
+          gain: 1.5
+          q: 0.7
+        - freq: 8000    # Highshelf
+          gain: 0.5
+          q: 0.7
+  ```
 
 
 Other types such as Bessel filters can be built by combining several Biquads.
@@ -2329,6 +2354,11 @@ The coefficients are given as a list a0..an in that order. Example:
 ```
 This example implements a Biquad lowpass, but for a Biquad the Free Biquad type is faster and should be preferred.
 Both a and b are optional. If left out, they default to [1.0].
+
+The coefficients are scaled so that a0 becomes unity, which leaves the transfer function unchanged.
+The a coefficients are also checked for stability when the configuration is loaded.
+A filter with poles on or outside the unit circle is unstable, meaning its output grows without limit,
+and such a configuration is rejected.
 
 
 ## Processors
@@ -2741,16 +2771,10 @@ It contains only filter definitions and pipeline steps, that can be pasted into 
 If using [CamillaGUI](#gui), it is also possible to import the filters into an existing configuration.
 
 # Related projects
-## Tools, utilities and libraries
-* https://github.com/scripple/alsa_cdsp - ALSA CamillaDSP "I/O" plugin, automatic config updates at changes of samplerate, sample format or number of channels.
-* https://github.com/raptorlightning/I2S-Hat - An SPDIF Hat for the Raspberry Pi 2-X for SPDIF Communication, see also [this thread at diyAudio.com](https://www.diyaudio.com/forums/pc-based/375834-i2s-hat-raspberry-pi-hat-spdif-i2s-communication-dsp.html).
-* https://github.com/worstenbrood/CamillaDsp.Client - CamillaDSP websocket client library for .NET, [also available on NuGet](https://www.nuget.org/packages/CamillaDsp.Client/).
-* https://github.com/AlfredJKwack/camillaEQ - A browser-based interactive graphical equalizer and spectrum analyzer for CamillaDSP, and a pipeline editor.
-
 ## Music players
 * https://moodeaudio.org/ - moOde audio player, audiophile-quality music playback for Raspberry Pi.
 * https://github.com/JWahle/piCoreCDSP - Installs CamillaDSP and GUI on piCorePlayer
-* [FusionDsp](https://docs.google.com/document/d/e/2PACX-1vRhU4i830YaaUlB6-FiDAdvl69T3Iej_9oSbNTeSpiW0DlsyuTLSv5IsVSYMmkwbFvNbdAT0Tj6Yjjh/pub) a plugin based on CamillaDsp for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
+* https://github.com/volumio/volumio-plugins-sources-bookworm/tree/master/fusion - FusionDsp, a plugin based on CamillaDSP for [Volumio](https://volumio.com), the music player, with graphic equalizer, parametric equalizer, FIR filters, Loudness, AutoEq profile for headphone and more!
 
 ## Measurement and filter generation tools
 ### rePhase 

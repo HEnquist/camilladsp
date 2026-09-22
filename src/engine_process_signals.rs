@@ -61,11 +61,11 @@ fn monitor_signals(
                 let path = (*active_path_thread.lock()).clone();
                 if let Some(path) = path {
                     match crate::config::load_validate_config(path.as_str()) {
-                        Ok(conf) => {
+                        Ok((conf, impulses)) => {
                             debug!("Config is valid");
-                            if let Err(e) = tx_command_thread
-                                .try_send(ControllerMessage::ConfigChanged(Box::new(conf)))
-                            {
+                            if let Err(e) = tx_command_thread.try_send(
+                                ControllerMessage::ConfigChanged(Box::new(conf), impulses),
+                            ) {
                                 error!("Error sending reload message: {e}");
                             }
                         }

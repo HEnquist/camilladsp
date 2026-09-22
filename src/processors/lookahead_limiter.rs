@@ -80,10 +80,10 @@ impl LookaheadLimiter {
         let monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
         let process_channels = all_channels_if_empty(config.process_channels(), channels);
         let (limit, attack_samples, release_coeff) = limiter_parameters(
-            config.limit,
-            config.attack,
+            config.limit.get(),
+            config.attack.get(),
             config.attack_unit,
-            config.release,
+            config.release.get(),
             config.release_unit,
             samplerate,
         );
@@ -140,19 +140,18 @@ impl Processor for LookaheadLimiter {
     }
 
     /// Apply a LookaheadLimiter to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.detect_peaks(input);
         self.gain.process_detection(&self.scratch);
         // Unless disabled, delay the unprocessed channels too, to keep all channels time aligned.
         for (ch, delay) in self.delays.iter_mut().enumerate() {
             if !self.delay_processed_only || self.process_channels.contains(&ch) {
-                delay.process_waveform(&mut input.waveforms[ch])?;
+                delay.process_waveform(&mut input.waveforms[ch]);
             }
         }
         for ch in self.process_channels.iter() {
             Self::apply_gain(self.gain.envelope(), &mut input.waveforms[*ch]);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -163,10 +162,10 @@ impl Processor for LookaheadLimiter {
             let channels = config.channels;
             let samplerate = self.samplerate;
             let (limit, attack_samples, release_coeff) = limiter_parameters(
-                config.limit,
-                config.attack,
+                config.limit.get(),
+                config.attack.get(),
                 config.attack_unit,
-                config.release,
+                config.release.get(),
                 config.release_unit,
                 samplerate,
             );
@@ -207,9 +206,9 @@ pub fn validate_lookahead_limiter(
 ) -> Res<()> {
     let channels = config.channels;
     validate_times(
-        config.attack,
+        config.attack.get(),
         config.attack_unit,
-        config.release,
+        config.release.get(),
         samplerate,
     )?;
     for ch in config.monitor_channels().iter() {
@@ -239,6 +238,7 @@ pub fn validate_lookahead_limiter(
 mod tests {
     use super::*;
     use crate::config::TimeUnit;
+    use crate::config::finite;
 
     fn params(
         monitor_channels: Option<Vec<usize>>,
@@ -250,10 +250,10 @@ mod tests {
             channels: 2,
             monitor_channels,
             process_channels,
-            limit: 0.0,
-            attack,
+            limit: finite!(0.0),
+            attack: finite!(attack),
             attack_unit: TimeUnit::Samples,
-            release,
+            release: finite!(release),
             release_unit: TimeUnit::Samples,
             delay_processed_only: None,
         }
@@ -290,10 +290,10 @@ mod tests {
                 channels: 1,
                 monitor_channels: None,
                 process_channels: None,
-                limit: 0.0,
-                attack: 4.0,
+                limit: finite!(0.0),
+                attack: finite!(4.0),
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2,
+                release: finite!(1.0 / std::f64::consts::LN_2),
                 release_unit: TimeUnit::Samples,
                 delay_processed_only: None,
             },
@@ -303,10 +303,10 @@ mod tests {
         let mut filter = crate::filters::lookahead_limiter::LookaheadLimiter::from_config(
             "test",
             config::LookaheadLimiterParameters {
-                limit: 0.0,
-                attack: 4.0,
+                limit: finite!(0.0),
+                attack: finite!(4.0),
                 attack_unit: TimeUnit::Samples,
-                release: 1.0 / std::f64::consts::LN_2,
+                release: finite!(1.0 / std::f64::consts::LN_2),
                 release_unit: TimeUnit::Samples,
             },
             samplerate,
@@ -316,8 +316,8 @@ mod tests {
         let mut processor_chunk = chunk(vec![waveform.clone()]);
         let mut filter_waveform = waveform;
 
-        processor.process_chunk(&mut processor_chunk).unwrap();
-        filter.process_waveform(&mut filter_waveform).unwrap();
+        processor.process_chunk(&mut processor_chunk);
+        filter.process_waveform(&mut filter_waveform);
 
         assert_close(&processor_chunk.waveforms[0], &filter_waveform, 1e-12);
     }
@@ -328,7 +328,7 @@ mod tests {
         let mut limiter =
             LookaheadLimiter::from_config("test", params(None, None, 0.0, 0.0), 48000, 4);
         let mut input = chunk(vec![vec![0.25, 0.25, 0.25, 0.25], vec![0.5, 1.0, 2.0, 4.0]]);
-        limiter.process_chunk(&mut input).unwrap();
+        limiter.process_chunk(&mut input);
 
         // Channel 1 is limited to 1.0, channel 0 gets the same gain reduction.
         assert_close(&input.waveforms[1], &[0.5, 1.0, 1.0, 1.0], 1e-12);
@@ -341,7 +341,7 @@ mod tests {
         let mut limiter =
             LookaheadLimiter::from_config("test", params(Some(vec![0]), None, 0.0, 0.0), 48000, 2);
         let mut input = chunk(vec![vec![1.0, 2.0], vec![4.0, 1.0]]);
-        limiter.process_chunk(&mut input).unwrap();
+        limiter.process_chunk(&mut input);
 
         assert_close(&input.waveforms[0], &[1.0, 1.0], 1e-12);
         assert_close(&input.waveforms[1], &[4.0, 0.5], 1e-12);
@@ -357,7 +357,7 @@ mod tests {
             4,
         );
         let mut input = chunk(vec![vec![0.0, 0.0, 2.0, 0.0], vec![1.0, 2.0, 3.0, 4.0]]);
-        limiter.process_chunk(&mut input).unwrap();
+        limiter.process_chunk(&mut input);
 
         // Channel 1 is only delayed by the two samples of lookahead.
         assert_close(&input.waveforms[1], &[0.0, 0.0, 1.0, 2.0], 1e-12);
@@ -365,7 +365,7 @@ mod tests {
         assert_close(&input.waveforms[0], &[0.0, 0.0, 0.0, 0.0], 1e-12);
 
         let mut input = chunk(vec![vec![0.0, 0.0, 0.0, 0.0], vec![5.0, 6.0, 7.0, 8.0]]);
-        limiter.process_chunk(&mut input).unwrap();
+        limiter.process_chunk(&mut input);
         assert_close(&input.waveforms[1], &[3.0, 4.0, 5.0, 6.0], 1e-12);
         assert_close(&input.waveforms[0], &[1.0, 0.0, 0.0, 0.0], 1e-12);
     }
@@ -378,7 +378,7 @@ mod tests {
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 4);
 
         let mut input = chunk(vec![vec![0.0, 0.0, 2.0, 0.0], vec![1.0, 2.0, 3.0, 4.0]]);
-        limiter.process_chunk(&mut input).unwrap();
+        limiter.process_chunk(&mut input);
 
         // Channel 1 passes through without any delay.
         assert_close(&input.waveforms[1], &[1.0, 2.0, 3.0, 4.0], 1e-12);

@@ -26,7 +26,8 @@
 
 // Full-precision `f64` literals, correct for the default build, hold more digits
 // than an `f32` build can represent. Silence that only in the f32 build.
-// Conversions go through `ToCamillaFloat` and `ToF32` rather than `as` casts, so
+// Conversions go through `ToCamillaFloat`, `ToF32` and `ToF64` rather than `as`
+// casts, so
 // no cast lint needs suppressing.
 #![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
@@ -152,14 +153,40 @@ impl ToF32 for f32 {
     }
 }
 
+/// Conversion from the processing precision up to `f64`.
+///
+/// Analysis that must stay numerically robust whatever [`CamillaFloat`] is,
+/// such as the biquad state guard, works in `f64` throughout. Written as a
+/// method rather than an `as` cast for the same reason as [`ToF32`]: the
+/// direction that is a no-op in a given build would otherwise need a blanket
+/// `clippy::unnecessary_cast` allow over a whole file.
+pub trait ToF64 {
+    /// Convert up to `f64` for analysis.
+    fn to_f64(self) -> f64;
+}
+
+impl ToF64 for f32 {
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+}
+
+impl ToF64 for f64 {
+    #[inline]
+    fn to_f64(self) -> f64 {
+        self
+    }
+}
+
 /// Convenience `Result` type used throughout CamillaDSP.
 pub type Res<T> = Result<T, Box<dyn error::Error>>;
 
 /// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
 pub mod alsa_backend;
-/// ASIO audio backend (Windows only, requires `asio-backend` feature).
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+/// ASIO audio backend (Windows only).
+#[cfg(target_os = "windows")]
 pub mod asio_backend;
 /// Audio chunk types and per-chunk statistics.
 pub mod audiochunk;
@@ -204,8 +231,7 @@ pub mod utils;
 /// WASAPI audio backend (Windows only).
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
-/// WebSocket control server (requires `websocket` feature).
-#[cfg(feature = "websocket")]
+/// WebSocket control server.
 pub mod websocket_server;
 
 /// Messages sent from audio device threads to the processing supervisor.
@@ -254,8 +280,12 @@ pub enum ExitState {
 /// Messages sent to the engine controller (WebSocket server or external caller).
 pub enum ControllerMessage {
     /// A new configuration has been loaded and should replace the active one.
+    ///
+    /// The [`ImpulseCache`](filters::fftconv::ImpulseCache) is what validating
+    /// the configuration read, carried along so that applying it does not have
+    /// to read the same coefficient files a second time.
     // Config must be boxed, to prevent "large size difference between variants" warning
-    ConfigChanged(Box<config::Configuration>),
+    ConfigChanged(Box<config::Configuration>, filters::fftconv::ImpulseCache),
     /// Stop processing but remain ready for a new configuration.
     Stop,
     /// Shut down the engine entirely.
@@ -708,7 +738,7 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Wasapi".to_owned());
         capturetypes.push("Wasapi".to_owned());
     }
-    if cfg!(all(target_os = "windows", feature = "asio-backend")) {
+    if cfg!(target_os = "windows") {
         playbacktypes.push("Asio".to_owned());
         capturetypes.push("Asio".to_owned());
     }
@@ -783,7 +813,7 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
         "wasapi" => wasapi_backend::capabilities::list_device_names(input),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
     }
@@ -815,7 +845,7 @@ pub fn get_device_capabilities(
         "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
         #[cfg(target_os = "windows")]
         "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::get_device_capabilities(device_name, input),
         _ => Err(DeviceError::Other("Unsupported backend".to_string())),
     }

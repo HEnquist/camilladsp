@@ -304,10 +304,10 @@ impl LookaheadLimiter {
         samplerate: usize,
     ) -> (CamillaFloat, usize, CamillaFloat) {
         limiter_parameters(
-            config.limit,
-            config.attack,
+            config.limit.get(),
+            config.attack.get(),
             config.attack_unit(),
-            config.release,
+            config.release.get(),
             config.release_unit(),
             samplerate,
         )
@@ -319,9 +319,8 @@ impl Filter for LookaheadLimiter {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         self.gain.process_waveform(waveform);
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Filter) {
@@ -346,9 +345,9 @@ impl Filter for LookaheadLimiter {
 
 pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: usize) -> Res<()> {
     validate_times(
-        config.attack,
+        config.attack.get(),
         config.attack_unit(),
-        config.release,
+        config.release.get(),
         samplerate,
     )
 }
@@ -358,6 +357,7 @@ mod tests {
     use super::*;
     use crate::audiochunk::AudioChunk;
     use crate::config::TimeUnit;
+    use crate::config::finite;
     use crate::processors::Processor;
 
     fn assert_close(left: &[CamillaFloat], right: &[CamillaFloat], epsilon: CamillaFloat) {
@@ -375,11 +375,11 @@ mod tests {
     #[test]
     fn test_lookahead_limiter_basic() {
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 4.0,
-            release: 1.0 / std::f64::consts::LN_2,
+            attack: finite!(4.0),
+            release: finite!(1.0 / std::f64::consts::LN_2),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![
@@ -407,7 +407,7 @@ mod tests {
             0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
             0.5_f64.powf(1.0 / 32.0) as CamillaFloat,
         ];
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
         assert_close(&input, &expected, 1e-6);
     }
 
@@ -415,27 +415,25 @@ mod tests {
     #[test]
     fn test_lookahead_limiter_same_as_limiter() {
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 0.0,
-            release: 0.0,
+            attack: finite!(0.0),
+            release: finite!(0.0),
         };
         let mut lookahead_limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let clipper = crate::filters::clipper::Clipper::from_config(
             "test",
             config::ClipperParameters {
                 soft_clip: None,
-                clip_limit: 0.0,
+                clip_limit: finite!(0.0),
             },
         );
 
         let mut lookahead_input = vec![0.5, 1.0, 2.0, -2.0, -1.0, -0.5, 1.5, -1.5, 0.0];
         let mut clipper_input = lookahead_input.clone();
 
-        lookahead_limiter
-            .process_waveform(&mut lookahead_input)
-            .unwrap();
+        lookahead_limiter.process_waveform(&mut lookahead_input);
         clipper.apply_clip(&mut clipper_input);
 
         assert_eq!(lookahead_input, clipper_input);
@@ -448,11 +446,11 @@ mod tests {
         let mut limiter_input = vec![2.0, 1.0, 1.0, 1.0, 1.0];
         let chunksize = limiter_input.len();
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 0.0,
-            release: release_samples,
+            attack: finite!(0.0),
+            release: finite!(release_samples),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, samplerate, chunksize);
         let mut compressor = crate::processors::compressor::Compressor::from_config(
@@ -461,12 +459,12 @@ mod tests {
                 channels: 1,
                 monitor_channels: None,
                 process_channels: None,
-                attack: 0.0,
+                attack: finite!(0.0),
                 attack_unit: TimeUnit::Seconds,
-                release: release_samples / samplerate as f64,
+                release: finite!(release_samples / samplerate as f64),
                 release_unit: TimeUnit::Seconds,
-                threshold: 0.0,
-                factor: 1.0e20,
+                threshold: finite!(0.0),
+                factor: finite!(1.0e20),
                 makeup_gain: None,
                 soft_clip: None,
                 clip_limit: None,
@@ -483,8 +481,8 @@ mod tests {
             limiter_input.len(),
         );
 
-        limiter.process_waveform(&mut limiter_input).unwrap();
-        compressor.process_chunk(&mut compressor_chunk).unwrap();
+        limiter.process_waveform(&mut limiter_input);
+        compressor.process_chunk(&mut compressor_chunk);
 
         // The values are not exactly equal because compressor works in the dB domain and has 1e-6 bias.
         assert_close(&limiter_input, &compressor_chunk.waveforms[0], 1e-6);
@@ -493,15 +491,15 @@ mod tests {
     #[test]
     fn test_lookahead_limiter_zero_release() {
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 2.0,
-            release: 0.0,
+            attack: finite!(2.0),
+            release: finite!(0.0),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut input = vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0];
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
         for &val in &input {
             assert!(val.abs() <= 1.0);
         }
@@ -510,17 +508,17 @@ mod tests {
     #[test]
     fn test_lookahead_limiter_state_persistence() {
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 5.0,
-            release: 1.0 / std::f64::consts::LN_2,
+            attack: finite!(5.0),
+            release: finite!(1.0 / std::f64::consts::LN_2),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 1024);
         let mut buf1 = vec![1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         let expected1: Vec<CamillaFloat> =
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.9, 0.8, 0.7, 0.6, 1.0];
-        limiter.process_waveform(&mut buf1).unwrap();
+        limiter.process_waveform(&mut buf1);
         assert_close(&buf1, &expected1, 1e-6);
 
         let mut buf2 = vec![1.0, 1.0, 1.0, 1.0];
@@ -530,18 +528,18 @@ mod tests {
             0.5_f64.powf(1.0 / 8.0) as CamillaFloat,
             0.5_f64.powf(1.0 / 16.0) as CamillaFloat,
         ];
-        limiter.process_waveform(&mut buf2).unwrap();
+        limiter.process_waveform(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
     }
 
     #[test]
     fn test_lookahead_limiter_attack_over_one_second_rejected() {
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 48001.0,
-            release: 4.0,
+            attack: finite!(48001.0),
+            release: finite!(4.0),
         };
         assert!(validate_config(&config, 48000).is_err());
     }
@@ -551,16 +549,16 @@ mod tests {
         let samplerate = 4;
         let chunksize = 8;
         let config = config::LookaheadLimiterParameters {
-            limit: 0.0,
+            limit: finite!(0.0),
             attack_unit: TimeUnit::Samples,
             release_unit: TimeUnit::Samples,
-            attack: 4.0,
-            release: 1.0,
+            attack: finite!(4.0),
+            release: finite!(1.0),
         };
         let mut limiter = LookaheadLimiter::from_config("test", config, samplerate, chunksize);
         let mut input = vec![1.0, 1.0, 2.0, 1.0, 1.0, -2.0, 1.0, 1.0];
 
-        limiter.process_waveform(&mut input).unwrap();
+        limiter.process_waveform(&mut input);
 
         assert_eq!(input.len(), chunksize);
     }
