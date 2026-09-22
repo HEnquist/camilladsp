@@ -10,19 +10,15 @@ the exit took. The margins are wide on purpose. What they are meant to catch is 
 that waits for the audio to finish rather than cutting it short, which is a difference
 of seconds, not the tens of milliseconds a loaded runner adds.
 
-From cdsp's `ImmediateAbort_PlaybackDrainingBug`, `UserStopDuringEOFDrain_UnblocksPlayback`
-and `GracefulTeardown_Sequence`.
-
-Its fourth teardown scenario, `NonRealtimeImmediateAbort_ExitsImmediately`, is not here
-because the state it describes cannot be reached. A file to file run goes at a few
-hundred times real time, measured at 60 s of audio in 0.11 s and still only 0.28 s
-through a 65536 tap FIR, so the job is finished before a stop can be sent and there is
-nothing to abort. Making it last long enough would take an input of several hundred
-megabytes. The two paths where a stop really can be delayed are the ones below, and
-both involve a capture blocked handing audio to a paced far end.
+From cdsp's `ImmediateAbort_PlaybackDrainingBug`, `NonRealtimeImmediateAbort_ExitsImmediately`,
+`UserStopDuringEOFDrain_UnblocksPlayback` and `GracefulTeardown_Sequence`.
 """
 
+import os
+import sys
 import time
+
+import pytest
 
 from conftest import SAMPLERATE, read_raw
 
@@ -102,6 +98,41 @@ def test_exit_with_a_full_queue_is_prompt(start_cdsp, device_config):
     config, _, _ = device_config("file", "dummy", seconds=60.0)
     cdsp = start_cdsp(config=config, extra_args=["--wait"])
     cdsp.poll_until_true("GetBufferLevel", lambda level: level > 0)
+
+    code, elapsed = timed_exit(cdsp)
+    assert code == EXIT_OK
+    assert elapsed < PROMPT, f"exit took {elapsed:.2f} s"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs /dev/zero and /dev/null")
+def test_aborting_an_endless_non_realtime_run_is_immediate(start_cdsp, config_file):
+    """A run with nothing pacing it and no end in sight still has to stop when asked.
+
+    From cdsp's `NonRealtimeImmediateAbort_ExitsImmediately`. The difficulty is
+    arranging for there to be anything to abort: file to file goes at a few hundred
+    times real time, measured here at over two thousand, so any input small enough to
+    generate is processed before a stop can be sent, and the test would pass on a run
+    that had already finished.
+
+    `/dev/zero` solves it by never ending, which turns the assertion from a measurement
+    into a certainty: the job cannot have completed, so a process that exited was cut
+    short. `/dev/null` on the far end keeps a run at that speed from filling the disk,
+    which it would otherwise do at a few hundred megabytes a second.
+
+    The measured capture rate is what says the run was really under way rather than
+    stuck somewhere. It reads thousands of times nominal, so the bound is loose.
+    """
+    config = config_file(
+        {"CAPTURE_FILE": "/dev/zero", "PLAYBACK_FILE": os.devnull},
+        base="file_devices.yml",
+    )
+    cdsp = start_cdsp(config=config, extra_args=["--wait"], wait_for_running=False)
+    # The rate is published once per update interval, so shorten it rather than hold
+    # every core at full tilt for the default second.
+    cdsp.send("SetUpdateInterval", 100)
+    rate = cdsp.poll_until_true("GetCaptureRate", lambda value: value > 10 * SAMPLERATE)
+    assert rate > 10 * SAMPLERATE
+    assert cdsp.send("GetStopReason") == "None"
 
     code, elapsed = timed_exit(cdsp)
     assert code == EXIT_OK
