@@ -202,6 +202,13 @@ pub fn run(
                             pipeline.set_playback_ready();
                             if pipeline.release_barrier_if_ready() {
                                 is_starting = false;
+                                // Startup is complete once the second device reports in,
+                                // and which one that is depends on how the two threads
+                                // are scheduled. So the reason the previous session
+                                // stopped is cleared in both arms. Clearing it in only
+                                // one left a new session that came up playback-last
+                                // reporting the old reason for as long as it ran.
+                                crate::set_stop_reason(&status_structs.status, StopReason::None);
                             }
                         }
                         StatusMessage::CaptureReady => {
