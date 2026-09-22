@@ -496,6 +496,7 @@ fn capture_loop(
                         params.channels,
                         params.chunksize,
                         &msg_channels.audio,
+                        &msg_channels.command,
                         &mut resampler,
                     );
                     let msg = AudioMessage::EndOfStream;
@@ -779,15 +780,39 @@ impl CaptureDevice for FileCaptureDevice {
     }
 }
 
+/// Hand over `samples` frames of silence, the tail a capture adds after its input ends.
+///
+/// Returns early when an Exit command arrives, which is what keeps a long tail from
+/// making the device unresponsive. The audio queue is bounded and a playback device
+/// drains it in real time, so handing over a tail of several seconds takes several
+/// seconds of blocking sends. Without a check in here the loop never gets back to the
+/// one at the top of the capture loop, and a user asking to stop, or a config reload,
+/// waits for the whole tail to play out first. The caller ends the stream the same way
+/// whether the tail finished or was cut short, so there is nothing to report back.
 fn send_silence(
     samples: usize,
     channels: usize,
     chunksize: usize,
     audio_channel: &crossbeam_channel::Sender<AudioMessage>,
+    command_channel: &crossbeam_channel::Receiver<CommandMessage>,
     resampler: &mut Option<ChunkResampler>,
 ) {
     let mut samples_left = samples;
     while samples_left > 0 {
+        match command_channel.try_recv() {
+            Ok(CommandMessage::Exit) => {
+                debug!("Exit message received, cutting the extra samples short");
+                return;
+            }
+            // A rate adjust has nothing left to act on once the input has ended, so it
+            // is dropped rather than parked.
+            Ok(CommandMessage::SetSpeed { .. }) => {}
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                debug!("Command channel was closed, cutting the extra samples short");
+                return;
+            }
+        }
         let chunk_samples = if samples_left > chunksize {
             chunksize
         } else {
