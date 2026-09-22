@@ -83,6 +83,8 @@ pub struct DummyCaptureDevice {
     pub signal: config::Signal,
     pub silence_threshold: f64,
     pub silence_timeout: f64,
+    pub stop_on_rate_change: bool,
+    pub rate_measure_interval: f32,
     pub control_port: Option<u16>,
 }
 
@@ -112,6 +114,8 @@ struct CaptureParams {
     signal: config::Signal,
     silence_threshold: f64,
     silence_timeout: f64,
+    stop_on_rate_change: bool,
+    rate_measure_interval: f32,
     capture_status: Arc<RwLock<CaptureStatus>>,
     control: Arc<DummyControl>,
 }
@@ -146,6 +150,16 @@ fn capture_loop(
     let mut generator = SignalSource::new(&params.signal, params.capture_samplerate);
     let mut pacer = Pacer::new(params.capture_samplerate);
     let mut averager = countertimer::TimeAverage::new();
+    // A second averager over its own, longer window. The one above feeds the status
+    // getters at whatever cadence the client asked for, which is far too short a window
+    // to decide that a source has changed rate.
+    let mut watcher_averager = countertimer::TimeAverage::new();
+    let rate_measure_interval_ms = (1000.0 * params.rate_measure_interval) as u64;
+    let mut valuewatcher = countertimer::ValueWatcher::new(
+        params.capture_samplerate as f32,
+        RATE_CHANGE_THRESHOLD_VALUE,
+        RATE_CHANGE_THRESHOLD_COUNT,
+    );
     let mut silence_counter = countertimer::SilenceCounter::new(
         params.silence_threshold,
         params.silence_timeout,
@@ -161,6 +175,9 @@ fn capture_loop(
         Duration::from_secs_f64(params.chunksize as f64 / params.samplerate as f64);
     let mut state = ProcessingState::Running;
     let mut drift_ppm = 0;
+    // What the device's own clock currently runs at, which is the configured rate until
+    // a test tells it the source switched.
+    let mut device_rate = params.capture_samplerate;
     // Stays at zero until the first SetSpeed arrives, the same as the file backend, so a
     // run without rate adjust reports no adjustment rather than a nominal one.
     let mut rate_adjust = 0.0;
@@ -202,7 +219,7 @@ fn capture_loop(
                     // runs its own clock faster or slower. That is the same shape as the
                     // ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
                     None => pacer.set_rate(capture_clock_rate(
-                        params.capture_samplerate,
+                        device_rate,
                         drift_ppm,
                         rate_adjust,
                         false,
@@ -215,6 +232,39 @@ fn capture_loop(
                 break;
             }
         };
+
+        // Checked ahead of the stall below, so a device that is already stalled can still
+        // be told to fail. On every way out from here the status message goes first and
+        // the end of stream second: the channel is FIFO, so the engine has the reason in
+        // hand before the playback device can reach the end of the stream and report a
+        // natural finish behind it. Sent the other way round, which reason wins is a race
+        // between two threads.
+        if params.control.failing() {
+            let message = "Dummy capture device failed on request".to_string();
+            error!("{message}");
+            msg_channels
+                .status
+                .send(StatusMessage::CaptureError(message))
+                .unwrap_or(());
+            msg_channels
+                .audio
+                .send(AudioMessage::EndOfStream)
+                .unwrap_or(());
+            break;
+        }
+
+        if params.control.at_eof() {
+            debug!("Dummy capture reached the end of its stream on request");
+            msg_channels
+                .status
+                .send(StatusMessage::CaptureDone)
+                .unwrap_or(());
+            msg_channels
+                .audio
+                .send(AudioMessage::EndOfStream)
+                .unwrap_or(());
+            break;
+        }
 
         if params.control.stalled() {
             // A stalled device hands over nothing at all. Keep the pacer anchored to the
@@ -236,11 +286,19 @@ fn capture_loop(
         }
 
         let requested_drift = params.control.drift_ppm();
-        if requested_drift != drift_ppm {
+        // A rate switch and a drift are different things and compose: the switch is the
+        // source changing rate, the drift is how far off nominal it then runs. Both end
+        // up in the same pacer rate, so they are applied together.
+        let requested_rate = params
+            .control
+            .rate_override()
+            .unwrap_or(params.capture_samplerate);
+        if requested_drift != drift_ppm || requested_rate != device_rate {
             drift_ppm = requested_drift;
-            debug!("Dummy capture clock set to {drift_ppm} ppm off nominal");
+            device_rate = requested_rate;
+            debug!("Dummy capture clock set to {device_rate} Hz, {drift_ppm} ppm off nominal");
             pacer.set_rate(capture_clock_rate(
-                params.capture_samplerate,
+                device_rate,
                 drift_ppm,
                 rate_adjust,
                 resampler.is_some(),
@@ -303,6 +361,31 @@ fn capture_loop(
             capture_status.rate_adjust = rate_adjust as f32;
         }
 
+        // The rate is measured rather than read back from the knob, so what trips the
+        // watcher is the device really producing frames at a different rate. That is
+        // what the real backends do, and it means a rate switch that the pacer failed to
+        // apply would show up here as a test that does not fire rather than one that
+        // passes for the wrong reason.
+        watcher_averager.add_value(capture_frames);
+        if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
+            let measured_rate = watcher_averager.average();
+            watcher_averager.restart();
+            if valuewatcher.check_value(measured_rate as f32) {
+                warn!("Sample rate change detected, last rate was {measured_rate:.1} Hz");
+                if params.stop_on_rate_change {
+                    msg_channels
+                        .status
+                        .send(StatusMessage::CaptureFormatChange(measured_rate as usize))
+                        .unwrap_or(());
+                    msg_channels
+                        .audio
+                        .send(AudioMessage::EndOfStream)
+                        .unwrap_or(());
+                    break;
+                }
+            }
+        }
+
         let silence_state = silence_counter.update(camilla_float(value_range));
         if silence_state != state {
             state = silence_state;
@@ -332,11 +415,16 @@ fn capture_loop(
     crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
+/// Run the playback device, and return the status message that says how it ended.
+///
+/// Returning the message rather than an error string keeps the three ways a real
+/// playback device can stop in one place: the stream ended, the device failed, or the
+/// hardware changed format underneath it.
 fn playback_loop(
     params: PlaybackParams,
     channel: crossbeam_channel::Receiver<AudioMessage>,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
-) -> Option<String> {
+) -> StatusMessage {
     debug!("starting dummy playback loop");
     let mut chunk_stats = ChunkStats {
         rms: vec![0.0; params.channels],
@@ -377,6 +465,22 @@ fn playback_loop(
             Ok(AudioMessage::Audio(chunk)) => {
                 let frames = chunk.frames;
                 params.control.add_frames(frames);
+                if params.control.failing() {
+                    let message = "Dummy playback device failed on request".to_string();
+                    error!("{message}");
+                    recycle_chunk(chunk);
+                    break StatusMessage::PlaybackError(message);
+                }
+                // A playback device has no rate of its own to measure, so unlike the
+                // capture it is simply told. That is the shape of the real thing: what
+                // reports a playback format change is the driver's own notification, as
+                // at `src/coreaudio_backend/device.rs:713`, not anything CamillaDSP
+                // counted.
+                if let Some(rate) = params.control.rate_override() {
+                    warn!("Dummy playback device switched to {rate} Hz");
+                    recycle_chunk(chunk);
+                    break StatusMessage::PlaybackFormatChange(rate);
+                }
                 if params.control.stalled() {
                     // A stalled device keeps taking chunks and throws them away, the way
                     // a real one does once it has been reset, so the queue does not back
@@ -486,11 +590,11 @@ fn playback_loop(
                 trace!("Pause message received");
             }
             Ok(AudioMessage::EndOfStream) => {
-                break None;
+                break StatusMessage::PlaybackDone;
             }
             Err(err) => {
                 error!("Message channel error: {err}");
-                break Some(err.to_string());
+                break StatusMessage::PlaybackError(err.to_string());
             }
         }
     }
@@ -515,6 +619,8 @@ impl CaptureDevice for DummyCaptureDevice {
         let signal = self.signal;
         let silence_threshold = self.silence_threshold;
         let silence_timeout = self.silence_timeout;
+        let stop_on_rate_change = self.stop_on_rate_change;
+        let rate_measure_interval = self.rate_measure_interval;
         let control_port = self.control_port;
 
         let handle = thread::Builder::new()
@@ -542,6 +648,8 @@ impl CaptureDevice for DummyCaptureDevice {
                     signal,
                     silence_threshold,
                     silence_timeout,
+                    stop_on_rate_change,
+                    rate_measure_interval,
                     capture_status,
                     control: listener.control(),
                 };
@@ -599,18 +707,8 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     .send(StatusMessage::PlaybackReady)
                     .unwrap_or(());
                 barrier.wait();
-                match playback_loop(params, channel, &status_channel) {
-                    Some(msg) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError(msg))
-                            .unwrap_or(());
-                    }
-                    None => {
-                        status_channel
-                            .send(StatusMessage::PlaybackDone)
-                            .unwrap_or(());
-                    }
-                }
+                let ended = playback_loop(params, channel, &status_channel);
+                status_channel.send(ended).unwrap_or(());
             })
             .unwrap();
         Ok(Box::new(handle))

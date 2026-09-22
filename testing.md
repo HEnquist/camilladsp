@@ -14,8 +14,9 @@ and shuts it down again.
 It covers the lifecycle and exit codes, the config command surface including rapid config churn,
 volume, mute and the faders, the signal level getters, the spectrum analysis, the pushed event
 subscriptions, the state file, the error paths, the stalled and paused states, the rate
-control loop, the capture side resampler, and the clipping that comes with converting to a
-sample format.
+control loop, the capture side resampler, the clipping that comes with converting to a
+sample format, and the stop reasons left behind by a device failure, a sample rate change or
+a stream that ends.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.

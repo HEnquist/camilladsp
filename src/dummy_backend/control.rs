@@ -35,7 +35,7 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,7 +56,10 @@ const BIND_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DummyControl {
     stall: AtomicBool,
     silence: AtomicBool,
+    error: AtomicBool,
+    eof: AtomicBool,
     drift_ppm: AtomicI32,
+    rate: AtomicU32,
     frames: AtomicU64,
     pauses: AtomicU64,
     resyncs: AtomicU64,
@@ -74,9 +77,35 @@ impl DummyControl {
         self.silence.load(Ordering::Relaxed)
     }
 
+    /// Whether the device should report a failure and stop.
+    ///
+    /// One shot without needing to be: the state belongs to the device, so the restart
+    /// that follows builds a new one with the flag clear, and the session comes back up
+    /// instead of failing again immediately.
+    pub fn failing(&self) -> bool {
+        self.error.load(Ordering::Relaxed)
+    }
+
+    /// Whether the capture should end its stream, the way a file capture does at EOF.
+    pub fn at_eof(&self) -> bool {
+        self.eof.load(Ordering::Relaxed)
+    }
+
     /// How far off nominal the device clock runs, in parts per million.
     pub fn drift_ppm(&self) -> i32 {
         self.drift_ppm.load(Ordering::Relaxed)
+    }
+
+    /// The rate the device has switched to, if it has been told to switch at all.
+    ///
+    /// This is a different thing from a drift. A drift is the same stream arriving a
+    /// little fast or slow, which rate adjust exists to absorb; this is the source
+    /// changing rate underneath the engine, which it can only react to by restarting.
+    pub fn rate_override(&self) -> Option<usize> {
+        match self.rate.load(Ordering::Relaxed) {
+            0 => None,
+            rate => Some(rate as usize),
+        }
     }
 
     /// Count frames produced or consumed.
@@ -224,7 +253,10 @@ fn read_key(control: &DummyControl, key: &str) -> String {
     let value = match key {
         "stall" => u64::from(control.stalled()),
         "silence" => u64::from(control.silenced()),
+        "error" => u64::from(control.failing()),
+        "eof" => u64::from(control.at_eof()),
         "drift" => return format!("drift={}", control.drift_ppm()),
+        "rate" => u64::from(control.rate.load(Ordering::Relaxed)),
         "frames" => control.frames.load(Ordering::Relaxed),
         "pauses" => control.pauses.load(Ordering::Relaxed),
         "resyncs" => control.resyncs.load(Ordering::Relaxed),
@@ -237,9 +269,18 @@ fn write_key(control: &DummyControl, key: &str, value: &str) -> String {
     match key {
         "stall" => store_bool(&control.stall, value),
         "silence" => store_bool(&control.silence, value),
+        "error" => store_bool(&control.error, value),
+        "eof" => store_bool(&control.eof, value),
         "drift" => match value.parse::<i32>() {
             Ok(parsed) => {
                 control.drift_ppm.store(parsed, Ordering::Relaxed);
+                "ok".to_string()
+            }
+            Err(_) => format!("bad value: {value}"),
+        },
+        "rate" => match value.parse::<u32>() {
+            Ok(parsed) => {
+                control.rate.store(parsed, Ordering::Relaxed);
                 "ok".to_string()
             }
             Err(_) => format!("bad value: {value}"),
@@ -289,5 +330,31 @@ mod tests {
         assert_eq!(handle_line(&control, "nonsense:1"), "unknown key: nonsense");
         assert_eq!(handle_line(&control, "stall:maybe"), "bad value: maybe");
         assert_eq!(handle_line(&control, "drift:lots"), "bad value: lots");
+        assert_eq!(handle_line(&control, "rate:fast"), "bad value: fast");
+    }
+
+    #[test]
+    fn a_rate_of_zero_is_no_switch_rather_than_a_stopped_clock() {
+        let control = DummyControl::default();
+        assert_eq!(handle_line(&control, "rate"), "rate=0");
+        assert_eq!(control.rate_override(), None);
+        assert_eq!(handle_line(&control, "rate:44100"), "ok");
+        assert_eq!(control.rate_override(), Some(44100));
+        // And back, so a test can put a device's clock where it started.
+        assert_eq!(handle_line(&control, "rate:0"), "ok");
+        assert_eq!(control.rate_override(), None);
+    }
+
+    #[test]
+    fn a_device_can_be_told_to_fail_and_to_finish() {
+        let control = DummyControl::default();
+        assert!(!control.failing());
+        assert!(!control.at_eof());
+        assert_eq!(handle_line(&control, "error:1"), "ok");
+        assert_eq!(handle_line(&control, "eof:1"), "ok");
+        assert!(control.failing());
+        assert!(control.at_eof());
+        assert_eq!(handle_line(&control, "error"), "error=1");
+        assert_eq!(handle_line(&control, "eof"), "eof=1");
     }
 }

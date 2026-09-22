@@ -402,6 +402,8 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             chunksize: conf.chunksize(),
             silence_threshold: conf.silence_threshold(),
             silence_timeout: conf.silence_timeout_s(),
+            stop_on_rate_change: conf.stop_on_rate_change(),
+            rate_measure_interval: conf.rate_measure_interval_s(),
             control_port,
         }),
         #[cfg(target_os = "macos")]

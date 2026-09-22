@@ -65,6 +65,7 @@ tested rather than a stale optimised one. `CAMILLADSP_BIN` overrides the choice.
 - `test_rate_control.py` — the PI controller, the buffer level, and clocks that disagree
 - `test_resampling.py` — the capture side resampler: the types, the load, the rates
 - `test_clipping.py` — the playback's sample format conversion, which is where clipping happens
+- `test_failures.py` — device failures, sample rate changes, and the end of a stream
 - `*.yml` — the configs the tests load
 - `pytest.ini` — the global timeout, which makes every test a hang check, and the `pacing` marker
 
@@ -86,8 +87,10 @@ its own, see `src/dummy_backend/control.rs`. A device gets one when its config b
 `control_port`, and `control_cdsp` is the fixture that starts a pair of them on free ports and
 hands back a `capture_control` and a `playback_control`. The protocol is one line in and one line
 out, `stall:1` to write and `stall` to read, and the counters `frames`, `pauses` and `resyncs`
-are readable keys like any other. The listener is owned by the device, so it dies on a config
-reload and nothing carries over between tests.
+are readable keys like any other. `error` makes the device report a failure, `rate` makes it
+switch sample rate, and `eof` ends the capture's stream. The listener is owned by the device, so
+it dies on a config reload and nothing carries over between tests, which is also what makes
+`error` a one shot: the session that comes back is built on control state that starts clear.
 
 Tests that assert on timing accuracy, rather than merely taking time, carry the `pacing` marker,
 and CI runs them on Linux only. The rate control loop and the buffer accounting are portable code
