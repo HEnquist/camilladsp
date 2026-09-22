@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+import numpy as np
 import pytest
 from websocket import WebSocketException
 
@@ -235,6 +236,103 @@ def control_cdsp(start_cdsp, config_file):
         return cdsp
 
     return _start
+
+
+# What the file device tests generate and expect: a sine at a level whose peak and RMS
+# are round numbers in dB, on an exact submultiple of the sample rate so a whole number
+# of periods fits in any chunk.
+SINE_FREQ = 1000.0
+SINE_LEVEL_DB = -6.0
+SAMPLERATE = 48000
+
+
+def sine_samples(seconds, channels=2, samplerate=SAMPLERATE):
+    """The interleaved float64 samples the file device tests read and compare against.
+
+    Built here rather than in a checked in .wav so a test can ask for whatever length it
+    needs, and so the expected output is computed from the same definition the input was
+    written from rather than from a second copy of it.
+    """
+    frames = int(seconds * samplerate)
+    amplitude = 10 ** (SINE_LEVEL_DB / 20)
+    wave = amplitude * np.sin(2 * np.pi * SINE_FREQ * np.arange(frames) / samplerate)
+    return np.repeat(wave[:, None], channels, axis=1)
+
+
+# The device blocks of file_devices.yml, and what each is swapped for. The dummy devices
+# are paced and the file devices are not, so swapping one block for the other is what
+# gives all four combinations of a free-running and a paced end of the pipeline.
+FILE_CAPTURE = """  capture:
+    type: RawFile
+    channels: 2
+    filename: CAPTURE_FILE
+    format: F64_LE"""
+DUMMY_CAPTURE = """  capture:
+    type: Dummy
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      level: -6.0"""
+FILE_PLAYBACK = """  playback:
+    type: File
+    channels: 2
+    filename: PLAYBACK_FILE
+    format: F64_LE"""
+DUMMY_PLAYBACK = """  playback:
+    type: Dummy
+    channels: 2"""
+
+
+@pytest.fixture
+def raw_sine_file(tmp_path):
+    """Factory that writes a raw float64 sine file and returns its path and samples."""
+    count = [0]
+
+    def _write(seconds, channels=2):
+        count[0] += 1
+        samples = sine_samples(seconds, channels)
+        path = tmp_path / f"sine{count[0]}.raw"
+        samples.astype(np.float64).ravel().tofile(path)
+        return str(path), samples
+
+    return _write
+
+
+def read_raw(path, channels=2):
+    """Read back what a File playback device wrote, as one column per channel."""
+    return np.fromfile(path, dtype=np.float64).reshape(-1, channels)
+
+
+@pytest.fixture
+def device_config(config_file, raw_sine_file, tmp_path):
+    """Factory for a config with either end of the pipeline paced or free-running.
+
+    Returns the config path, the input samples if the capture reads a file, and the
+    output path if the playback writes one, so a test can compare what came out against
+    what went in wherever both exist.
+    """
+
+    def _build(capture="file", playback="file", seconds=2.0, edits=None):
+        replacements = {}
+        samples = None
+        if capture == "file":
+            source, samples = raw_sine_file(seconds)
+            replacements["CAPTURE_FILE"] = source
+        else:
+            replacements[FILE_CAPTURE] = DUMMY_CAPTURE
+        destination = None
+        if playback == "file":
+            destination = str(tmp_path / "out.raw")
+            replacements["PLAYBACK_FILE"] = destination
+        else:
+            replacements[FILE_PLAYBACK] = DUMMY_PLAYBACK
+        # Applied last so a caller can override what this chose, which is how the
+        # startup failure test points the playback at a directory that does not exist.
+        replacements.update(edits or {})
+        return config_file(replacements, base="file_devices.yml"), samples, destination
+
+    return _build
 
 
 @pytest.fixture

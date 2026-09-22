@@ -1,0 +1,24 @@
+---
+# Raw file in, raw file out, for the tests about how the devices are paced and whether
+# the audio survives the trip. The dummy devices are paced and the file devices are not,
+# so swapping one block for the other is what gives all four combinations of a
+# free-running and a paced end. See test_file_devices.py for the blocks that go in.
+#
+# The two filenames are placeholders, replaced by the tests with paths under tmp_path.
+# The dummy blocks need a build with the dummy-backend feature; the file blocks do not.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  queuelimit: 4
+  capture:
+    type: RawFile
+    channels: 2
+    filename: CAPTURE_FILE
+    format: F64_LE
+  playback:
+    type: File
+    channels: 2
+    filename: PLAYBACK_FILE
+    format: F64_LE
+
+pipeline: []

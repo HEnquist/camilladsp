@@ -15,12 +15,14 @@ It covers the lifecycle and exit codes, the config command surface including rap
 volume, mute and the faders, the signal level getters, the spectrum analysis, the pushed event
 subscriptions, the state file, the error paths, the stalled and paused states, the rate
 control loop, the capture side resampler, the clipping that comes with converting to a
-sample format, and the stop reasons left behind by a device failure, a sample rate change or
-a stream that ends.
+sample format, the stop reasons left behind by a device failure, a sample rate change or
+a stream that ends, the processing itself through a mixer and a filter, and the file devices
+in every combination of a paced and a free-running end.
 
 The tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.
-They also need the Python packages `pytest`, `pytest-timeout` and `websocket-client`.
+They also need the Python packages `pytest`, `pytest-timeout`, `websocket-client`
+and `numpy`.
 
 ```sh
 cargo build --profile e2e --features dummy-backend

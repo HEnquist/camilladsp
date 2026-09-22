@@ -32,7 +32,7 @@ forwards whatever command name it is handed, so it cannot lag.
 
 ```sh
 cargo build --profile e2e --features dummy-backend
-pip install pytest pytest-timeout websocket-client
+pip install pytest pytest-timeout websocket-client numpy
 pytest -v testscripts/e2e
 ```
 
@@ -66,6 +66,9 @@ tested rather than a stale optimised one. `CAMILLADSP_BIN` overrides the choice.
 - `test_resampling.py` — the capture side resampler: the types, the load, the rates
 - `test_clipping.py` — the playback's sample format conversion, which is where clipping happens
 - `test_failures.py` — device failures, sample rate changes, and the end of a stream
+- `test_file_devices.py` — the file devices, and a paced end of the pipeline meeting a free one
+- `test_teardown.py` — stopping a run in the states where stopping is hard
+- `test_processing.py` — a mixer and a Biquad, asserted through the audio
 - `*.yml` — the configs the tests load
 - `pytest.ini` — the global timeout, which makes every test a hang check, and the `pacing` marker
 

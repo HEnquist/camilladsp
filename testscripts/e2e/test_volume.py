@@ -5,7 +5,11 @@ the playback level instead, so they prove the Main fader actually reaches the au
 not only the status struct.
 """
 
+import os
+
 import pytest
+
+from conftest import HERE
 
 NUM_FADERS = 5
 # The global range every fader is clamped to, see the SetVolume docs in
@@ -162,3 +166,26 @@ def test_volume_limit_clamps_the_playback_level(start_cdsp, config_file):
     # The fader reports what it was told, the audio gets the limited value.
     assert cdsp.send("GetVolume") == pytest.approx(0.0)
     settled_playback_peak(cdsp, PLAYBACK_PEAK_DB + limit)
+
+
+def test_a_fader_set_before_start_applies_to_the_new_session(start_cdsp):
+    """A volume set in standby has to survive into the session that follows.
+
+    From cdsp's `PresetFaderVolumeBeforeStart`. The faders live outside any session, so
+    a controller can set one while the engine has no config at all, and the obvious way
+    to get that wrong is to reset them when the pipeline is built. Asserting on the
+    playback level rather than on the getter is what makes this about the audio: the
+    round trip would still pass if the value were kept and then ignored.
+    """
+    preset = -20.0
+    cdsp = start_cdsp(config=None, extra_args=["--wait"], wait_for_running=False)
+    cdsp.poll_until("GetState", "Inactive")
+    cdsp.send("SetVolume", preset)
+    assert cdsp.send("GetVolume") == pytest.approx(preset)
+
+    with open(os.path.join(HERE, "dummy_sine.yml")) as conf:
+        cdsp.send("SetConfig", conf.read())
+    cdsp.poll_until("GetState", "Running")
+
+    assert cdsp.send("GetVolume") == pytest.approx(preset)
+    settled_playback_peak(cdsp, PLAYBACK_PEAK_DB + preset)
