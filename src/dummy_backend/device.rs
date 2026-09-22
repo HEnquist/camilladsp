@@ -42,8 +42,26 @@ use crate::Res;
 use crate::StatusMessage;
 
 /// How far a dummy device is allowed to fall behind the clock before it gives up on
-/// catching up, expressed in chunks. See `Pacer::resync_if_behind`.
-const MAX_DEFICIT_CHUNKS: usize = 8;
+/// catching up. See `Pacer::resync_if_behind`.
+///
+/// A duration rather than a chunk count. What the budget stands for is what a real
+/// device's buffer holds, and that is a time: an ALSA device with 128 frame periods still
+/// buffers tens of milliseconds, because the buffer is several periods deep. Counted in
+/// chunks it shrank with the chunk size instead, to 21 ms at chunksize 128 against 171 ms
+/// at 1024, so the smallest chunk size had the least tolerance for exactly the scheduling
+/// jitter that hurts it most. Every wake later than that threw away the frames the device
+/// owed, which is why `GetCaptureRate` read 38377 on a loaded macOS runner and stayed
+/// there, with nothing wrong with the pacing itself.
+const MAX_DEFICIT: Duration = Duration::from_millis(200);
+
+/// The floor under that, so a device with a very long chunk still gets a whole one of
+/// slack. At 4096 frames and 48 kHz two chunks is 171 ms, just under the duration above.
+const MIN_DEFICIT_CHUNKS: f64 = 2.0;
+
+/// How many frames of deficit a device carries before it resyncs, at this rate and chunk.
+fn max_deficit_frames(samplerate: f64, chunk_frames: f64) -> f64 {
+    (MAX_DEFICIT.as_secs_f64() * samplerate).max(MIN_DEFICIT_CHUNKS * chunk_frames)
+}
 
 /// The rate a device runs at once its clock is taken off nominal.
 fn drifted_rate(samplerate: usize, drift_ppm: i32) -> f64 {
@@ -167,10 +185,10 @@ fn capture_loop(
         params.chunksize,
     );
     // One chunk of frames measured on the capture side of the resampler, which is what the
-    // pacer counts, so the deficit limit means the same eight chunks of time either way.
+    // pacer counts, so the deficit limit means the same span of time either way.
     let capture_chunk_frames =
         params.chunksize as f64 * params.capture_samplerate as f64 / params.samplerate as f64;
-    let max_deficit = MAX_DEFICIT_CHUNKS as f64 * capture_chunk_frames;
+    let max_deficit = max_deficit_frames(params.capture_samplerate as f64, capture_chunk_frames);
     let chunk_duration =
         Duration::from_secs_f64(params.chunksize as f64 / params.samplerate as f64);
     let mut state = ProcessingState::Running;
@@ -432,7 +450,7 @@ fn playback_loop(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
-    let max_deficit = (MAX_DEFICIT_CHUNKS * params.chunksize) as f64;
+    let max_deficit = max_deficit_frames(params.samplerate as f64, params.chunksize as f64);
     // The target level is where the buffer should sit, not how big it is, so the device
     // has room above it. Without that headroom the write below blocks as soon as the
     // level reaches the target, the excess piles up in the queue until the capture
