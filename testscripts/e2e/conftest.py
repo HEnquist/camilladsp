@@ -8,6 +8,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -113,7 +114,22 @@ class CamillaDsp:
             self.send("Exit")
         except (OSError, WebSocketException):
             pass
-        return self.process.wait(timeout=timeout)
+        # A piped stdout that nobody reads stops the playback device inside a write as
+        # soon as the pipe buffer fills, and the process then never gets to exit. The
+        # drain has to run alongside the wait rather than after it.
+        drain = self.drain_stdout()
+        code = self.process.wait(timeout=timeout)
+        if drain is not None:
+            drain.join(timeout=timeout)
+        return code
+
+    def drain_stdout(self):
+        """Read a piped stdout to EOF in the background, or do nothing if it is inherited."""
+        if self.process.stdout is None:
+            return None
+        thread = threading.Thread(target=_drain, args=(self.process.stdout,), daemon=True)
+        thread.start()
+        return thread
 
 
 @pytest.fixture(scope="session")
@@ -138,16 +154,22 @@ def spawn_cdsp(camilladsp_bin):
     """
     started = []
 
-    def _spawn(config="dummy_sine.yml", extra_args=()):
+    def _spawn(config="dummy_sine.yml", extra_args=(), pipe_stdin=False, pipe_stdout=False):
         port = free_port()
         args = [camilladsp_bin, "-p", str(port), *extra_args]
         if config is not None:
             # A config given as an absolute path is used as-is, which is what the tests
             # that build a config in tmp_path rely on.
             args.append(os.path.join(HERE, config))
-        # stdout and stderr are inherited, so pytest captures the log and prints it
-        # when a test fails.
-        process = subprocess.Popen(args)
+        # stdout and stderr are inherited by default, so pytest captures the log and
+        # prints it when a test fails. The Stdin and Stdout devices need a pipe on the
+        # stream they use, and it is a parameter rather than the default so stderr keeps
+        # carrying the log through those tests too.
+        process = subprocess.Popen(
+            args,
+            stdin=subprocess.PIPE if pipe_stdin else None,
+            stdout=subprocess.PIPE if pipe_stdout else None,
+        )
         started.append(process)
         return process, port
 
@@ -164,8 +186,8 @@ def start_cdsp(spawn_cdsp):
     """Factory that starts CamillaDSP and cleans it up when the test is done."""
     started = []
 
-    def _start(config="dummy_sine.yml", extra_args=(), wait_for_running=True):
-        process, port = spawn_cdsp(config, extra_args)
+    def _start(config="dummy_sine.yml", extra_args=(), wait_for_running=True, **pipes):
+        process, port = spawn_cdsp(config, extra_args, **pipes)
         client = _connect(process, port)
         cdsp = CamillaDsp(process, client, port)
         started.append(cdsp)
@@ -355,6 +377,15 @@ def _connect(process, port):
             time.sleep(0.05)
     process.kill()
     raise TimeoutError(f"No websocket on port {port} after {STARTUP_TIMEOUT} s: {last_error}")
+
+
+def _drain(stream):
+    """Read a stream to EOF and throw it away."""
+    try:
+        while stream.read(65536):
+            pass
+    except (OSError, ValueError):
+        pass
 
 
 def _teardown(cdsp):
