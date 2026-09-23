@@ -20,9 +20,12 @@ use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
-use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
+use crate::utils::stash::{
+    CHUNK_RESERVE, MAX_CONTAINER_STASH_SIZE, MAX_STASH_SIZE, container_from_stash, recycle_chunk,
+    recycle_container, stash_can_spare, vec_from_stash,
+};
 use crate::utils::wavtools::write_wav_header;
-use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -31,6 +34,9 @@ use std::thread;
 
 // Minimum number of chunks the writer channel can hold
 const MIN_CHUNKS: usize = 4;
+
+/// Token in a FileWriter filename, replaced by the local time when the file is created.
+pub const TIMESTAMP_TOKEN: &str = "$timestamp$";
 
 pub struct FileWriter {
     name: String,
@@ -78,7 +84,7 @@ impl WriterPool {
     }
 
     /// Get a sender to the writer for these parameters, starting one if needed.
-    fn sender(&mut self, name: &str, key: WriterKey) -> Sender<AudioChunk> {
+    fn sender(&mut self, name: &str, key: WriterKey, nbr_channels: usize) -> Sender<AudioChunk> {
         let path =
             file_key(&key.params.filename).unwrap_or_else(|_| PathBuf::from(&key.params.filename));
         let predecessor = match self.entries.get_mut(&path) {
@@ -93,7 +99,7 @@ impl WriterPool {
             Some(_) => self.entries.remove(&path).and_then(|entry| entry.handle),
             None => None,
         };
-        let (tx, handle) = spawn_writer(name, key.clone(), predecessor);
+        let (tx, handle) = spawn_writer(name, key.clone(), nbr_channels, predecessor);
         self.entries.insert(
             path,
             PoolEntry {
@@ -140,12 +146,28 @@ impl WriterPool {
     }
 }
 
+/// The number of chunks a writer can queue: about one second, as far as half
+/// the stash can supply it.
+fn writer_capacity(samplerate: usize, chunksize: usize, nbr_channels: usize) -> usize {
+    let one_second = samplerate / chunksize.max(1);
+    let containers = MAX_CONTAINER_STASH_SIZE / 2;
+    let vecs = MAX_STASH_SIZE / (2 * nbr_channels.max(1));
+    one_second.min(containers).min(vecs).max(MIN_CHUNKS)
+}
+
+/// Start a writer thread, and put the chunks it can queue into the stash, plus
+/// the reserve it must leave there, so that the stash has them to spare when
+/// the writer falls behind.
 fn spawn_writer(
     name: &str,
     key: WriterKey,
+    nbr_channels: usize,
     predecessor: Option<thread::JoinHandle<()>>,
 ) -> (Sender<AudioChunk>, Option<thread::JoinHandle<()>>) {
-    let capacity = (key.samplerate / key.chunksize.max(1)).max(MIN_CHUNKS);
+    let capacity = writer_capacity(key.samplerate, key.chunksize, nbr_channels);
+    for _ in 0..capacity + CHUNK_RESERVE {
+        recycle_container(vec![vec![0.0; key.chunksize]; nbr_channels]);
+    }
     let (tx, rx) = bounded::<AudioChunk>(capacity);
     let proc_name = name.to_string();
     let handle = thread::Builder::new()
@@ -177,7 +199,9 @@ fn write_loop(key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
     let mut bytes = Vec::new();
     for chunk in rx.iter() {
         if file.is_none() {
-            let mut f = BufWriter::new(File::create(&params.filename)?);
+            let filename = resolve_timestamp(&params.filename, chrono::Local::now());
+            info!("FileWriter writing to {filename}");
+            let mut f = BufWriter::new(File::create(&filename)?);
             if params.wav_header() {
                 write_wav_header(&mut f, chunk.channels, params.format, key.samplerate)?;
             }
@@ -195,6 +219,18 @@ fn write_loop(key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
     }
     debug!("FileWriter writer for '{}' done", params.filename);
     Ok(())
+}
+
+/// Replace the timestamp token with the local time, to the second.
+fn resolve_timestamp<Tz: chrono::TimeZone>(filename: &str, now: chrono::DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    if !filename.contains(TIMESTAMP_TOKEN) {
+        return filename.to_string();
+    }
+    let stamp = now.format("%Y%m%d-%H%M%S").to_string();
+    filename.replace(TIMESTAMP_TOKEN, &stamp)
 }
 
 impl FileWriter {
@@ -223,7 +259,7 @@ impl FileWriter {
             samplerate,
             chunksize,
         };
-        let tx = pool.sender(name, key);
+        let tx = pool.sender(name, key, process_channels.len());
         FileWriter {
             name: name.to_string(),
             config,
@@ -241,6 +277,17 @@ impl Processor for FileWriter {
 
     /// Copy the selected channels of the input AudioChunk and queue them for writing.
     fn process_chunk(&mut self, input: &mut AudioChunk) {
+        // Drop the chunk rather than take buffers the audio path may need.
+        if self.tx.is_full() || !stash_can_spare(self.process_channels.len()) {
+            if !self.warned {
+                warn!(
+                    "FileWriter processor '{}' buffer overrun, dropping chunks",
+                    self.name
+                );
+                self.warned = true;
+            }
+            return;
+        }
         let mut waveforms = container_from_stash(self.process_channels.len());
         for channel in self.process_channels.iter() {
             let source = &input.waveforms[*channel];
@@ -261,18 +308,9 @@ impl Processor for FileWriter {
                     self.warned = false;
                 }
             }
-            Err(TrySendError::Full(chunk)) => {
-                recycle_chunk(chunk);
-                if !self.warned {
-                    warn!(
-                        "FileWriter processor '{}' buffer overrun, dropping chunks",
-                        self.name
-                    );
-                    self.warned = true;
-                }
-            }
-            // The writer thread stopped, and logged why.
-            Err(TrySendError::Disconnected(chunk)) => recycle_chunk(chunk),
+            // Only this thread sends, so after the check above an error means
+            // the writer thread stopped, and it logged why.
+            Err(err) => recycle_chunk(err.into_inner()),
         }
     }
 
@@ -329,6 +367,15 @@ pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
         return Err(
             config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
         );
+    }
+    let in_directory = Path::new(&config.filename)
+        .parent()
+        .is_some_and(|dir| dir.to_string_lossy().contains(TIMESTAMP_TOKEN));
+    if in_directory {
+        return Err(config::ConfigError::new(
+            "FileWriter processor filename can only use $timestamp$ in the file name, not the directory.",
+        )
+        .into());
     }
     if config.wav_header() && config.format == BinarySampleFormat::S24_4_RJ_LE {
         return Err(config::ConfigError::new(
@@ -454,19 +501,54 @@ mod tests {
         let mut pool = WriterPool::default();
         let mut fw = writer(f32_config(filename.clone()), &mut pool);
         // Swap in a channel nobody reads.
-        let (tx, rx) = bounded(1);
+        let (tx, rx) = bounded(2);
         fw.tx = tx;
 
         let mut chunk = stereo_chunk([1.0, 2.0], [3.0, 4.0], 2);
         fw.process_chunk(&mut chunk);
+        fw.process_chunk(&mut chunk);
         assert!(!fw.warned);
         fw.process_chunk(&mut chunk);
         assert!(fw.warned);
-        assert_eq!(rx.len(), 1);
+        assert_eq!(rx.len(), 2);
+
+        // The writer catches up.
+        recycle_chunk(rx.recv().unwrap());
+        recycle_chunk(rx.recv().unwrap());
+        fw.process_chunk(&mut chunk);
+        assert!(!fw.warned);
 
         drop(fw);
         pool.join();
         assert!(!Path::new(&filename).exists());
+    }
+
+    #[test]
+    fn writer_capacity_fits_in_the_stash() {
+        // One second when the stash has room.
+        assert_eq!(writer_capacity(48_000, 1024, 2), 46);
+        // Half the containers at a small chunksize.
+        assert_eq!(writer_capacity(48_000, 64, 2), MAX_CONTAINER_STASH_SIZE / 2);
+        // Half the waveform buffers with many channels.
+        assert_eq!(writer_capacity(48_000, 64, 32), MAX_STASH_SIZE / 64);
+        // Never below the minimum.
+        assert_eq!(writer_capacity(1_000, 1024, 2), MIN_CHUNKS);
+    }
+
+    #[test]
+    fn timestamp_is_resolved_in_the_file_name() {
+        use chrono::TimeZone;
+        let now = chrono::Utc.with_ymd_and_hms(2026, 9, 23, 8, 5, 3).unwrap();
+        assert_eq!(
+            resolve_timestamp("/tmp/cap_$timestamp$.wav", now),
+            "/tmp/cap_20260923-080503.wav"
+        );
+        assert_eq!(resolve_timestamp("/tmp/cap.wav", now), "/tmp/cap.wav");
+
+        let mut config = f32_config("/tmp/$timestamp$/cap.wav".to_string());
+        assert!(validate_file_writer(&config).is_err());
+        config.filename = "/tmp/cap_$timestamp$.wav".to_string();
+        assert!(validate_file_writer(&config).is_ok());
     }
 
     #[test]

@@ -20,8 +20,14 @@ use std::sync::LazyLock;
 use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
 
-const MAX_STASH_SIZE: usize = 1024;
-const MAX_CONTAINER_STASH_SIZE: usize = 128;
+/// Capacity of the waveform buffer stash. Sized so that a FileWriter can keep
+/// half of it in flight at small chunksizes.
+pub const MAX_STASH_SIZE: usize = 4096;
+/// Capacity of the channel container stash.
+pub const MAX_CONTAINER_STASH_SIZE: usize = 512;
+/// Chunks kept for the audio path when an optional user such as a FileWriter
+/// asks with [`stash_can_spare`]. About what the audio path has in flight.
+pub const CHUNK_RESERVE: usize = 8;
 
 /// Global stash of reusable `Vec<CamillaFloat>` audio waveform buffers, avoiding repeated allocations.
 pub static BUFFERSTASH: LazyLock<ArrayQueue<Vec<CamillaFloat>>> =
@@ -121,6 +127,15 @@ pub fn recycle_vec(vector: Vec<CamillaFloat>) {
 /// Return a channel container and all its inner waveform vectors to the stash.
 pub fn recycle_container(container: Vec<Vec<CamillaFloat>>) {
     recycle_container_to_queue(&CONTAINERSTASH, &BUFFERSTASH, container);
+}
+
+/// Whether the stash can spare a chunk of `nbr_vecs` waveform buffers and
+/// still hold [`CHUNK_RESERVE`] such chunks for the audio path.
+///
+/// For users that would rather drop data than make the audio path allocate.
+/// The counts are a snapshot, which is close enough for that.
+pub fn stash_can_spare(nbr_vecs: usize) -> bool {
+    CONTAINERSTASH.len() > CHUNK_RESERVE && BUFFERSTASH.len() >= (CHUNK_RESERVE + 1) * nbr_vecs
 }
 
 /// Return all waveform buffers of an [`AudioChunk`] to the stash.
