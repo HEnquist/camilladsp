@@ -6,79 +6,183 @@ on:
 
 name: ALSA loopback probe
 
-# Answers whether a stock runner can load snd-aloop at all, and whether the runner user
-# can then open the devices, before an e2e job is built on it. Every step prints what it
-# finds and the job only fails where a later suite would fail too. The steps are meant
-# to move into the real snd-aloop job later, so it fails early when the loopback can't
-# be enabled.
+# The runner's azure kernel is built with CONFIG_SOUND unset, so snd-aloop cannot be
+# loaded on the runner itself, whatever package is installed. Instead this boots an
+# Ubuntu minimal cloud image under KVM, which runs the generic kernel, and loads the
+# module there. The binary is built on the runner and copied in, so the VM needs no
+# Rust toolchain. The guest is the same Ubuntu release as the runner, which keeps the
+# binary's glibc requirement satisfied.
+#
+# Every step prints what it finds and the job only fails where a later suite would fail
+# too. The checks are meant to move into the real snd-aloop job, so it fails early and
+# says why when the loopback can't be enabled.
+env:
+  IMAGE_URL: https://cloud-images.ubuntu.com/minimal/releases/noble/release/ubuntu-24.04-minimal-cloudimg-amd64.img
+
 jobs:
   probe:
-    name: snd-aloop, ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+    name: snd-aloop in a VM
+    runs-on: ubuntu-latest
     steps:
-      - name: Kernel and image
-        run: |
-          uname -a
-          cat /etc/os-release
-          echo "image: $ImageOS $ImageVersion"
-          id
+      - name: Checkout sources
+        uses: actions/checkout@v5
 
-      - name: Is the module there before installing anything
+      - name: Is KVM available
         run: |
-          modinfo snd-aloop || echo "snd-aloop not in the installed module tree"
-          ls /proc/asound 2>/dev/null || echo "no /proc/asound, sound core not loaded"
+          ls -l /dev/kvm
+          # The runner user is not in the kvm group, the usual fix for hosted runners.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
 
-      # The known risk from the plan: the kernel matching package can lag the image kernel.
-      - name: Is the matching modules-extra package published
+      - name: Install QEMU and ALSA devel
         run: |
           sudo apt-get update
-          apt-cache policy "linux-modules-extra-$(uname -r)"
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils libasound2-dev
 
-      - name: Install modules-extra and alsa-utils
-        run: sudo apt-get install -y "linux-modules-extra-$(uname -r)" alsa-utils
-
-      # The azure flavour kernel may be built without sound at all, in which case no
-      # package brings snd-aloop and the module has to come from somewhere else.
-      - name: Is the kernel built with ALSA
+      - name: Download the image
         run: |
-          grep -E '^(# )?CONFIG_(SOUND|SND|SND_PCM|SND_TIMER|SND_ALOOP)[= ]' "/boot/config-$(uname -r)" || true
-          find "/lib/modules/$(uname -r)" -path '*sound*' -name '*.ko*' | head -20
-          dpkg -L "linux-modules-extra-$(uname -r)" | grep -c '\.ko' || true
+          curl -sSfL -o base.img "$IMAGE_URL"
+          qemu-img info base.img
+          qemu-img create -f qcow2 -F qcow2 -b base.img vm.qcow2 6G
 
-      - name: Load snd-aloop
+      - name: Boot the VM
         run: |
+          ssh-keygen -q -t ed25519 -N '' -f vm_key
+          cat > user-data <<EOF
+          #cloud-config
+          ssh_authorized_keys:
+            - $(cat vm_key.pub)
+          EOF
+          echo "instance-id: probe" > meta-data
+          cloud-localds seed.img user-data meta-data
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/config <<EOF
+          Host vm
+            HostName localhost
+            Port 2222
+            User ubuntu
+            IdentityFile $PWD/vm_key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            LogLevel ERROR
+            ConnectTimeout 5
+          EOF
+          qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 2048 \
+            -drive file=vm.qcow2,if=virtio \
+            -drive file=seed.img,if=virtio,format=raw \
+            -nic user,model=virtio,hostfwd=tcp:127.0.0.1:2222-:22 \
+            -display none -serial file:console.log -daemonize
+          start=$(date +%s)
+          until ssh vm true 2>/dev/null; do
+            if [ $(( $(date +%s) - start )) -gt 300 ]; then
+              echo "no ssh after 300 s"
+              cat console.log
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "ssh up after $(( $(date +%s) - start )) s"
+          ssh vm cloud-init status --wait || echo "cloud-init status $?"
+
+      # No --features, the release shape of the binary. Runs while nothing else needs
+      # the runner, but after the boot so a broken image fails fast.
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: stock
+
+      - name: Build
+        run: cargo build --profile e2e
+
+      - name: Is the guest kernel built with ALSA
+        run: |
+          ssh vm 'uname -a; grep -E "^(# )?CONFIG_(SOUND|SND|SND_PCM|SND_TIMER|SND_ALOOP)[= ]" /boot/config-$(uname -r); id'
+
+      - name: Load snd-aloop in the guest
+        run: |
+          ssh vm bash -s <<'EOF'
+          set -e
+          if ! modinfo snd-aloop >/dev/null 2>&1; then
+            echo "snd-aloop is not in linux-modules, installing linux-modules-extra"
+            sudo apt-get update -q
+            sudo apt-get install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
+          fi
+          sudo apt-get install -y -q --no-install-recommends alsa-utils
           sudo modprobe snd-aloop pcm_substreams=2
-          lsmod | grep -E '^snd' || true
           cat /proc/asound/cards
           ls -l /dev/snd
+          EOF
 
-      # The runner user is not in the audio group, so without a logind seat ACL the
-      # devices may only open as root. A suite that has to run camilladsp under sudo
-      # is a different shape, so this is worth knowing up front.
-      - name: Can the runner user see the devices
-        run: |
-          aplay -l
-          arecord -l
-          getfacl /dev/snd/* 2>/dev/null || true
+      - name: Can the guest user see the devices
+        run: ssh vm 'aplay -l; arecord -l'
 
-      - name: Roundtrip through the loopback
+      - name: Roundtrip through the loopback with alsa-utils
         run: |
+          ssh vm bash -s <<'EOF'
+          set -e
           head -c 384000 /dev/urandom > in.raw
-          arecord -D hw:Loopback,1,0 -f S16_LE -r 48000 -c 2 -t raw -d 3 out.raw &
+          arecord -q -D hw:Loopback,1,0 -f S16_LE -r 48000 -c 2 -t raw -d 3 out.raw &
           rec=$!
           sleep 0.5
-          aplay -D hw:Loopback,0,0 -f S16_LE -r 48000 -c 2 -t raw in.raw
+          aplay -q -D hw:Loopback,0,0 -f S16_LE -r 48000 -c 2 -t raw in.raw
           wait $rec
-          ls -l in.raw out.raw
-          python3 - <<'EOF'
+          python3 - <<'PY'
           data = open("out.raw", "rb").read()
+          src = open("in.raw", "rb").read()
           nonzero = sum(1 for b in data if b)
           print(f"captured {len(data)} bytes, {nonzero} nonzero")
-          src = open("in.raw", "rb").read()
           print("input found in capture:", src[:4096] in data)
           assert nonzero > 0, "capture is silent"
+          PY
           EOF
+
+      - name: Play through the loopback with camilladsp
+        run: |
+          scp -q target/e2e/camilladsp vm:
+          ssh vm bash -s <<'EOF'
+          set -e
+          ./camilladsp --version
+          cat > loopback.yml <<'YML'
+          devices:
+            samplerate: 48000
+            chunksize: 1024
+            capture:
+              type: SignalGenerator
+              channels: 2
+              signal:
+                type: Sine
+                freq: 1000
+                level: -6.0
+            playback:
+              type: Alsa
+              channels: 2
+              device: "hw:Loopback,0,0"
+              format: S16_LE
+          YML
+          arecord -q -D hw:Loopback,1,0 -f S16_LE -r 48000 -c 2 -t raw -d 3 tone.raw &
+          rec=$!
+          timeout 5 ./camilladsp -v loopback.yml > camilladsp.log 2>&1 || status=$?
+          wait $rec
+          echo "camilladsp exit status ${status:-0}"
+          tail -20 camilladsp.log
+          python3 - <<'PY'
+          import array, math
+          s = array.array("h", open("tone.raw", "rb").read())
+          left = s[0::2]
+          peak = max(abs(v) for v in left) / 32768
+          crossings = sum(1 for a, b in zip(left, left[1:]) if a < 0 <= b)
+          seconds = len(left) / 48000
+          print(f"{seconds:.2f} s captured, peak {20 * math.log10(peak or 1e-9):.1f} dBFS, "
+                f"{crossings / seconds:.0f} rising zero crossings per s")
+          assert peak > 0.25, "capture has no tone"
+          PY
+          EOF
+
+      - name: Guest console on failure
+        if: failure()
+        run: cat console.log || true
