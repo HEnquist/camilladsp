@@ -197,9 +197,19 @@ def stop_camilladsp(proc, client, name):
     print(f"{name}: exit code {proc.returncode}")
     print(Path(f"{name}.log").read_text()[-4000:])
     if FLEXASIO_LOG.exists():
-        print(f"FlexASIO log, {FLEXASIO_LOG.stat().st_size} bytes, the tail:")
-        print(FLEXASIO_LOG.read_text(errors="replace")[-3000:])
+        # Keep each run's log whole for the artifact, and print only what is not the per
+        # buffer chatter: how the stream was opened, and anything that went wrong.
+        text = FLEXASIO_LOG.read_text(errors="replace")
+        Path(f"{name}.flexasio.log").write_text(text)
         FLEXASIO_LOG.write_text("")
+        noise = ("time info", "STREAM CALLBACK", "Transferring", "bufferSwitch")
+        keep = ("format", "sample", "exclusive", "error", "fail", "opening", "buffer size",
+                "channel", "latency", "stream parameters", "device")
+        print(f"FlexASIO log, {len(text)} bytes, the interesting lines:")
+        for line in text.splitlines():
+            low = line.lower()
+            if any(k in low for k in keep) and not any(n.lower() in low for n in noise):
+                print(line[:300])
 
 
 def wasapi_block(side, device, exclusive, fmt):

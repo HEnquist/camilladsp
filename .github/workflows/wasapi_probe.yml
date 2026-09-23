@@ -146,3 +146,12 @@ jobs:
       - name: CamillaDSP through FlexASIO, exclusive mode
         continue-on-error: true
         run: python testscripts/e2e/wasapi/probe.py cdsp --asio --exclusive
+
+      - name: Keep the logs and configs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: wasapi-probe-logs
+          path: |
+            ${{ runner.temp }}/*.log
+            ${{ runner.temp }}/*.yml
