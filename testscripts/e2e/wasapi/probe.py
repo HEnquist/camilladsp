@@ -5,8 +5,10 @@ suite would fail too. Meant to be taken apart into fixtures once the answers are
 
     probe.py devices              the WASAPI devices as PortAudio sees them
     probe.py roundtrip            a tone through the cable with PortAudio alone
-    probe.py caps                 the devices and capabilities as CamillaDSP sees them
-    probe.py cdsp [--exclusive]   CamillaDSP playing into the cable, then capturing from it
+    probe.py caps [--asio]        the devices and capabilities as CamillaDSP sees them
+    probe.py cdsp [--exclusive] [--asio]
+                                  CamillaDSP playing into the cable, then capturing from it,
+                                  through WASAPI or through FlexASIO on top of the cable
 """
 
 import json
@@ -25,6 +27,9 @@ from wsclient import Client  # noqa: E402
 REPO = Path(__file__).resolve().parents[3]
 CAMILLADSP = REPO / "target" / "e2e" / "camilladsp.exe"
 PORT = 12399
+FLEXASIO_TOML = Path.home() / "FlexASIO.toml"
+# FlexASIO logs only while this file exists.
+FLEXASIO_LOG = Path.home() / "FlexASIO.log"
 FREQ = 1000.0
 AMPLITUDE = 0.5
 CHANNELS = 2
@@ -136,16 +141,18 @@ def roundtrip():
         raise SystemExit(1)
 
 
-def caps():
+def caps(backend):
+    if backend == "Asio":
+        write_flexasio_toml(cable_output()[1]["name"], cable_input()[1]["name"], False)
     proc = subprocess.Popen([str(CAMILLADSP), "-w", "-p", str(PORT)])
     time.sleep(2)
     client = Client(PORT)
     for kind in ("Capture", "Playback"):
-        found = client.send(f"GetAvailable{kind}Devices", backend="Wasapi")
+        found = client.send(f"GetAvailable{kind}Devices", backend=backend)
         print(f"{kind}: {json.dumps(found, indent=1)}")
         for name, _ in found:
-            if "VB-Audio" in name:
-                reply = client.send_raw(f"Get{kind}DeviceCapabilities", backend="Wasapi", device=name)
+            if "VB-Audio" in name or "FlexASIO" in name:
+                reply = client.send_raw(f"Get{kind}DeviceCapabilities", backend=backend, device=name)
                 print(name, json.dumps(reply, indent=1))
     client.send_raw("Exit")
     proc.wait(10)
@@ -189,6 +196,10 @@ def stop_camilladsp(proc, client, name):
         proc.wait()
     print(f"{name}: exit code {proc.returncode}")
     print(Path(f"{name}.log").read_text()[-4000:])
+    if FLEXASIO_LOG.exists():
+        print(f"FlexASIO log, {FLEXASIO_LOG.stat().st_size} bytes, the tail:")
+        print(FLEXASIO_LOG.read_text(errors="replace")[-3000:])
+        FLEXASIO_LOG.write_text("")
 
 
 def wasapi_block(side, device, exclusive, fmt):
@@ -199,17 +210,43 @@ def wasapi_block(side, device, exclusive, fmt):
     return "\n".join(lines)
 
 
-def cdsp(exclusive):
+def asio_block(side, fmt):
+    return "\n".join([f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}",
+                      '    device: "FlexASIO"', f"    format: {fmt}"])
+
+
+def write_flexasio_toml(input_device, output_device, exclusive):
+    """FlexASIO reads its settings from the user profile. An empty device disables that
+    direction, which the one way runs need: a driver with both open on the one cable would
+    feed its own output back in."""
+    lines = ['backend = "Windows WASAPI"']
+    for section, device in (("input", input_device), ("output", output_device)):
+        lines += ["", f"[{section}]", f'device = "{device}"']
+        if exclusive:
+            lines += ['sampleType = "Int16"', "wasapiExclusiveMode = true",
+                      "wasapiExplicitSampleFormat = true"]
+    FLEXASIO_TOML.write_text("\n".join(lines) + "\n")
+    print(FLEXASIO_TOML.read_text())
+
+
+def cdsp(exclusive, backend):
     _, out_dev = cable_input()
     in_index, in_dev = cable_output()
     rate = int(in_dev["default_samplerate"])
-    # Shared mode is always F32, exclusive needs a format the driver takes.
-    fmt = "S16" if exclusive else None
-    mode = "exclusive" if exclusive else "shared"
+    mode = ("exclusive" if exclusive else "shared") + ("_asio" if backend == "Asio" else "")
     ok = True
+
+    # Shared mode is always F32, exclusive needs a format the driver takes. FlexASIO does
+    # no conversion, so its ASIO side has the sample type the TOML asks for.
+    def block(side, device):
+        if backend == "Asio":
+            return asio_block(side, "S16_LE" if exclusive else "F32_LE")
+        return wasapi_block(side, device, exclusive, "S16" if exclusive else None)
 
     # Playback: a generated tone into CABLE Input, recorded off CABLE Output by PortAudio.
     name = f"playback_{mode}"
+    if backend == "Asio":
+        write_flexasio_toml("", out_dev["name"], exclusive)
     config = "\n".join([
         "devices:",
         f"  samplerate: {rate}",
@@ -218,7 +255,7 @@ def cdsp(exclusive):
         "    type: SignalGenerator",
         f"    channels: {CHANNELS}",
         f"    signal: {{type: Sine, freq: {FREQ}, level: -6.0206}}",
-        wasapi_block("playback", out_dev["name"], exclusive, fmt),
+        block("playback", out_dev["name"]),
         "pipeline: []",
         "",
     ])
@@ -233,11 +270,13 @@ def cdsp(exclusive):
     name = f"capture_{mode}"
     out_index, _ = cable_input()
     raw = Path(f"{name}.raw")
+    if backend == "Asio":
+        write_flexasio_toml(in_dev["name"], "", exclusive)
     config = "\n".join([
         "devices:",
         f"  samplerate: {rate}",
         "  chunksize: 1024",
-        wasapi_block("capture", in_dev["name"], exclusive, fmt),
+        block("capture", in_dev["name"]),
         "  playback:",
         "    type: File",
         f"    channels: {CHANNELS}",
@@ -258,14 +297,15 @@ def cdsp(exclusive):
 
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
+    backend = "Asio" if "--asio" in sys.argv else "Wasapi"
     if command == "devices":
         devices()
     elif command == "roundtrip":
         roundtrip()
     elif command == "caps":
-        caps()
+        caps(backend)
     elif command == "cdsp":
-        if not cdsp("--exclusive" in sys.argv):
+        if not cdsp("--exclusive" in sys.argv, backend):
             raise SystemExit(1)
     else:
         raise SystemExit(__doc__)

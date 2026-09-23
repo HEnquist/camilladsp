@@ -123,3 +123,26 @@ jobs:
           testscripts/e2e/wasapi/install_vbcable.ps1 -Dir "$env:RUNNER_TEMP\vbcable"
           Get-PnpDevice -FriendlyName '*CABLE*' | Format-Table Class, Status, FriendlyName, InstanceId -AutoSize
           python testscripts/e2e/wasapi/probe.py devices
+
+      # FlexASIO on top of the cable, for the ASIO backend. Its settings file names the
+      # WASAPI endpoints, so the same one way runs work through ASIO.
+      - name: Install FlexASIO
+        run: |
+          $exe = "$env:RUNNER_TEMP\FlexASIO.exe"
+          Invoke-WebRequest https://github.com/dechamps/FlexASIO/releases/download/flexasio-1.10b/FlexASIO-1.10b.exe -OutFile $exe
+          (Get-FileHash $exe).Hash
+          Start-Process $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          Get-ChildItem 'HKLM:\SOFTWARE\ASIO' | Format-Table PSChildName
+          New-Item -ItemType File "$env:USERPROFILE\FlexASIO.log" -Force | Out-Null
+
+      - name: ASIO devices and capabilities as CamillaDSP sees them
+        continue-on-error: true
+        run: python testscripts/e2e/wasapi/probe.py caps --asio
+
+      - name: CamillaDSP through FlexASIO, shared mode
+        continue-on-error: true
+        run: python testscripts/e2e/wasapi/probe.py cdsp --asio
+
+      - name: CamillaDSP through FlexASIO, exclusive mode
+        continue-on-error: true
+        run: python testscripts/e2e/wasapi/probe.py cdsp --asio --exclusive
