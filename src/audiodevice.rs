@@ -420,6 +420,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 silence_timeout: conf.silence_timeout_s(),
                 stop_on_rate_change: conf.stop_on_rate_change(),
                 rate_measure_interval: conf.rate_measure_interval_s(),
+                enable_rate_adjust: conf.rate_adjust(),
             })
         }
         #[cfg(target_os = "windows")]

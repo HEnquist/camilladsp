@@ -167,6 +167,7 @@ pub struct CoreaudioCaptureDevice {
     pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
+    pub enable_rate_adjust: bool,
 }
 
 pub fn list_device_names(input: bool) -> Vec<String> {
@@ -871,6 +872,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let silence_threshold = self.silence_threshold;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = (1000.0 * self.rate_measure_interval) as u64;
+        let enable_rate_adjust = self.enable_rate_adjust;
         let blockalign = 4 * channels;
 
         let handle = thread::Builder::new()
@@ -981,7 +983,10 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     capture_frames,
                 );
 
-                let pitch_supported = configure_pitch_control(device_id);
+                // The clock source and pitch belong to the device and outlive this process,
+                // and other programs may use them too, so they are only touched when rate
+                // adjust is going to write them.
+                let pitch_supported = enable_rate_adjust && configure_pitch_control(device_id);
                 if pitch_supported {
                     if samplerate == capture_samplerate && resampler.is_some() {
                         warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust.");

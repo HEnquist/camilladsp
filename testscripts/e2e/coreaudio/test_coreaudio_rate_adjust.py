@@ -25,7 +25,15 @@ import time
 
 import pytest
 
-from .blackhole import FEED_DEVICE, SINK_DEVICE, pitch, set_pitch
+from .blackhole import (
+    ADJUSTABLE_CLOCK,
+    FEED_DEVICE,
+    FIXED_CLOCK,
+    SINK_DEVICE,
+    clock_source,
+    pitch,
+    set_pitch,
+)
 
 pytestmark = pytest.mark.coreaudio
 
@@ -165,33 +173,27 @@ def test_the_correction_is_clamped(start_cdsp, ca_config, feeder):
     assert median_pitch() == pytest.approx(1.0 + CLAMP, abs=1e-4)
 
 
-def test_without_rate_adjust_the_capture_pitch_is_left_at_nominal(start_cdsp, ca_config, feeder):
-    """The backend only writes the pitch when the loop asks it to.
+@pytest.mark.parametrize(
+    "clock,start_pitch",
+    [(FIXED_CLOCK, 1.0), (ADJUSTABLE_CLOCK, 1.0), (ADJUSTABLE_CLOCK, 1.002)],
+)
+def test_without_rate_adjust_the_capture_device_is_left_alone(
+    start_cdsp, ca_config, feeder, clock, start_pitch
+):
+    """The clock source and pitch are only touched when rate adjust is going to use them.
 
-    Worth pinning because the pitch belongs to the device and outlives the process: a
-    stray write here would change the rate for whatever uses the device next.
+    Both belong to the device, outlive the process, and may be set by someone else, a
+    user in Audio MIDI Setup or another program. So a session without rate adjust has to
+    leave the device on whatever clock and pitch it found, including a pitch an earlier
+    session with rate adjust ended at.
     """
+    if clock == ADJUSTABLE_CLOCK:
+        set_pitch(FEED_DEVICE, start_pitch)
     set_pitch(SINK_DEVICE, 1.0 + SKEW)
     feeder()
     cdsp = start_cdsp(config=ca_config())
     cdsp.poll_until_true("GetCaptureRate", lambda rate: rate > 0, timeout=10.0)
     time.sleep(3.0)
-    assert pitch(FEED_DEVICE) == 1.0
+    assert clock_source(FEED_DEVICE) == clock
+    assert pitch(FEED_DEVICE) == pytest.approx(start_pitch, abs=1e-6)
     assert cdsp.send("GetRateAdjust") == 0.0
-
-
-def test_a_pitch_left_by_an_earlier_session_is_not_inherited(start_cdsp, ca_config, feeder):
-    """A session without rate adjust has to capture at nominal, whatever the device holds.
-
-    The backend switches the capture to the adjustable clock on every start, rate adjust
-    or not, and the pitch is kept by the device. So a session with rate adjust that ends
-    at some correction leaves the device running off nominal, and the next session
-    without it would capture at that rate, drifting against its playback with nothing
-    to correct it.
-    """
-    set_pitch(FEED_DEVICE, 1.005)
-    feeder()
-    cdsp = start_cdsp(config=ca_config())
-    cdsp.poll_until_true(
-        "GetCaptureRate", lambda rate: abs(rate - 48000) < 0.001 * 48000, timeout=10.0
-    )
