@@ -125,6 +125,23 @@ jobs:
       - name: Can the guest user see the devices
         run: ssh vm 'aplay -l; arecord -l'
 
+      - name: Hardware parameters of the devices
+        run: |
+          ssh vm bash -s <<'EOF'
+          for dev in hw:Loopback,0,0 hw:Dummy; do
+            echo "== playback $dev"
+            aplay -D $dev --dump-hw-params -d 1 -f S16_LE -r 48000 -c 2 /dev/zero 2>&1 | sed -n '/HW Params/,/^---/p'
+          done
+          echo "== capture hw:Loopback,1,0, with the playback end idle"
+          arecord -D hw:Loopback,1,0 --dump-hw-params -d 1 -f S16_LE -r 48000 -c 2 /dev/null 2>&1 | sed -n '/HW Params/,/^---/p'
+          echo "== capture hw:Loopback,1,0, with the playback end running S16_LE 44100"
+          aplay -q -D hw:Loopback,0,0 -f S16_LE -r 44100 -c 2 -t raw -d 3 /dev/zero &
+          sleep 0.5
+          arecord -D hw:Loopback,1,0 --dump-hw-params -d 1 -f S16_LE -r 44100 -c 2 /dev/null 2>&1 | sed -n '/HW Params/,/^---/p'
+          wait
+          amixer -c Loopback contents | grep -A2 -E "name='PCM (Notify|Slave|Rate)" | head -40
+          EOF
+
       - name: Roundtrip through the loopback with alsa-utils
         run: |
           ssh vm bash -s <<'EOF'
