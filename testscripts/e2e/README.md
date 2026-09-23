@@ -97,6 +97,41 @@ bring the capture cable's own shift to the same value, and the tests read that b
 card. In a VM on a shared runner the scheduling is jittery and the loop answers jitter the way
 it answers drift, so those tests judge a median of readings and never a single one.
 
+## CoreAudio on BlackHole
+
+The tests in `coreaudio/` carry the `coreaudio` marker and run the CoreAudio backend against two
+BlackHole devices: BlackHole 2ch for a capture the test can feed, and BlackHole 16ch for a playback
+it can record. They are the only tests that reach the CoreAudio code at all.
+`coreaudio/blackhole.py` explains which device is which and the four BlackHole properties the
+tests are built on.
+
+BlackHole is a HAL plugin, so the casks install on a stock runner. The installer asks for a reboot,
+and what it actually needs is a restart of coreaudiod, which the `coreaudio` job in
+`.github/workflows/e2e.yml` does before the tests. On a Mac of your own it is the same two casks,
+plus sounddevice for the feeder and the recorder:
+
+```sh
+brew install --cask blackhole-2ch blackhole-16ch
+sudo killall coreaudiod
+cargo build --profile e2e
+pip install sounddevice
+pytest -v testscripts/e2e -m coreaudio
+```
+
+Anywhere the two devices are missing the tests skip. They change the devices' sample rate, clock
+source and pitch, which the devices keep after the process that set them is gone, so a fixture
+puts all three back as a fresh install has them around every test. That includes a BlackHole 2ch
+you use for something else.
+
+Rate adjust is tested against BlackHole 16ch put on its adjustable clock at a pitch the test sets.
+The adjust loop then has to bring BlackHole 2ch's pitch to the same value, and the tests read that
+back from the device, the same shape as the ALSA rate shift tests.
+
+Setting those properties from Python has two traps, both handled in `blackhole.py`. A pan written
+just after switching to the adjustable clock is accepted and then lost, so it is written until it
+reads back. And a sample rate change has the HAL restore the clock source and pan it last saw,
+which can land just after the new rate reads back and undo a write made in between.
+
 ## Layout
 
 - `conftest.py` — the fixtures that spawn the binary, wait for its websocket, and tear it down
@@ -131,7 +166,8 @@ it answers drift, so those tests judge a median of readings and never a single o
 - `test_stock_build.py` — what a release build has, and what it must refuse
 - `*.yml` — the configs the tests load
 - `alsa/` — the ALSA suite, see "ALSA on real devices" above
-- `pytest.ini` — the global timeout, which makes every test a hang check, and the three markers
+- `coreaudio/` — the CoreAudio suite, see "CoreAudio on BlackHole" above
+- `pytest.ini` — the global timeout, which makes every test a hang check, and the four markers
 
 ## Writing more
 
