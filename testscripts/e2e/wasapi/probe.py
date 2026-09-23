@@ -31,20 +31,35 @@ CHANNELS = 2
 MIN_RMS = 0.1
 
 
-def wasapi_device(fragment, output):
-    """Index and info of the WASAPI device whose name contains `fragment`."""
+def wasapi_devices(fragment, output):
+    """Index and info of each WASAPI device whose name contains `fragment`."""
     hostapi = next(
         i for i, api in enumerate(sd.query_hostapis()) if "WASAPI" in api["name"]
     )
     key = "max_output_channels" if output else "max_input_channels"
-    for index, dev in enumerate(sd.query_devices()):
-        if dev["hostapi"] == hostapi and fragment in dev["name"] and dev[key] > 0:
-            return index, dev
-    raise SystemExit(f"no WASAPI {'output' if output else 'input'} matching {fragment!r}")
+    found = [
+        (index, dev)
+        for index, dev in enumerate(sd.query_devices())
+        if dev["hostapi"] == hostapi and fragment in dev["name"] and dev[key] > 0
+    ]
+    if not found:
+        raise SystemExit(f"no WASAPI {'output' if output else 'input'} matching {fragment!r}")
+    return found
+
+
+def wasapi_device(fragment, output):
+    return wasapi_devices(fragment, output)[0]
+
+
+# The playback side of the cable has two endpoints, a 2 channel one and "CABLE In 16 Ch".
+# Installed without the vendor's setup the 2 channel one is called "Speakers" rather than
+# "CABLE Input", so it is found by the driver name and by not being the 16 channel one.
+def cable_inputs():
+    return wasapi_devices("(VB-Audio Virtual Cable)", output=True)
 
 
 def cable_input():
-    return wasapi_device("CABLE Input", output=True)
+    return next(d for d in cable_inputs() if "16 Ch" not in d[1]["name"])
 
 
 def cable_output():
@@ -101,20 +116,21 @@ def devices():
     for api in sd.query_hostapis():
         print(api["name"])
     print(sd.query_devices())
-    for find in (cable_input, cable_output):
-        index, dev = find()
+    for index, dev in cable_inputs() + [cable_output()]:
         print(f"{index}: {dev}")
 
 
 def roundtrip():
-    out_index, out_dev = cable_input()
     in_index, in_dev = cable_output()
     rate = int(in_dev["default_samplerate"])
-    print(f"CABLE Input at {out_dev['default_samplerate']}, CABLE Output at {rate}")
-    with tone_stream(out_index, rate):
-        time.sleep(0.5)
-        data = record(in_index, rate, 2.0)
-    if not report("PortAudio roundtrip", data[int(0.2 * rate):]):
+    ok = True
+    for out_index, out_dev in cable_inputs():
+        print(f"{out_dev['name']} at {out_dev['default_samplerate']}, CABLE Output at {rate}")
+        with tone_stream(out_index, rate):
+            time.sleep(0.5)
+            data = record(in_index, rate, 2.0)
+        ok &= report(f"PortAudio roundtrip from {out_dev['name']}", data[int(0.2 * rate):])
+    if not ok:
         raise SystemExit(1)
 
 
