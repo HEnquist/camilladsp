@@ -69,6 +69,34 @@ Anything marked `stock` has to keep away from the dummy devices, since a stock b
 config outright. `device_config` swaps them in when asked, so a stock test builds its own blocks
 through `swdevices.py` instead.
 
+## ALSA on real devices
+
+The tests in `alsa/` carry the `alsa` marker and run the ALSA backend against kernel devices:
+snd-aloop for a capture the test can feed and a playback it can record, and snd-dummy for a sink
+with nothing behind it. They are the only tests that reach the ALSA code at all. `alsa/loopback.py`
+explains which cable is which and the three loopback properties the tests are built on.
+
+The GitHub runners' kernel is built without sound, so in CI the `alsa` job in
+`.github/workflows/e2e.yml` boots an Ubuntu minimal cloud image under KVM, copies the binary and
+this directory in, and runs the suite there, once for each ALSA backend. On a Linux machine of
+your own it is only the modules, with your user in the `audio` group:
+
+```sh
+sudo modprobe snd-aloop pcm_substreams=2
+sudo modprobe snd-dummy
+cargo build --profile e2e              # or with --features threaded-alsa
+pytest -v testscripts/e2e -m alsa
+```
+
+Anywhere the two cards are missing the tests skip. They do not care which build they get, since
+both have the ALSA backend, but the other markers do, so run them as their own selection.
+
+Rate adjust is tested against a loopback cable whose `PCM Rate Shift 100000` control the test
+skews, not against snd-dummy, which has no control over its clock. The adjust loop then has to
+bring the capture cable's own shift to the same value, and the tests read that back from the
+card. In a VM on a shared runner the scheduling is jittery and the loop answers jitter the way
+it answers drift, so those tests judge a median of readings and never a single one.
+
 ## Layout
 
 - `conftest.py` — the fixtures that spawn the binary, wait for its websocket, and tear it down
@@ -102,7 +130,8 @@ through `swdevices.py` instead.
 - `test_exact_processing.py` — a gain and a mixer, asserted sample by sample
 - `test_stock_build.py` — what a release build has, and what it must refuse
 - `*.yml` — the configs the tests load
-- `pytest.ini` — the global timeout, which makes every test a hang check, and the two markers
+- `alsa/` — the ALSA suite, see "ALSA on real devices" above
+- `pytest.ini` — the global timeout, which makes every test a hang check, and the three markers
 
 ## Writing more
 

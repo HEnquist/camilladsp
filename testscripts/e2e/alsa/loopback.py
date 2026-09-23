@@ -55,14 +55,6 @@ ALSA_FORMAT = {
     "F32_LE": "FLOAT_LE",
     "F64_LE": "FLOAT64_LE",
 }
-BYTES_PER_SAMPLE = {
-    "S16_LE": 2,
-    "S24_3_LE": 3,
-    "S24_4_LE": 4,
-    "S32_LE": 4,
-    "F32_LE": 4,
-    "F64_LE": 8,
-}
 # Every format snd-aloop takes that CamillaDSP also has. The loopback has no FLOAT64.
 LOOPBACK_FORMATS = ("S16_LE", "S24_3_LE", "S24_4_LE", "S32_LE", "F32_LE")
 INT_BITS = {"S16_LE": 16, "S24_3_LE": 24, "S24_4_LE": 24, "S32_LE": 32}
@@ -212,6 +204,19 @@ def find_in_loop(block, window):
         if np.array_equal(doubled[start : start + len(window)], window):
             return int(start)
     return None
+
+
+def exact_fraction(block, window, piece):
+    """The fraction of `piece` frame pieces of `window` found exactly in `block` looped.
+
+    An xrun leaves a gap in the output, and on a jittery VM one can land anywhere, so a
+    window that has to match in one piece fails on timing rather than on the audio. Cut
+    into pieces, a conversion bug still fails every piece, since no sample survives it,
+    while a gap only breaks the piece it falls in.
+    """
+    pieces = [window[start : start + piece] for start in range(0, len(window) - piece + 1, piece)]
+    found = sum(1 for part in pieces if find_in_loop(block, part) is not None)
+    return found / len(pieces)
 
 
 class Feeder:
