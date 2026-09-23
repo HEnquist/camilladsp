@@ -26,7 +26,7 @@ fn chunk_to_buffer_with_adapter<A>(
     chunk: AudioChunk,
     adapter: &mut A,
     bytes_per_sample: usize,
-) -> (usize, usize)
+) -> (usize, usize, CamillaFloat)
 where
     A: AdapterMut<CamillaFloat>,
 {
@@ -51,16 +51,8 @@ where
         }
     }
     xtrace!("Convert, nbr clipped: {}, peak: {}", clipped, peak);
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
-            clipped,
-            20.0 * peak.log10(),
-            peak * 100.0
-        );
-    }
     recycle_chunk(chunk);
-    (num_valid_bytes, clipped)
+    (num_valid_bytes, clipped, peak)
 }
 
 fn buffer_to_chunk_with_adapter<A>(
@@ -121,12 +113,36 @@ where
     AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_valid_frames)
 }
 
-/// Convert an AudioChunk to an interleaved buffer of u8.
+/// Convert an AudioChunk to an interleaved buffer of u8, and warn if any samples clipped.
+///
+/// Returns the number of valid bytes and the number of clipped samples.
 pub fn chunk_to_buffer_rawbytes(
     chunk: AudioChunk,
     buf: &mut [u8],
     sample_format: &BinarySampleFormat,
 ) -> (usize, usize) {
+    let (valid_bytes, clipped, peak) = chunk_to_buffer_rawbytes_unlogged(chunk, buf, sample_format);
+    if clipped > 0 {
+        warn!(
+            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
+            clipped,
+            20.0 * peak.log10(),
+            peak * 100.0
+        );
+    }
+    (valid_bytes, clipped)
+}
+
+/// Convert an AudioChunk to an interleaved buffer of u8, leaving it to the
+/// caller to report clipping.
+///
+/// Returns the number of valid bytes, the number of clipped samples, and the
+/// peak of the clipped channels, or zero if none clipped.
+pub fn chunk_to_buffer_rawbytes_unlogged(
+    chunk: AudioChunk,
+    buf: &mut [u8],
+    sample_format: &BinarySampleFormat,
+) -> (usize, usize, CamillaFloat) {
     let frames = chunk.frames;
     let channels = chunk.channels;
     let bytes_per_sample = sample_format.bytes_per_sample();

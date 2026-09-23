@@ -19,7 +19,7 @@ use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
-use crate::utils::conversions::chunk_to_buffer_rawbytes;
+use crate::utils::conversions::chunk_to_buffer_rawbytes_unlogged;
 use crate::utils::stash::{
     CHUNK_RESERVE, MAX_CONTAINER_STASH_SIZE, MAX_STASH_SIZE, container_from_stash, recycle_chunk,
     recycle_container, stash_can_spare, vec_from_stash,
@@ -47,9 +47,11 @@ pub struct FileWriter {
 }
 
 /// Everything a writer thread was built from. A rebuilt pipeline reuses a
-/// running writer only when this is unchanged.
+/// running writer only when this is unchanged, so renaming the processor
+/// starts a new file, like any other change.
 #[derive(Clone, Debug, PartialEq)]
 struct WriterKey {
+    name: String,
     params: config::FileWriterParameters,
     samplerate: usize,
     chunksize: usize,
@@ -176,7 +178,7 @@ fn spawn_writer(
             if let Some(predecessor) = predecessor {
                 let _ = predecessor.join();
             }
-            if let Err(err) = write_loop(&key, rx) {
+            if let Err(err) = write_loop(&proc_name, &key, rx) {
                 error!("FileWriter processor '{}' writer error: {}", proc_name, err);
             }
         });
@@ -193,14 +195,14 @@ fn spawn_writer(
 }
 
 /// Write chunks until every sender is dropped. The file is created on the first chunk.
-fn write_loop(key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
+fn write_loop(name: &str, key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
     let params = &key.params;
     let mut file: Option<BufWriter<File>> = None;
     let mut bytes = Vec::new();
     for chunk in rx.iter() {
         if file.is_none() {
             let filename = resolve_timestamp(&params.filename, chrono::Local::now());
-            info!("FileWriter writing to {filename}");
+            info!("FileWriter processor '{name}' writing to {filename}");
             let mut f = BufWriter::new(File::create(&filename)?);
             if params.wav_header() {
                 write_wav_header(&mut f, chunk.channels, params.format, key.samplerate)?;
@@ -211,7 +213,17 @@ fn write_loop(key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
             chunk.frames * chunk.channels * params.format.bytes_per_sample(),
             0,
         );
-        let (valid_bytes, _) = chunk_to_buffer_rawbytes(chunk, &mut bytes, &params.format);
+        let (valid_bytes, clipped, peak) =
+            chunk_to_buffer_rawbytes_unlogged(chunk, &mut bytes, &params.format);
+        if clipped > 0 {
+            warn!(
+                "FileWriter processor '{}' clipped {} samples, peak +{:.2} dB ({:.1}%)",
+                name,
+                clipped,
+                20.0 * peak.log10(),
+                peak * 100.0
+            );
+        }
         file.as_mut().unwrap().write_all(&bytes[..valid_bytes])?;
     }
     if let Some(mut file) = file {
@@ -255,6 +267,7 @@ impl FileWriter {
             process_channels = (0..config.channels).collect();
         }
         let key = WriterKey {
+            name: name.to_string(),
             params: config.clone(),
             samplerate,
             chunksize,
@@ -614,6 +627,27 @@ mod tests {
         // The old file is truncated, but only once the old writer is done with it.
         let data = fs::read(&filename).unwrap();
         assert_eq!(data, f32_bytes(&[0.5, -0.75]));
+        let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn renamed_writer_starts_a_new_file() {
+        let filename = unique_test_filename();
+        let mut pool = WriterPool::default();
+        let mut old =
+            FileWriter::from_config("before", f32_config(filename.clone()), 48_000, 2, &mut pool);
+        old.process_chunk(&mut stereo_chunk([0.25, -0.5], [0.75, -1.0], 2));
+
+        let mut new =
+            FileWriter::from_config("after", f32_config(filename.clone()), 48_000, 2, &mut pool);
+        drop(old);
+        pool.sweep();
+        new.process_chunk(&mut stereo_chunk([0.125, -0.25], [0.5, -0.75], 2));
+        drop(new);
+        pool.join();
+
+        let data = fs::read(&filename).unwrap();
+        assert_eq!(data, f32_bytes(&[0.125, 0.5, -0.25, -0.75]));
         let _ = fs::remove_file(&filename);
     }
 

@@ -2661,7 +2661,7 @@ It is meant as a diagnostic capture tool, not a recorder.
 Writing happens in a separate thread, which can fall behind by up to about one second of audio, or less at small chunksizes. Beyond that, chunks are dropped with a warning.
 
 A config reload that leaves a FileWriter unchanged keeps the file open and appends to it.
-If the FileWriter parameters change, or processing restarts, for example after a device error, the file is started over.
+If the FileWriter parameters change, the processor is renamed, or processing restarts, for example after a device error, the file is started over.
 Put `$timestamp$` in the file name to get a new file each time instead.
 
 Example:
