@@ -1,0 +1,148 @@
+on:
+  push:
+    paths:
+      - .github/workflows/coreaudio_probe.yml
+  workflow_dispatch:
+
+name: CoreAudio BlackHole probe
+
+# Answers whether a headless macOS runner enumerates a HAL plugin at all, and whether a
+# process there may read an input device, before an e2e job is built on it. Every step
+# prints what it finds and the job only fails where a later suite would fail too. The
+# steps are meant to move into the real BlackHole job later.
+#
+# Two BlackHole devices, since the suite wants one cable to feed the capture and another
+# to record the playback, the way the ALSA suite uses two loopback cables. Always the
+# latest cask, not a pinned one.
+jobs:
+  probe:
+    name: BlackHole, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: OS and image
+        run: |
+          sw_vers
+          uname -a
+          echo "image: $ImageOS $ImageVersion"
+          id
+          csrutil status || true
+
+      - name: Audio devices before installing anything
+        run: system_profiler SPAudioDataType || true
+
+      - name: Install BlackHole 2ch and 16ch, and sox
+        run: |
+          brew install --cask blackhole-2ch blackhole-16ch
+          brew install sox
+          brew list --cask --versions | grep -i blackhole
+          ls -l /Library/Audio/Plug-Ins/HAL
+
+      # The cask's installer restarts coreaudiod itself, so list once before doing it by
+      # hand, to know whether the suite needs the restart at all.
+      - name: Audio devices after the install
+        run: system_profiler SPAudioDataType
+
+      - name: Restart coreaudiod and list again
+        run: |
+          sudo killall coreaudiod || true
+          sleep 5
+          system_profiler SPAudioDataType
+          system_profiler SPAudioDataType | grep -E "BlackHole (2|16)ch"
+
+      # Capture is behind the microphone permission. A process without it does not get an
+      # error, it gets silence, so the roundtrip below is the real check and this is only
+      # there to explain it if it comes back silent.
+      - name: Microphone permissions
+        run: |
+          db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          sqlite3 "$db" "select client, auth_value from access where service='kTCCServiceMicrophone'" \
+            || echo "user TCC.db not readable"
+          sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+            "select client, auth_value from access where service='kTCCServiceMicrophone'" \
+            || echo "system TCC.db not readable"
+
+      - name: Roundtrip through BlackHole with sox
+        run: |
+          for dev in "BlackHole 2ch" "BlackHole 16ch"; do
+            echo "== $dev"
+            sox -q -n -t coreaudio "$dev" synth 4 sine 1000 vol 0.5 &
+            sleep 0.5
+            sox -q -t coreaudio "$dev" rec.wav trim 0 2
+            wait
+            sox rec.wav -n stat 2>&1 | tee stat.txt | grep -E "RMS +amp|Maximum amp|Length"
+            rms=$(awk '/RMS +amplitude/ {print $3}' stat.txt)
+            awk -v r="$rms" 'BEGIN { exit !(r > 0.3) }' || { echo "$dev recorded silence"; exit 1; }
+          done
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --profile e2e
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install websocket-client
+        run: pip install websocket-client
+
+      # What the backend itself sees: the device lists, the formats and rates BlackHole
+      # offers, which is what the format tests will be written against.
+      - name: Devices and capabilities as CamillaDSP sees them
+        run: |
+          target/e2e/camilladsp -w -p 12399 &
+          sleep 2
+          cd testscripts/e2e
+          python3 - <<'EOF'
+          import json
+          from wsclient import Client
+          c = Client(12399)
+          print(c.send("GetAvailableCaptureDevices", backend="CoreAudio"))
+          print(c.send("GetAvailablePlaybackDevices", backend="CoreAudio"))
+          for dev in ("BlackHole 2ch", "BlackHole 16ch"):
+              print(json.dumps(c.send("GetCaptureDeviceCapabilities", backend="CoreAudio", device=dev)))
+          c.send_raw("Exit")
+          EOF
+
+      # sox feeds 2ch, CamillaDSP moves it to 16ch, sox records 16ch. Rate adjust is on so
+      # the log says whether this BlackHole has the adjustable clock the backend looks for.
+      - name: Audio through CamillaDSP, BlackHole to BlackHole
+        run: |
+          cat > probe.yml <<'EOF'
+          devices:
+            samplerate: 48000
+            chunksize: 1024
+            enable_rate_adjust: true
+            capture:
+              type: CoreAudio
+              channels: 2
+              device: "BlackHole 2ch"
+            playback:
+              type: CoreAudio
+              channels: 2
+              device: "BlackHole 16ch"
+          pipeline: []
+          EOF
+          sox -q -n -t coreaudio "BlackHole 2ch" synth 8 sine 1000 vol 0.5 &
+          feed=$!
+          target/e2e/camilladsp -v probe.yml 2> cdsp.log &
+          cdsp=$!
+          sleep 3
+          sox -q -t coreaudio "BlackHole 16ch" rec.wav trim 0 2 remix 1 2
+          kill $cdsp $feed || true
+          wait || true
+          grep -i -E "pitch|clock source|error|warn" cdsp.log || true
+          sox rec.wav -n stat 2>&1 | tee stat.txt | grep -E "RMS +amp|Maximum amp"
+          rms=$(awk '/RMS +amplitude/ {print $3}' stat.txt)
+          awk -v r="$rms" 'BEGIN { exit !(r > 0.3) }' || { echo "silence out of CamillaDSP"; tail -50 cdsp.log; exit 1; }
