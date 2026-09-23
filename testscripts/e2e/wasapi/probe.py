@@ -234,6 +234,10 @@ def write_flexasio_toml(input_device, output_device, exclusive):
     direction, which the one way runs need: a driver with both open on the one cable would
     feed its own output back in."""
     lines = ['backend = "Windows WASAPI"']
+    if exclusive:
+        # By default the exclusive stream gets an 80 ms host buffer, and the cable then
+        # stays silent in both directions. Try what the direct WASAPI stream gets.
+        lines.append("bufferSizeSamples = 480")
     for section, device in (("input", input_device), ("output", output_device)):
         lines += ["", f"[{section}]", f'device = "{device}"']
         if exclusive:

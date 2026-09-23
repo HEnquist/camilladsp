@@ -169,6 +169,12 @@ jobs:
         run: |
           python testscripts/e2e/wasapi/probe.py caps --asio --driver "$env:STEINBERG_ASIO"
           python testscripts/e2e/wasapi/probe.py cdsp --asio --driver "$env:STEINBERG_ASIO"
+          # Where it keeps the devices its settings panel would pick, now that it has run.
+          reg query 'HKCU\Software\ASIO' /s
+          reg query 'HKLM\SOFTWARE\ASIO' /s
+          reg query 'HKCU\Software\Steinberg Media Technologies' /s
+          reg query 'HKCU\Software\Steinberg' /s
+          exit 0
 
       - name: Keep the logs and configs
         if: always()
