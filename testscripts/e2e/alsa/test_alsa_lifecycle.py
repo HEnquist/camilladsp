@@ -243,6 +243,11 @@ def test_a_capture_clock_that_jumps_stops_the_session(start_cdsp, alsa_config, f
     The loopback's rate shift is what moves it: 10 % slow is well past the 4 % the
     watcher allows, so with `stop_on_rate_change` set the engine has to stop and report
     the rate it measured. On real hardware this is an S/PDIF source changing rate.
+
+    The reported rate is one short measurement window, 0.2 s here, and that holds only
+    eight or nine chunks, so it is quantised by about a chunk and lands several percent
+    either side of the true rate. What it has to be is clearly on the far side of the
+    threshold, not close to the shifted rate.
     """
     feeder()
     config = alsa_config(
@@ -254,7 +259,8 @@ def test_a_capture_clock_that_jumps_stops_the_session(start_cdsp, alsa_config, f
     set_rate_shift(CAPTURE_CABLE, shift)
     reason = wait_for_stop(cdsp)
     assert list(reason) == ["CaptureFormatChange"]
-    assert reason["CaptureFormatChange"] == pytest.approx(shifted_rate(RATE, shift), rel=0.02)
+    reported = reason["CaptureFormatChange"]
+    assert 0.85 * shifted_rate(RATE, shift) < reported < RATE / 1.04
 
 
 def test_the_process_exits_cleanly_while_audio_is_flowing(start_cdsp, alsa_config, feeder):

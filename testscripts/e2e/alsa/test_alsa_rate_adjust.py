@@ -121,10 +121,16 @@ def test_rate_adjust_matches_the_capture_to_a_skewed_sink(start_cdsp, alsa_confi
     feeder()
     cdsp = start_cdsp(config=alsa_config(devices=RATE_ADJUST))
     wait_for_capture_shift(sink_shift)
-    # What the engine reports asking for and what reached the card, read back to back.
-    # Both move with the loop, so they are compared with the same slack as the shift.
-    speed = cdsp.send("GetRateAdjust")
-    assert NOMINAL_SHIFT / speed == pytest.approx(sink_shift, abs=SHIFT_TOLERANCE)
+    # What the engine reports asking for against what reached the card. The report is a
+    # status snapshot refreshed on its own interval, so a single pair of readings
+    # compares two different moments of a loop that is moving. Interleaved readings
+    # and a median of the differences compare where the two sit.
+    differences = []
+    for _ in range(10):
+        reported = NOMINAL_SHIFT / cdsp.send("GetRateAdjust")
+        differences.append(reported - rate_shift(CAPTURE_CABLE))
+        time.sleep(0.2)
+    assert abs(statistics.median(differences)) < SHIFT_TOLERANCE
     # The point of matching the clocks is the level, so that has to be where it was asked.
     wait_for_level(cdsp)
 
@@ -152,10 +158,11 @@ def test_rate_adjust_against_snd_dummy_stays_near_nominal(start_cdsp, alsa_confi
     """
     feeder()
     cdsp = start_cdsp(config=alsa_config(playback_device=DUMMY, devices=RATE_ADJUST))
-    # The first SetSpeed is what shows the loop is running at all.
+    # The first SetSpeed is what shows the loop is running at all. From there it may
+    # take a while to come back from whatever the startup did to the buffer level, so
+    # this waits for it to settle rather than reading it at a fixed time.
     cdsp.poll_until_true("GetRateAdjust", lambda speed: speed > 0.5, timeout=10.0)
-    time.sleep(3.0)
-    assert abs(median_shift(readings=10) - NOMINAL_SHIFT) < SHIFT_TOLERANCE
+    wait_for_capture_shift(NOMINAL_SHIFT)
     assert cdsp.send("GetState") == "Running"
 
 
