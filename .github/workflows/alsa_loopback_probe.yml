@@ -1,0 +1,76 @@
+on:
+  push:
+    paths:
+      - .github/workflows/alsa_loopback_probe.yml
+  workflow_dispatch:
+
+name: ALSA loopback probe
+
+# Answers whether a stock runner can load snd-aloop at all, and whether the runner user
+# can then open the devices, before an e2e job is built on it. Every step prints what it
+# finds and the job only fails where a later suite would fail too. The steps are meant
+# to move into the real snd-aloop job later, so it fails early when the loopback can't
+# be enabled.
+jobs:
+  probe:
+    name: snd-aloop, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - name: Kernel and image
+        run: |
+          uname -a
+          cat /etc/os-release
+          echo "image: $ImageOS $ImageVersion"
+          id
+
+      - name: Is the module there before installing anything
+        run: |
+          modinfo snd-aloop || echo "snd-aloop not in the installed module tree"
+          ls /proc/asound 2>/dev/null || echo "no /proc/asound, sound core not loaded"
+
+      # The known risk from the plan: the kernel matching package can lag the image kernel.
+      - name: Is the matching modules-extra package published
+        run: |
+          sudo apt-get update
+          apt-cache policy "linux-modules-extra-$(uname -r)"
+
+      - name: Install modules-extra and alsa-utils
+        run: sudo apt-get install -y "linux-modules-extra-$(uname -r)" alsa-utils
+
+      - name: Load snd-aloop
+        run: |
+          sudo modprobe snd-aloop pcm_substreams=2
+          lsmod | grep -E '^snd' || true
+          cat /proc/asound/cards
+          ls -l /dev/snd
+
+      # The runner user is not in the audio group, so without a logind seat ACL the
+      # devices may only open as root. A suite that has to run camilladsp under sudo
+      # is a different shape, so this is worth knowing up front.
+      - name: Can the runner user see the devices
+        run: |
+          aplay -l
+          arecord -l
+          getfacl /dev/snd/* 2>/dev/null || true
+
+      - name: Roundtrip through the loopback
+        run: |
+          head -c 384000 /dev/urandom > in.raw
+          arecord -D hw:Loopback,1,0 -f S16_LE -r 48000 -c 2 -t raw -d 3 out.raw &
+          rec=$!
+          sleep 0.5
+          aplay -D hw:Loopback,0,0 -f S16_LE -r 48000 -c 2 -t raw in.raw
+          wait $rec
+          ls -l in.raw out.raw
+          python3 - <<'EOF'
+          data = open("out.raw", "rb").read()
+          nonzero = sum(1 for b in data if b)
+          print(f"captured {len(data)} bytes, {nonzero} nonzero")
+          src = open("in.raw", "rb").read()
+          print("input found in capture:", src[:4096] in data)
+          assert nonzero > 0, "capture is silent"
+          EOF
