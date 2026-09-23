@@ -147,6 +147,29 @@ jobs:
         continue-on-error: true
         run: python testscripts/e2e/wasapi/probe.py cdsp --asio --exclusive
 
+      # Steinberg's free generic driver, which users actually run. It has no settings file
+      # and follows the Windows default devices, which on the runner can only be the cable.
+      # Its name in the ASIO list is not known yet, so the step looks it up.
+      - name: Install the Steinberg built-in ASIO Driver
+        continue-on-error: true
+        run: |
+          $zip = "$env:RUNNER_TEMP\steinberg_asio.zip"
+          Invoke-WebRequest https://download.steinberg.net/static_content/runtime-components/asio/1.0.9.26-1973a36d-45e1-3b89-b1ba-ee79d9eb03a8/Steinberg_built_in_ASIO_Driver.zip -OutFile $zip
+          (Get-FileHash $zip).Hash
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\steinberg_asio"
+          $msi = Get-ChildItem "$env:RUNNER_TEMP\steinberg_asio" -Recurse -Filter *64bit.msi | Select-Object -First 1
+          $p = Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn', '/norestart', '/l*v', "$env:RUNNER_TEMP\steinberg_msi.log" -Wait -PassThru
+          "msiexec exit code $($p.ExitCode)"
+          Get-ChildItem 'HKLM:\SOFTWARE\ASIO' | Format-Table PSChildName
+          $name = (Get-ChildItem 'HKLM:\SOFTWARE\ASIO' | Where-Object PSChildName -like '*Steinberg*' | Select-Object -First 1).PSChildName
+          "STEINBERG_ASIO=$name" >> $env:GITHUB_ENV
+
+      - name: CamillaDSP through the Steinberg driver
+        continue-on-error: true
+        run: |
+          python testscripts/e2e/wasapi/probe.py caps --asio --driver "$env:STEINBERG_ASIO"
+          python testscripts/e2e/wasapi/probe.py cdsp --asio --driver "$env:STEINBERG_ASIO"
+
       - name: Keep the logs and configs
         if: always()
         uses: actions/upload-artifact@v6

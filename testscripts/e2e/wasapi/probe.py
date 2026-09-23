@@ -6,9 +6,10 @@ suite would fail too. Meant to be taken apart into fixtures once the answers are
     probe.py devices              the WASAPI devices as PortAudio sees them
     probe.py roundtrip            a tone through the cable with PortAudio alone
     probe.py caps [--asio]        the devices and capabilities as CamillaDSP sees them
-    probe.py cdsp [--exclusive] [--asio]
+    probe.py cdsp [--exclusive] [--asio [--driver NAME]]
                                   CamillaDSP playing into the cable, then capturing from it,
-                                  through WASAPI or through FlexASIO on top of the cable
+                                  through WASAPI or through an ASIO driver on top of the
+                                  cable, FlexASIO unless --driver names another
 """
 
 import json
@@ -27,6 +28,7 @@ from wsclient import Client  # noqa: E402
 REPO = Path(__file__).resolve().parents[3]
 CAMILLADSP = REPO / "target" / "e2e" / "camilladsp.exe"
 PORT = 12399
+FLEXASIO = "FlexASIO"
 FLEXASIO_TOML = Path.home() / "FlexASIO.toml"
 # FlexASIO logs only while this file exists.
 FLEXASIO_LOG = Path.home() / "FlexASIO.log"
@@ -141,8 +143,8 @@ def roundtrip():
         raise SystemExit(1)
 
 
-def caps(backend):
-    if backend == "Asio":
+def caps(backend, driver):
+    if backend == "Asio" and driver == FLEXASIO:
         write_flexasio_toml(cable_output()[1]["name"], cable_input()[1]["name"], False)
     proc = subprocess.Popen([str(CAMILLADSP), "-w", "-p", str(PORT)])
     time.sleep(2)
@@ -151,7 +153,7 @@ def caps(backend):
         found = client.send(f"GetAvailable{kind}Devices", backend=backend)
         print(f"{kind}: {json.dumps(found, indent=1)}")
         for name, _ in found:
-            if "VB-Audio" in name or "FlexASIO" in name:
+            if backend == "Asio" or "VB-Audio" in name:
                 reply = client.send_raw(f"Get{kind}DeviceCapabilities", backend=backend, device=name)
                 print(name, json.dumps(reply, indent=1))
     client.send_raw("Exit")
@@ -220,9 +222,11 @@ def wasapi_block(side, device, exclusive, fmt):
     return "\n".join(lines)
 
 
-def asio_block(side, fmt):
-    return "\n".join([f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}",
-                      '    device: "FlexASIO"', f"    format: {fmt}"])
+def asio_block(side, driver, fmt):
+    lines = [f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}", f'    device: "{driver}"']
+    if fmt:
+        lines.append(f"    format: {fmt}")
+    return "\n".join(lines)
 
 
 def write_flexasio_toml(input_device, output_device, exclusive):
@@ -239,23 +243,28 @@ def write_flexasio_toml(input_device, output_device, exclusive):
     print(FLEXASIO_TOML.read_text())
 
 
-def cdsp(exclusive, backend):
+def cdsp(exclusive, backend, driver):
     _, out_dev = cable_input()
     in_index, in_dev = cable_output()
     rate = int(in_dev["default_samplerate"])
-    mode = ("exclusive" if exclusive else "shared") + ("_asio" if backend == "Asio" else "")
+    mode = ("exclusive" if exclusive else "shared")
+    if backend == "Asio":
+        mode += "_" + driver.split()[0].lower()
+    flexasio = backend == "Asio" and driver == FLEXASIO
     ok = True
 
     # Shared mode is always F32, exclusive needs a format the driver takes. FlexASIO does
-    # no conversion, so its ASIO side has the sample type the TOML asks for.
+    # no conversion, so its ASIO side has the sample type the TOML asks for. Other drivers
+    # are left to report their native format.
     def block(side, device):
         if backend == "Asio":
-            return asio_block(side, "S16_LE" if exclusive else "F32_LE")
+            fmt = ("S16_LE" if exclusive else "F32_LE") if flexasio else None
+            return asio_block(side, driver, fmt)
         return wasapi_block(side, device, exclusive, "S16" if exclusive else None)
 
     # Playback: a generated tone into CABLE Input, recorded off CABLE Output by PortAudio.
     name = f"playback_{mode}"
-    if backend == "Asio":
+    if flexasio:
         write_flexasio_toml("", out_dev["name"], exclusive)
     config = "\n".join([
         "devices:",
@@ -280,7 +289,7 @@ def cdsp(exclusive, backend):
     name = f"capture_{mode}"
     out_index, _ = cable_input()
     raw = Path(f"{name}.raw")
-    if backend == "Asio":
+    if flexasio:
         write_flexasio_toml(in_dev["name"], "", exclusive)
     config = "\n".join([
         "devices:",
@@ -308,14 +317,15 @@ def cdsp(exclusive, backend):
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     backend = "Asio" if "--asio" in sys.argv else "Wasapi"
+    driver = sys.argv[sys.argv.index("--driver") + 1] if "--driver" in sys.argv else FLEXASIO
     if command == "devices":
         devices()
     elif command == "roundtrip":
         roundtrip()
     elif command == "caps":
-        caps(backend)
+        caps(backend, driver)
     elif command == "cdsp":
-        if not cdsp("--exclusive" in sys.argv, backend):
+        if not cdsp("--exclusive" in sys.argv, backend, driver):
             raise SystemExit(1)
     else:
         raise SystemExit(__doc__)
