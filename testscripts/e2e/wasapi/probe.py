@@ -5,9 +5,11 @@ suite would fail too. Meant to be taken apart into fixtures once the answers are
 
     probe.py devices              the WASAPI devices as PortAudio sees them
     probe.py roundtrip            a tone through the cable with PortAudio alone
+    probe.py caps                 the devices and capabilities as CamillaDSP sees them
     probe.py cdsp [--exclusive]   CamillaDSP playing into the cable, then capturing from it
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -134,6 +136,21 @@ def roundtrip():
         raise SystemExit(1)
 
 
+def caps():
+    proc = subprocess.Popen([str(CAMILLADSP), "-w", "-p", str(PORT)])
+    time.sleep(2)
+    client = Client(PORT)
+    for kind in ("Capture", "Playback"):
+        found = client.send(f"GetAvailable{kind}Devices", backend="Wasapi")
+        print(f"{kind}: {json.dumps(found, indent=1)}")
+        for name, _ in found:
+            if "VB-Audio" in name:
+                reply = client.send_raw(f"Get{kind}DeviceCapabilities", backend="Wasapi", device=name)
+                print(name, json.dumps(reply, indent=1))
+    client.send_raw("Exit")
+    proc.wait(10)
+
+
 def start_camilladsp(config, name):
     path = Path(f"{name}.yml")
     path.write_text(config)
@@ -245,6 +262,8 @@ def main():
         devices()
     elif command == "roundtrip":
         roundtrip()
+    elif command == "caps":
+        caps()
     elif command == "cdsp":
         if not cdsp("--exclusive" in sys.argv):
             raise SystemExit(1)

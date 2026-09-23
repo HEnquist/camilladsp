@@ -107,23 +107,7 @@ jobs:
       # What the backend itself sees: the device lists and the formats and rates the cable
       # offers in each mode, which is what the format tests will be written against.
       - name: Devices and capabilities as CamillaDSP sees them
-        shell: python
-        working-directory: testscripts/e2e
-        run: |
-          import json, subprocess, time
-          from wsclient import Client
-          proc = subprocess.Popen([r"..\..\target\e2e\camilladsp.exe", "-w", "-p", "12399"])
-          time.sleep(2)
-          c = Client(12399)
-          print(json.dumps(c.send("GetAvailableCaptureDevices", backend="Wasapi"), indent=1))
-          print(json.dumps(c.send("GetAvailablePlaybackDevices", backend="Wasapi"), indent=1))
-          for kind in ("Capture", "Playback"):
-              for dev in c.send(f"GetAvailable{kind}Devices", backend="Wasapi"):
-                  if "CABLE" in dev[0]:
-                      caps = c.send_raw(f"Get{kind}DeviceCapabilities", backend="Wasapi", device=dev[0])
-                      print(dev[0], json.dumps(caps, indent=1))
-          c.send_raw("Exit")
-          proc.wait(10)
+        run: python testscripts/e2e/wasapi/probe.py caps
 
       - name: CamillaDSP through VB-Cable, shared mode
         run: python testscripts/e2e/wasapi/probe.py cdsp
