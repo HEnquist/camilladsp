@@ -45,6 +45,7 @@ use camillalib::config;
 use camillalib::config::FiniteF64;
 use camillalib::filters::fftconv::{ConvCoeffCache, ImpulseCache};
 use camillalib::pipeline::Pipeline;
+use camillalib::processors::filewriter::WriterPool;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -246,14 +247,20 @@ fn params() -> Arc<ProcessingParameters> {
 /// no `parallelize_filters` pass, which is a small extra on top of everything
 /// measured here for the users who do enable it.
 fn build(conf: config::Configuration) -> Pipeline {
-    Pipeline::from_config(conf, params(), None, &mut ConvCoeffCache::new())
+    Pipeline::from_config(
+        conf,
+        params(),
+        None,
+        &mut ConvCoeffCache::new(),
+        &mut WriterPool::default(),
+    )
 }
 
 /// As `build`, but with the coefficients already read and transformed, the way
 /// the processing thread receives them from the supervisor.
 fn build_prepared(input: (config::Configuration, ConvCoeffCache)) -> Pipeline {
     let (conf, mut cache) = input;
-    Pipeline::from_config(conf, params(), None, &mut cache)
+    Pipeline::from_config(conf, params(), None, &mut cache, &mut WriterPool::default())
 }
 
 /// Transform straight from the fixture files, as the supervisor does for a

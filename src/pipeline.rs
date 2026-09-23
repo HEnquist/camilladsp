@@ -23,6 +23,7 @@ use crate::filters::fftconv::ConvCoeffCache;
 use crate::mixer;
 use crate::processors;
 use crate::processors::Processor;
+use crate::processors::filewriter::WriterPool;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -421,13 +422,17 @@ impl Pipeline {
     /// that [`ConvCoeffCache::transformed`] already filled from `conf` and the
     /// build reads nothing and transforms nothing; pass an empty one and it
     /// does both as it goes.
+    ///
+    /// `writer_pool` holds the FileWriter threads, which outlive the pipeline.
     pub fn from_config(
         conf: config::Configuration,
         processing_params: Arc<ProcessingParameters>,
         filter_pool: Option<Arc<rayon::ThreadPool>>,
         coeff_cache: &mut ConvCoeffCache,
+        writer_pool: &mut WriterPool,
     ) -> Self {
         debug!("Build new pipeline");
+        writer_pool.start_build();
         trace!("Pipeline config {:?}", conf.pipeline);
         let mut steps = Vec::<PipelineStep>::new();
         let mut num_channels = conf.devices.capture.channels();
@@ -554,8 +559,9 @@ impl Pipeline {
                                 let filewriter = processors::filewriter::FileWriter::from_config(
                                     &step.name,
                                     parameters,
-                                    conf.devices.samplerate,
-                                    conf.devices.chunksize,
+                                    conf.devices.samplerate(),
+                                    conf.devices.chunksize(),
+                                    writer_pool,
                                 );
                                 Box::new(filewriter) as Box<dyn Processor>
                             }
@@ -775,7 +781,7 @@ fn parallelize_filters(
 
 #[cfg(test)]
 mod tests {
-    use super::{ConvCoeffCache, Pipeline, PipelineStep};
+    use super::{ConvCoeffCache, Pipeline, PipelineStep, WriterPool};
     use crate::CamillaFloat;
     use crate::ProcessingParameters;
     use crate::audiochunk::AudioChunk;
@@ -898,8 +904,13 @@ pipeline:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline =
-            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf.clone(),
+            params,
+            None,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
         assert!(
             matches!(pipeline.steps[0], PipelineStep::BiquadStep(_)),
             "an all-biquad step should compile"
@@ -940,8 +951,13 @@ pipeline:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline =
-            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf.clone(),
+            params,
+            None,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
 
         // Only 0 and 2 carry audio, as they would ahead of a mixer that reads
         // just those two of four capture channels.
@@ -992,8 +1008,13 @@ pipeline:
             CHUNK,
         );
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline =
-            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf.clone(),
+            params,
+            None,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
 
         // Run a chunk so every stage has state worth preserving.
         let waveforms: Vec<Vec<CamillaFloat>> = (0..2).map(|c| test_signal(CHUNK, c)).collect();
@@ -1113,8 +1134,13 @@ parameters:
         );
 
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline =
-            Pipeline::from_config(conf.clone(), params, None, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf.clone(),
+            params,
+            None,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
 
         // Two biquads either side of the gain compile; the gain does not.
         let shape: Vec<&str> = pipeline
@@ -1176,7 +1202,13 @@ parameters:
             conf.devices.samplerate(),
         );
         let params = Arc::new(ProcessingParameters::default());
-        let mut pipeline = Pipeline::from_config(conf, params, pool, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf,
+            params,
+            pool,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
         let waveforms: Vec<Vec<CamillaFloat>> =
             (0..channels).map(|c| test_signal(chunksize, c)).collect();
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);
@@ -1274,7 +1306,13 @@ parameters:
         let pool = crate::processing::build_processing_threadpool(true, 2, 64, 44100);
         assert!(pool.is_some(), "the test needs a pool to be built");
         let params = Arc::new(ProcessingParameters::default());
-        let pipeline = Pipeline::from_config(conf, params, pool, &mut ConvCoeffCache::new());
+        let pipeline = Pipeline::from_config(
+            conf,
+            params,
+            pool,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
 
         let shape: Vec<&str> = pipeline
             .steps
@@ -1361,7 +1399,13 @@ devices:
         params.set_target_volume(0, -100.0);
         params.sync_volumes_to_target();
 
-        let mut pipeline = Pipeline::from_config(conf, params, None, &mut ConvCoeffCache::new());
+        let mut pipeline = Pipeline::from_config(
+            conf,
+            params,
+            None,
+            &mut ConvCoeffCache::new(),
+            &mut WriterPool::default(),
+        );
 
         let waveforms = vec![vec![1.0 as CamillaFloat; chunksize]; channels];
         let chunk = AudioChunk::new(waveforms, 1.0, -1.0, chunksize, chunksize);

@@ -8,6 +8,7 @@ use camillalib::config;
 use camillalib::config::FiniteF64;
 use camillalib::filters::fftconv::ConvCoeffCache;
 use camillalib::pipeline::Pipeline;
+use camillalib::processors::filewriter::WriterPool;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -251,6 +252,7 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
         processing_params,
         filter_pool,
         &mut ConvCoeffCache::new(),
+        &mut WriterPool::default(),
     )
 }
 
@@ -332,6 +334,7 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
         processing_params,
         filter_pool,
         &mut ConvCoeffCache::new(),
+        &mut WriterPool::default(),
     )
 }
 

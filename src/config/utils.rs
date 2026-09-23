@@ -689,6 +689,8 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     let mut num_channels = conf.devices.capture.channels();
     let fs = conf.devices.samplerate();
+    // FileWriter steps seen so far, by output file, to catch two writing one file.
+    let mut file_writers: HashMap<PathBuf, &str> = HashMap::new();
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline {
             match step {
@@ -876,6 +878,30 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
                                                 );
                                                 return Err(ConfigError::new(&msg).into());
                                             }
+                                        }
+                                        let key = filewriter::file_key(&parameters.filename)
+                                            .map_err(|err| {
+                                                let msg = format!(
+                                                    "Invalid FileWriter processor '{}'. Cannot write to '{}': {}",
+                                                    step.name, parameters.filename, err
+                                                );
+                                                ConfigError::new(&msg)
+                                            })?;
+                                        if let Some(other) =
+                                            file_writers.insert(key, step.name.as_str())
+                                        {
+                                            let msg = if other == step.name {
+                                                format!(
+                                                    "FileWriter processor '{}' is used more than once in the pipeline.",
+                                                    step.name
+                                                )
+                                            } else {
+                                                format!(
+                                                    "FileWriter processors '{}' and '{}' write to the same file.",
+                                                    other, step.name
+                                                )
+                                            };
+                                            return Err(ConfigError::new(&msg).into());
                                         }
                                     }
                                 }

@@ -2657,7 +2657,12 @@ pipeline:
 ### FileWriter
 The "FileWriter" processor writes raw audio to a file.
 This is useful for recording (un)processed audio, or for capturing intermediate stages of the pipeline for analysis.
-When exiting the process, the last few chunks may not be written to the file.
+It is meant as a diagnostic capture tool, not a recorder.
+Writing happens in a separate thread, and if that falls behind by more than about one second of audio, chunks are dropped with a warning.
+
+A config reload that leaves a FileWriter unchanged keeps the file open and appends to it.
+If the FileWriter parameters change, the file is started over.
+The file is also started over when processing restarts, for example after a device error.
 
 Example:
 ```yml
@@ -2674,7 +2679,7 @@ processors:
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the FileWriter is inserted.
   * `process_channels`: a list of channels to write to the file. Optional, defaults to all channels. The channels are written in the specified order.
-  * `filename`: path to the output file. The file is never overwritten: a zero-padded counter is appended to the filename to claim a unique name, e.g. with `filename: /tmp/capture` the files written are `/tmp/capture.000`, `/tmp/capture.001`, and so on. The counter starts one higher than the highest numbered file already present.
+  * `filename`: path to the output file. The file is created when the first chunk arrives, and an existing file is overwritten. The directory must exist. Use an absolute path, since a relative path is resolved against the working directory of the CamillaDSP process. Two FileWriters in the pipeline can not use the same file.
   * `wav_header`: whether to write a wav header to the output file or just raw audio. Optional, defaults to false.
   * `format`: sample format of the output file. One of `S16_LE`, `S24_3_LE`, `S24_4_RJ_LE`, `S24_4_LJ_LE`, `S32_LE`, `F32_LE`, `F64_LE`. `F32_LE` is recommended for diagnostic use: the integer formats clip at 0 dB.
 

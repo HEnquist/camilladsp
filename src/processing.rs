@@ -18,6 +18,7 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::filters::fftconv::ConvCoeffCache;
 use crate::pipeline;
+use crate::processors::filewriter::WriterPool;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -112,11 +113,14 @@ fn processing(
     // Later changes arrive with their coefficients already transformed, but
     // this first build happens before the barrier and before this thread is
     // promoted, so it can do its own reading.
+    // The FileWriter threads live as long as the session, not the pipeline.
+    let mut writer_pool = WriterPool::default();
     let mut pipeline = pipeline::Pipeline::from_config(
         conf_proc,
         processing_params.clone(),
         processing_pool.clone(),
         &mut ConvCoeffCache::new(),
+        &mut writer_pool,
     );
     debug!("build filters, waiting to start processing loop");
 
@@ -188,8 +192,10 @@ fn processing(
                         processing_params.clone(),
                         processing_pool.clone(),
                         &mut coeff_cache,
+                        &mut writer_pool,
                     );
                     pipeline = new_pipeline;
+                    writer_pool.sweep();
                 }
                 config::ConfigChange::FilterParameters {
                     filters,
@@ -219,6 +225,9 @@ fn processing(
             }
         };
     }
+    // Waiting for the writers to empty their queues is fine at normal priority.
+    drop(pipeline);
+    writer_pool.join();
 }
 
 /// Build the shared processing thread pool. It's used for parallel filter processing.

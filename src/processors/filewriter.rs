@@ -14,46 +14,187 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::CamillaFloat;
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
-use crate::utils::conversions::chunk_to_buffer_rawbytes_borrowed;
+use crate::utils::conversions::chunk_to_buffer_rawbytes;
+use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use crate::utils::wavtools::write_wav_header;
-use crossbeam_channel::{Sender, bounded};
-use ringbuf::HeapCons;
-use ringbuf::{HeapProd, HeapRb, traits::*};
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::Path;
+use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::thread;
 
-// Minimum number of chunks to store in the ring buffer
+// Minimum number of chunks the writer channel can hold
 const MIN_CHUNKS: usize = 4;
 
 pub struct FileWriter {
     name: String,
     config: config::FileWriterParameters,
     process_channels: Vec<usize>,
-    chunksize: usize,
-    producer: HeapProd<CamillaFloat>,
-    tx_notify: Sender<()>,
+    tx: Sender<AudioChunk>,
     warned: bool,
 }
 
-struct WriterThread {
-    channels: usize,
+/// Everything a writer thread was built from. A rebuilt pipeline reuses a
+/// running writer only when this is unchanged.
+#[derive(Clone, Debug, PartialEq)]
+struct WriterKey {
+    params: config::FileWriterParameters,
     samplerate: usize,
-    wav_header: bool,
-    samples_per_chunk: usize,
-    sample_format: BinarySampleFormat,
-    filename: String,
-    consumer: HeapCons<CamillaFloat>,
-    rx_notify: crossbeam_channel::Receiver<()>,
-    chunk: AudioChunk,
-    bytes: Vec<u8>,
+    chunksize: usize,
+}
+
+struct PoolEntry {
+    key: WriterKey,
+    tx: Sender<AudioChunk>,
+    handle: Option<thread::JoinHandle<()>>,
+    used: bool,
+}
+
+/// The writer threads of a processing session, keyed on output file.
+///
+/// The pool outlives the pipelines built from it, so a FileWriter that is
+/// unchanged by a config reload keeps its thread and its open file. A writer
+/// that has to be replaced hands its thread to the replacement, which joins it
+/// before opening the file. At most one thread writes to a file at a time.
+#[derive(Default)]
+pub struct WriterPool {
+    entries: HashMap<PathBuf, PoolEntry>,
+    retired: Vec<thread::JoinHandle<()>>,
+}
+
+impl WriterPool {
+    /// Start a pipeline build. Writers the build does not ask for are retired
+    /// by the following [`WriterPool::sweep`].
+    pub fn start_build(&mut self) {
+        for entry in self.entries.values_mut() {
+            entry.used = false;
+        }
+    }
+
+    /// Get a sender to the writer for these parameters, starting one if needed.
+    fn sender(&mut self, name: &str, key: WriterKey) -> Sender<AudioChunk> {
+        let path =
+            file_key(&key.params.filename).unwrap_or_else(|_| PathBuf::from(&key.params.filename));
+        let predecessor = match self.entries.get_mut(&path) {
+            Some(entry) if entry.key == key => {
+                debug!(
+                    "FileWriter processor '{}' reuses the writer for {}",
+                    name, key.params.filename
+                );
+                entry.used = true;
+                return entry.tx.clone();
+            }
+            Some(_) => self.entries.remove(&path).and_then(|entry| entry.handle),
+            None => None,
+        };
+        let (tx, handle) = spawn_writer(name, key.clone(), predecessor);
+        self.entries.insert(
+            path,
+            PoolEntry {
+                key,
+                tx: tx.clone(),
+                handle,
+                used: true,
+            },
+        );
+        tx
+    }
+
+    /// Let go of the writers the latest pipeline does not use.
+    ///
+    /// Call after the previous pipeline is dropped. Their threads finish writing
+    /// what is queued and are joined by [`WriterPool::join`].
+    pub fn sweep(&mut self) {
+        let retired = &mut self.retired;
+        self.entries.retain(|_, entry| {
+            if entry.used {
+                true
+            } else {
+                retired.extend(entry.handle.take());
+                false
+            }
+        });
+        // Dropping the handle of a finished thread is just bookkeeping.
+        retired.retain(|handle| !handle.is_finished());
+    }
+
+    /// Close all writers and wait for them to write what is queued.
+    ///
+    /// Blocks, so call it off the real-time thread and after every pipeline
+    /// built from this pool is dropped.
+    pub fn join(self) {
+        let handles = self
+            .entries
+            .into_values()
+            .filter_map(|entry| entry.handle)
+            .chain(self.retired);
+        for handle in handles {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn spawn_writer(
+    name: &str,
+    key: WriterKey,
+    predecessor: Option<thread::JoinHandle<()>>,
+) -> (Sender<AudioChunk>, Option<thread::JoinHandle<()>>) {
+    let capacity = (key.samplerate / key.chunksize.max(1)).max(MIN_CHUNKS);
+    let (tx, rx) = bounded::<AudioChunk>(capacity);
+    let proc_name = name.to_string();
+    let handle = thread::Builder::new()
+        .name(format!("FileWriter-{proc_name}"))
+        .spawn(move || {
+            if let Some(predecessor) = predecessor {
+                let _ = predecessor.join();
+            }
+            if let Err(err) = write_loop(&key, rx) {
+                error!("FileWriter processor '{}' writer error: {}", proc_name, err);
+            }
+        });
+    match handle {
+        Ok(handle) => (tx, Some(handle)),
+        Err(err) => {
+            error!(
+                "FileWriter processor '{}' failed to spawn writer thread: {}",
+                name, err
+            );
+            (tx, None)
+        }
+    }
+}
+
+/// Write chunks until every sender is dropped. The file is created on the first chunk.
+fn write_loop(key: &WriterKey, rx: Receiver<AudioChunk>) -> Res<()> {
+    let params = &key.params;
+    let mut file: Option<BufWriter<File>> = None;
+    let mut bytes = Vec::new();
+    for chunk in rx.iter() {
+        if file.is_none() {
+            let mut f = BufWriter::new(File::create(&params.filename)?);
+            if params.wav_header() {
+                write_wav_header(&mut f, chunk.channels, params.format, key.samplerate)?;
+            }
+            file = Some(f);
+        }
+        bytes.resize(
+            chunk.frames * chunk.channels * params.format.bytes_per_sample(),
+            0,
+        );
+        let (valid_bytes, _) = chunk_to_buffer_rawbytes(chunk, &mut bytes, &params.format);
+        file.as_mut().unwrap().write_all(&bytes[..valid_bytes])?;
+    }
+    if let Some(mut file) = file {
+        file.flush()?;
+    }
+    debug!("FileWriter writer for '{}' done", params.filename);
+    Ok(())
 }
 
 impl FileWriter {
@@ -63,6 +204,7 @@ impl FileWriter {
         config: config::FileWriterParameters,
         samplerate: usize,
         chunksize: usize,
+        pool: &mut WriterPool,
     ) -> Self {
         debug!(
             "Creating FileWriter processor '{}', channels: {}, process_channels: {:?}, filename: {}, format: {}",
@@ -72,59 +214,21 @@ impl FileWriter {
             config.filename,
             config.format
         );
-        let input_channels = config.channels;
         let mut process_channels = config.process_channels();
         if process_channels.is_empty() {
-            for n in 0..input_channels {
-                process_channels.push(n);
-            }
+            process_channels = (0..config.channels).collect();
         }
-        let write_channels = process_channels.len();
-        let sample_format = config.format;
-        let filename = config.filename.clone();
-        let wav_header = config.wav_header();
-        let samples_per_chunk = chunksize * write_channels;
-        let bytes_per_chunk = samples_per_chunk * sample_format.bytes_per_sample();
-        let ring_size = write_channels * samplerate.max(MIN_CHUNKS * chunksize);
-        let ringbuffer = HeapRb::<CamillaFloat>::new(ring_size);
-        let (producer, consumer) = ringbuffer.split();
-        let (tx_notify, rx_notify) = bounded::<()>(2);
-        let proc_name = name.to_string();
-        if let Err(err) = thread::Builder::new()
-            .name(format!("FileWriter-{proc_name}"))
-            .spawn(move || {
-                let waveforms = (0..write_channels).map(|_| vec![0.0; chunksize]).collect();
-                let chunk = AudioChunk::new(waveforms, 0.0, 0.0, chunksize, chunksize);
-                let bytes = vec![0_u8; bytes_per_chunk];
-                let writer = WriterThread {
-                    channels: write_channels,
-                    samplerate,
-                    wav_header,
-                    samples_per_chunk,
-                    sample_format,
-                    filename,
-                    consumer,
-                    rx_notify,
-                    chunk,
-                    bytes,
-                };
-                if let Err(err) = writer.run() {
-                    error!("FileWriter processor '{}' writer error: {}", proc_name, err);
-                }
-            })
-        {
-            error!(
-                "FileWriter processor '{}' failed to spawn writer thread: {}",
-                name, err
-            );
-        }
+        let key = WriterKey {
+            params: config.clone(),
+            samplerate,
+            chunksize,
+        };
+        let tx = pool.sender(name, key);
         FileWriter {
             name: name.to_string(),
             config,
             process_channels,
-            chunksize,
-            producer,
-            tx_notify,
+            tx,
             warned: false,
         }
     }
@@ -135,30 +239,41 @@ impl Processor for FileWriter {
         &self.name
     }
 
-    /// Copy the input AudioChunk into the ring buffer.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
-        if input.valid_frames < self.chunksize {
-            // Silently drop last partial chunk.
-            return Ok(());
-        }
-
-        if self.producer.vacant_len() < input.valid_frames * self.process_channels.len() {
-            if !self.warned {
-                warn!(
-                    "FileWriter processor '{}' buffer overrun, dropping chunks",
-                    self.name
-                );
-                self.warned = true;
-            }
-            return Ok(());
-        }
+    /// Copy the selected channels of the input AudioChunk and queue them for writing.
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
+        let mut waveforms = container_from_stash(self.process_channels.len());
         for channel in self.process_channels.iter() {
-            let slice = &input.waveforms[*channel][..input.valid_frames];
-            let _ = self.producer.push_slice(slice);
+            let source = &input.waveforms[*channel];
+            // An empty waveform is a silent channel, and stays empty.
+            let mut waveform = if source.is_empty() {
+                Vec::new()
+            } else {
+                vec_from_stash(source.len())
+            };
+            waveform.copy_from_slice(source);
+            waveforms.push(waveform);
         }
-        let _ = self.tx_notify.try_send(());
-        self.warned = false;
-        Ok(())
+        let chunk = AudioChunk::from(input, waveforms);
+        match self.tx.try_send(chunk) {
+            Ok(()) => {
+                let capacity = self.tx.capacity().unwrap_or_default();
+                if self.warned && self.tx.len() * 2 <= capacity {
+                    self.warned = false;
+                }
+            }
+            Err(TrySendError::Full(chunk)) => {
+                recycle_chunk(chunk);
+                if !self.warned {
+                    warn!(
+                        "FileWriter processor '{}' buffer overrun, dropping chunks",
+                        self.name
+                    );
+                    self.warned = true;
+                }
+            }
+            // The writer thread stopped, and logged why.
+            Err(TrySendError::Disconnected(chunk)) => recycle_chunk(chunk),
+        }
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -176,97 +291,20 @@ impl Processor for FileWriter {
     }
 }
 
-impl WriterThread {
-    // Consume `self` and run the write loop to completion.
-    fn run(mut self) -> Result<(), std::io::Error> {
-        let mut file: Option<File> = None;
-        while let Ok(()) = self.rx_notify.recv() {
-            self.drain_and_write(&mut file)?;
-        }
-        self.drain_and_write(&mut file)?;
-        if let Some(mut file) = file {
-            file.flush()?;
-        }
-        debug!("FileWriter processor '{}' writer done", self.filename);
-        Ok(())
-    }
-
-    /// Open unique numbered output file, starting after the highest existing one.
-    fn open_file(&mut self) -> Result<File, std::io::Error> {
-        let mut counter = highest_existing_counter(&self.filename).map_or(0, |n| n + 1);
-        loop {
-            let candidate = numbered_filename(&self.filename, counter);
-            match OpenOptions::new()
-                .write(true)
-                // atomic
-                .create_new(true)
-                .open(&candidate)
-            {
-                Ok(mut file) => {
-                    self.filename = candidate;
-                    if self.wav_header {
-                        write_wav_header(
-                            &mut file,
-                            self.channels,
-                            self.sample_format,
-                            self.samplerate,
-                        )
-                        .map_err(|err| std::io::Error::other(err.to_string()))?;
-                    }
-                    return Ok(file);
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                    counter += 1;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-    }
-
-    fn drain_and_write(&mut self, file: &mut Option<File>) -> Result<(), std::io::Error> {
-        while self.consumer.occupied_len() >= self.samples_per_chunk {
-            for ch in 0..self.channels {
-                self.consumer.pop_slice(&mut self.chunk.waveforms[ch]);
-            }
-            let (valid_bytes, _) = chunk_to_buffer_rawbytes_borrowed(
-                &self.chunk,
-                &mut self.bytes,
-                &self.sample_format,
-            );
-            if file.is_none() {
-                *file = Some(self.open_file()?);
-            }
-            file.as_mut()
-                .unwrap()
-                .write_all(&self.bytes[..valid_bytes])?;
-        }
-        Ok(())
-    }
-}
-
-fn numbered_filename(filename: &str, counter: u64) -> String {
-    format!("{filename}.{counter:03}")
-}
-
-fn highest_existing_counter(filename: &str) -> Option<u64> {
+/// The key that identifies an output file: its canonical parent directory
+/// joined with the file name.
+///
+/// The file itself need not exist, but its directory must.
+pub fn file_key(filename: &str) -> std::io::Result<PathBuf> {
     let path = Path::new(filename);
-    let name = path.file_name()?.to_str()?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("the path has no file name"))?;
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let prefix = format!("{name}.");
-    std::fs::read_dir(parent)
-        .ok()?
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            let name = name.to_str()?;
-            let rest = name.strip_prefix(&prefix)?;
-            (!rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
-                .then(|| rest.parse::<u64>().ok())?
-        })
-        .max()
+    Ok(std::fs::canonicalize(parent)?.join(name))
 }
 
 /// Validate the file writer config.
@@ -307,8 +345,6 @@ mod tests {
     use crate::CamillaFloat;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::thread;
-    use std::time::Duration;
 
     static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -323,15 +359,6 @@ mod tests {
             .into_owned()
     }
 
-    /// Drop the `FileWriter`, which drops the `notify` sender so the writer
-    /// thread drains its ring buffer and exits, then sleep briefly to let the
-    /// detached thread flush the file before the test reads it. The writer
-    /// thread is detached, so we cannot join it.
-    fn shutdown(fw: FileWriter) {
-        drop(fw);
-        thread::sleep(Duration::from_millis(100));
-    }
-
     fn f32_config(filename: String) -> config::FileWriterParameters {
         config::FileWriterParameters {
             channels: 2,
@@ -340,6 +367,10 @@ mod tests {
             format: BinarySampleFormat::F32_LE,
             wav_header: Some(false),
         }
+    }
+
+    fn writer(config: config::FileWriterParameters, pool: &mut WriterPool) -> FileWriter {
+        FileWriter::from_config("test", config, 48_000, 2, pool)
     }
 
     fn stereo_chunk(left: [f64; 2], right: [f64; 2], valid_frames: usize) -> AudioChunk {
@@ -356,6 +387,10 @@ mod tests {
         )
     }
 
+    fn f32_bytes(values: &[f32]) -> Vec<u8> {
+        values.iter().flat_map(|v| v.to_le_bytes()).collect()
+    }
+
     #[test]
     fn validate_rejects_invalid_process_channel() {
         let mut config = f32_config("test".to_string());
@@ -365,58 +400,33 @@ mod tests {
     }
 
     #[test]
-    fn writes_three_interleaved_raw_chunks_without_modifying_chunks() {
+    fn writes_interleaved_raw_chunks_without_modifying_chunks() {
         let filename = unique_test_filename();
-        let mut fw = FileWriter::from_config("test", f32_config(filename.clone()), 48_000, 2);
+        let mut pool = WriterPool::default();
+        let mut fw = writer(f32_config(filename.clone()), &mut pool);
 
         let mut c1 = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
         let mut c2 = stereo_chunk([0.125, -0.25], [0.5, -0.75], 2);
-        // c3 has only 1 valid frame, less than the chunksize of 2. Partial
-        // chunks are silently dropped by `process_chunk`, so c3 is never
-        // written to the file. It is still passed through to verify the
-        // processor does not mutate the input chunk.
+        // A partial chunk writes its valid frames only.
         let mut c3 = stereo_chunk([1.0, -0.875], [0.0, 0.375], 1);
 
-        fw.process_chunk(&mut c1).unwrap();
-        fw.process_chunk(&mut c2).unwrap();
-        fw.process_chunk(&mut c3).unwrap();
-        shutdown(fw);
+        fw.process_chunk(&mut c1);
+        fw.process_chunk(&mut c2);
+        fw.process_chunk(&mut c3);
+        drop(fw);
+        pool.join();
 
-        assert_eq!(
-            c1.waveforms[0],
-            vec![0.25 as CamillaFloat, -0.5 as CamillaFloat]
-        );
-        assert_eq!(
-            c1.waveforms[1],
-            vec![0.75 as CamillaFloat, -1.0 as CamillaFloat]
-        );
-        assert_eq!(
-            c2.waveforms[0],
-            vec![0.125 as CamillaFloat, -0.25 as CamillaFloat]
-        );
-        assert_eq!(
-            c2.waveforms[1],
-            vec![0.5 as CamillaFloat, -0.75 as CamillaFloat]
-        );
-        assert_eq!(
-            c3.waveforms[0],
-            vec![1.0 as CamillaFloat, -0.875 as CamillaFloat]
-        );
-        assert_eq!(
-            c3.waveforms[1],
-            vec![0.0 as CamillaFloat, 0.375 as CamillaFloat]
-        );
+        assert_eq!(c1.waveforms[0], vec![0.25, -0.5]);
+        assert_eq!(c1.waveforms[1], vec![0.75, -1.0]);
+        assert_eq!(c2.waveforms[0], vec![0.125, -0.25]);
+        assert_eq!(c2.waveforms[1], vec![0.5, -0.75]);
+        assert_eq!(c3.waveforms[0], vec![1.0, -0.875]);
+        assert_eq!(c3.waveforms[1], vec![0.0, 0.375]);
 
-        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
-        let mut expected = Vec::new();
-        // Only c1 and c2 are written; c3 is dropped (partial chunk).
-        for &value in &[
-            0.25f32, 0.75f32, -0.5f32, -1.0f32, 0.125f32, 0.5f32, -0.25f32, -0.75f32,
-        ] {
-            expected.extend_from_slice(&value.to_le_bytes());
-        }
+        let data = fs::read(&filename).unwrap();
+        let expected = f32_bytes(&[0.25, 0.75, -0.5, -1.0, 0.125, 0.5, -0.25, -0.75, 1.0, 0.0]);
         assert_eq!(data, expected);
-        let _ = fs::remove_file(numbered_filename(&filename, 0));
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
@@ -424,37 +434,39 @@ mod tests {
         let filename = unique_test_filename();
         let mut config = f32_config(filename.clone());
         config.process_channels = Some(vec![1, 0]);
-        let mut fw = FileWriter::from_config("test", config, 48_000, 2);
+        let mut pool = WriterPool::default();
+        let mut fw = writer(config, &mut pool);
 
         let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
 
-        fw.process_chunk(&mut chunk).unwrap();
-        shutdown(fw);
+        fw.process_chunk(&mut chunk);
+        drop(fw);
+        pool.join();
 
-        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
-        let mut expected = Vec::new();
-        for &value in &[0.75f32, 0.25f32, -1.0f32, -0.5f32] {
-            expected.extend_from_slice(&value.to_le_bytes());
-        }
-        assert_eq!(data, expected);
-        let _ = fs::remove_file(numbered_filename(&filename, 0));
+        let data = fs::read(&filename).unwrap();
+        assert_eq!(data, f32_bytes(&[0.75, 0.25, -1.0, -0.5]));
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
-    fn drops_chunk_when_ring_buffer_is_full() {
+    fn drops_chunk_when_channel_is_full() {
         let filename = unique_test_filename();
-        let mut fw = FileWriter::from_config("test", f32_config(filename.clone()), 48_000, 2);
-        let ringbuffer = HeapRb::<CamillaFloat>::new(1);
-        let (mut producer, _consumer) = ringbuffer.split();
-        assert!(producer.try_push(0.0).is_ok());
-        fw.producer = producer;
+        let mut pool = WriterPool::default();
+        let mut fw = writer(f32_config(filename.clone()), &mut pool);
+        // Swap in a channel nobody reads.
+        let (tx, rx) = bounded(1);
+        fw.tx = tx;
 
         let mut chunk = stereo_chunk([1.0, 2.0], [3.0, 4.0], 2);
-        fw.process_chunk(&mut chunk).unwrap();
+        fw.process_chunk(&mut chunk);
+        assert!(!fw.warned);
+        fw.process_chunk(&mut chunk);
+        assert!(fw.warned);
+        assert_eq!(rx.len(), 1);
 
-        assert_eq!(fw.producer.occupied_len(), 1);
         drop(fw);
-        let _ = fs::remove_file(numbered_filename(&filename, 0));
+        pool.join();
+        assert!(!Path::new(&filename).exists());
     }
 
     #[test]
@@ -464,7 +476,8 @@ mod tests {
         let mut config2 = f32_config(filename.clone());
         config2.channels = config.channels + 1;
 
-        let mut fw = FileWriter::from_config("test", config.clone(), 48_000, 2);
+        let mut pool = WriterPool::default();
+        let mut fw = writer(config.clone(), &mut pool);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             fw.update_parameters(config::Processor::FileWriter {
@@ -475,74 +488,81 @@ mod tests {
         assert!(result.is_err());
 
         drop(fw);
-        let _ = fs::remove_file(numbered_filename(&filename, 0));
-    }
-
-    /// Write one stereo chunk through a fresh writer.
-    fn write_one_chunk(filename: &str) {
-        let mut fw = FileWriter::from_config("test", f32_config(filename.to_string()), 48_000, 2);
-        let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
-        fw.process_chunk(&mut chunk).unwrap();
-        shutdown(fw);
-    }
-
-    fn expected_bytes() -> Vec<u8> {
-        let mut expected = Vec::new();
-        for &value in &[0.25f32, 0.75f32, -0.5f32, -1.0f32] {
-            expected.extend_from_slice(&value.to_le_bytes());
-        }
-        expected
+        pool.join();
     }
 
     #[test]
-    fn claims_next_free_number() {
-        // The counter is zero-padded to three digits.
-        assert_eq!(numbered_filename("capture", 42), "capture.042");
-        // An existing file at 000 blocks the first name.
+    fn unchanged_writer_survives_a_rebuild() {
         let filename = unique_test_filename();
-        fs::write(numbered_filename(&filename, 0), b"occupied").unwrap();
-        write_one_chunk(&filename);
-        assert_eq!(
-            fs::read(numbered_filename(&filename, 0)).unwrap(),
-            b"occupied"
-        );
-        assert_eq!(
-            fs::read(numbered_filename(&filename, 1)).unwrap(),
-            expected_bytes()
-        );
-        fs::remove_file(numbered_filename(&filename, 0)).unwrap();
-        fs::remove_file(numbered_filename(&filename, 1)).unwrap();
+        let mut pool = WriterPool::default();
+        let mut old = writer(f32_config(filename.clone()), &mut pool);
+        old.process_chunk(&mut stereo_chunk([0.25, -0.5], [0.75, -1.0], 2));
 
-        // Gaps are skipped: with 000 and 002 present, the next is 003.
-        let filename = unique_test_filename();
-        fs::write(numbered_filename(&filename, 0), b"old0").unwrap();
-        fs::write(numbered_filename(&filename, 2), b"old2").unwrap();
-        write_one_chunk(&filename);
-        assert_eq!(fs::read(numbered_filename(&filename, 0)).unwrap(), b"old0");
-        assert_eq!(fs::read(numbered_filename(&filename, 2)).unwrap(), b"old2");
-        assert!(!Path::new(&numbered_filename(&filename, 1)).exists());
-        assert_eq!(
-            fs::read(numbered_filename(&filename, 3)).unwrap(),
-            expected_bytes()
-        );
-        for n in [0, 2, 3] {
-            fs::remove_file(numbered_filename(&filename, n)).unwrap();
-        }
+        // Build the new pipeline before dropping the old, as processing does.
+        let mut new = writer(f32_config(filename.clone()), &mut pool);
+        drop(old);
+        pool.sweep();
+        new.process_chunk(&mut stereo_chunk([0.125, -0.25], [0.5, -0.75], 2));
+        drop(new);
+        pool.join();
 
-        // A 4-digit name is still counted, so the next is 1001.
+        let data = fs::read(&filename).unwrap();
+        let expected = f32_bytes(&[0.25, 0.75, -0.5, -1.0, 0.125, 0.5, -0.25, -0.75]);
+        assert_eq!(data, expected);
+        let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn changed_writer_waits_for_its_predecessor() {
         let filename = unique_test_filename();
-        fs::write(numbered_filename(&filename, 1000), b"old").unwrap();
-        write_one_chunk(&filename);
+        let mut pool = WriterPool::default();
+        let mut old = writer(f32_config(filename.clone()), &mut pool);
+        old.process_chunk(&mut stereo_chunk([0.25, -0.5], [0.75, -1.0], 2));
+
+        let mut config = f32_config(filename.clone());
+        config.process_channels = Some(vec![1]);
+        let mut new = writer(config, &mut pool);
+        // The new writer gets data while the old one still holds the file.
+        new.process_chunk(&mut stereo_chunk([0.125, -0.25], [0.5, -0.75], 2));
+        drop(old);
+        pool.sweep();
+        drop(new);
+        pool.join();
+
+        // The old file is truncated, but only once the old writer is done with it.
+        let data = fs::read(&filename).unwrap();
+        assert_eq!(data, f32_bytes(&[0.5, -0.75]));
+        let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn dropped_writer_is_retired_and_joined() {
+        let filename = unique_test_filename();
+        let mut pool = WriterPool::default();
+        let mut fw = writer(f32_config(filename.clone()), &mut pool);
+        fw.process_chunk(&mut stereo_chunk([0.25, -0.5], [0.75, -1.0], 2));
+        // A rebuild without this writer.
+        pool.start_build();
+        drop(fw);
+        pool.sweep();
+        assert!(pool.entries.is_empty());
+        pool.join();
+
+        let data = fs::read(&filename).unwrap();
+        assert_eq!(data, f32_bytes(&[0.25, 0.75, -0.5, -1.0]));
+        let _ = fs::remove_file(&filename);
+    }
+
+    #[test]
+    fn file_key_folds_the_parent_directory() {
+        let dir = std::env::temp_dir();
+        let plain = dir.join("capture.raw");
+        let dotted = dir.join(".").join("capture.raw");
         assert_eq!(
-            fs::read(numbered_filename(&filename, 1000)).unwrap(),
-            b"old"
+            file_key(plain.to_str().unwrap()).unwrap(),
+            file_key(dotted.to_str().unwrap()).unwrap()
         );
-        assert_eq!(
-            fs::read(numbered_filename(&filename, 1001)).unwrap(),
-            expected_bytes()
-        );
-        fs::remove_file(numbered_filename(&filename, 1000)).unwrap();
-        fs::remove_file(numbered_filename(&filename, 1001)).unwrap();
+        assert!(file_key("/no/such/dir/capture.raw").is_err());
     }
 
     #[test]
@@ -550,14 +570,15 @@ mod tests {
         let filename = unique_test_filename();
         let mut config = f32_config(filename.clone());
         config.wav_header = Some(true);
-        let mut fw = FileWriter::from_config("test", config, 48_000, 2);
-        let mut chunk = stereo_chunk([0.25, -0.5], [0.75, -1.0], 2);
-        fw.process_chunk(&mut chunk).unwrap();
-        shutdown(fw);
-        let data = fs::read(numbered_filename(&filename, 0)).unwrap();
+        let mut pool = WriterPool::default();
+        let mut fw = writer(config, &mut pool);
+        fw.process_chunk(&mut stereo_chunk([0.25, -0.5], [0.75, -1.0], 2));
+        drop(fw);
+        pool.join();
+        let data = fs::read(&filename).unwrap();
         assert!(data.starts_with(b"RIFF"));
         assert!(data.len() > 4 + 24 + 8);
-        let _ = fs::remove_file(numbered_filename(&filename, 0));
+        let _ = fs::remove_file(&filename);
     }
 
     #[test]
