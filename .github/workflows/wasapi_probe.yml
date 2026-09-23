@@ -1,0 +1,141 @@
+on:
+  push:
+    paths:
+      - .github/workflows/wasapi_probe.yml
+      - testscripts/e2e/wasapi/**
+  workflow_dispatch:
+
+name: WASAPI VB-Cable probe
+
+# Answers whether a stock Windows runner can install VB-Cable without devcon or a reboot,
+# and whether a process there gets audio from its capture side, before an e2e job is built
+# on it. Every step prints what it finds and the job only fails where a later suite would
+# fail too. The steps are meant to move into the real WASAPI job later.
+#
+# The free VB-Cable is a single cable, where the ALSA and CoreAudio suites use two. The
+# last step tries installing a second instance of the same driver, to see if that gives a
+# second cable.
+jobs:
+  probe:
+    name: VB-Cable, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: OS and image
+        run: |
+          Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber, OSArchitecture
+          "image: $env:ImageOS $env:ImageVersion"
+          whoami
+
+      - name: Audio devices and services before installing anything
+        run: |
+          Get-Service audiosrv, AudioEndpointBuilder | Format-Table Name, Status, StartType
+          Get-PnpDevice -Class MEDIA, AudioEndpoint -ErrorAction SilentlyContinue |
+            Format-Table Class, Status, FriendlyName, InstanceId -AutoSize
+          Get-CimInstance Win32_SoundDevice | Format-Table Name, Status
+
+      # Capture is behind the microphone privacy setting. Without it a capture does not
+      # fail, it delivers silence, so the roundtrips below are the real check and the
+      # consent store is dumped only to explain a silent one.
+      - name: Start the audio service and allow microphone access
+        run: |
+          Set-Service audiosrv -StartupType Automatic
+          Start-Service audiosrv
+          Get-Service audiosrv | Format-Table Name, Status
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name LetAppsAccessMicrophone -Value 1 -PropertyType DWord -Force | Out-Null
+          Get-ItemProperty $key
+          $consent = 'CapabilityAccessManager\ConsentStore\microphone'
+          foreach ($root in 'HKLM:', 'HKCU:') {
+            $path = "$root\SOFTWARE\Microsoft\Windows\CurrentVersion\$consent"
+            "$path : $((Get-ItemProperty $path -ErrorAction SilentlyContinue).Value)"
+          }
+
+      - name: Download the VB-Cable driver pack
+        run: |
+          $zip = "$env:RUNNER_TEMP\vbcable.zip"
+          Invoke-WebRequest https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip -OutFile $zip
+          (Get-FileHash $zip).Hash
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\vbcable"
+          Get-ChildItem "$env:RUNNER_TEMP\vbcable" | Format-Table Name, Length
+          Select-String -Path "$env:RUNNER_TEMP\vbcable\*.inf" -Pattern 'VBAudioVACWDM|DriverVer|CatalogFile'
+
+      - name: Install VB-Cable
+        run: |
+          $start = Get-Date
+          testscripts/e2e/wasapi/install_vbcable.ps1 -Dir "$env:RUNNER_TEMP\vbcable"
+          "took $(((Get-Date) - $start).TotalSeconds) s"
+
+      - name: Audio devices after the install
+        run: |
+          Get-PnpDevice -Class MEDIA, AudioEndpoint |
+            Format-Table Class, Status, FriendlyName, InstanceId -AutoSize
+          Get-PnpDevice -FriendlyName '*CABLE*' | Format-Table Class, Status, FriendlyName -AutoSize
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install sounddevice, numpy and websocket-client
+        run: pip install sounddevice numpy websocket-client
+
+      - name: Devices as PortAudio sees them
+        run: python testscripts/e2e/wasapi/probe.py devices
+
+      - name: Roundtrip through VB-Cable with PortAudio
+        run: python testscripts/e2e/wasapi/probe.py roundtrip
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --profile e2e
+
+      # What the backend itself sees: the device lists and the formats and rates the cable
+      # offers in each mode, which is what the format tests will be written against.
+      - name: Devices and capabilities as CamillaDSP sees them
+        shell: python
+        working-directory: testscripts/e2e
+        run: |
+          import json, subprocess, time
+          from wsclient import Client
+          proc = subprocess.Popen([r"..\..\target\e2e\camilladsp.exe", "-w", "-p", "12399"])
+          time.sleep(2)
+          c = Client(12399)
+          print(json.dumps(c.send("GetAvailableCaptureDevices", backend="Wasapi"), indent=1))
+          print(json.dumps(c.send("GetAvailablePlaybackDevices", backend="Wasapi"), indent=1))
+          for kind in ("Capture", "Playback"):
+              for dev in c.send(f"GetAvailable{kind}Devices", backend="Wasapi"):
+                  if "CABLE" in dev[0]:
+                      caps = c.send_raw(f"Get{kind}DeviceCapabilities", backend="Wasapi", device=dev[0])
+                      print(dev[0], json.dumps(caps, indent=1))
+          c.send_raw("Exit")
+          proc.wait(10)
+
+      - name: CamillaDSP through VB-Cable, shared mode
+        run: python testscripts/e2e/wasapi/probe.py cdsp
+
+      # Informational: whether exclusive mode on the cable works at all, and at S16.
+      - name: CamillaDSP through VB-Cable, exclusive mode
+        continue-on-error: true
+        run: python testscripts/e2e/wasapi/probe.py cdsp --exclusive
+
+      - name: Try a second instance of the cable
+        continue-on-error: true
+        run: |
+          testscripts/e2e/wasapi/install_vbcable.ps1 -Dir "$env:RUNNER_TEMP\vbcable"
+          Get-PnpDevice -FriendlyName '*CABLE*' | Format-Table Class, Status, FriendlyName, InstanceId -AutoSize
+          python testscripts/e2e/wasapi/probe.py devices
