@@ -221,17 +221,17 @@ jobs:
           EOF
 
       # snd-dummy has no knob for its clock, so a skewed sink is a second loopback cable
-      # whose far end nobody opens, with its own rate shift set by the test. The backend
-      # only writes the rate shift of its capture subdevice, so the two do not clash.
-      # Rate adjust should then pull the capture cable towards the sink's rate. Printed
-      # rather than asserted, since which way a shift on one end counts is what this
-      # finds out.
+      # whose far end nobody opens, with its own rate shift set by the test. The rate
+      # shift is per cable and named after the cable's capture end, so the sink played
+      # through 0,1 is controlled by device=1,subdevice=1. The backend only writes the
+      # control of its own capture cable, 1,0, so the two do not clash. Rate adjust
+      # should pull the capture cable's shift to the sink's.
       - name: Rate adjust on the loopback capture against a skewed sink
         run: |
           ssh vm bash -s <<'EOF'
           set -e
-          amixer -c Loopback cset iface=PCM,name='PCM Rate Shift 100000',device=0,subdevice=1 100200
-          amixer -c Loopback cget iface=PCM,name='PCM Rate Shift 100000',device=0,subdevice=1
+          amixer -c Loopback cset iface=PCM,name='PCM Rate Shift 100000',device=1,subdevice=1 100200
+          amixer -c Loopback cget iface=PCM,name='PCM Rate Shift 100000',device=1,subdevice=1
           cat > skew.yml <<'YML'
           devices:
             samplerate: 48000
@@ -256,13 +256,16 @@ jobs:
           dsp=$!
           sleep 28
           echo "capture cable rate shift after 28 s:"
-          amixer -c Loopback cget iface=PCM,name='PCM Rate Shift 100000',device=1,subdevice=0 | tail -1
+          amixer -c Loopback cget iface=PCM,name='PCM Rate Shift 100000',device=1,subdevice=0 | tail -1 | tee shift.txt
           wait $dsp || status=$?
           kill $feed 2>/dev/null || true
           echo "camilladsp exit status ${status:-0}"
           grep -E 'Setting capture loopback speed|rror|nderrun|verrun' skew.log | tail -30
           grep -q 'Setting capture loopback speed' skew.log
           test "${status:-0}" = 124
+          shift=$(sed -E 's/.*values=//' shift.txt)
+          echo "capture shift $shift, sink shift 100200"
+          test "$shift" -gt 100100 -a "$shift" -lt 100300
           EOF
 
       - name: Guest console on failure
