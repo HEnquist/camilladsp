@@ -41,6 +41,14 @@ jobs:
       - name: Install modules-extra and alsa-utils
         run: sudo apt-get install -y "linux-modules-extra-$(uname -r)" alsa-utils
 
+      # The azure flavour kernel may be built without sound at all, in which case no
+      # package brings snd-aloop and the module has to come from somewhere else.
+      - name: Is the kernel built with ALSA
+        run: |
+          grep -E '^(# )?CONFIG_(SOUND|SND|SND_PCM|SND_TIMER|SND_ALOOP)[= ]' "/boot/config-$(uname -r)" || true
+          find "/lib/modules/$(uname -r)" -path '*sound*' -name '*.ko*' | head -20
+          dpkg -L "linux-modules-extra-$(uname -r)" | grep -c '\.ko' || true
+
       - name: Load snd-aloop
         run: |
           sudo modprobe snd-aloop pcm_substreams=2
