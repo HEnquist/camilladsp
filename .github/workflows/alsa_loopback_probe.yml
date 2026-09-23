@@ -101,19 +101,23 @@ jobs:
 
       - name: Is the guest kernel built with ALSA
         run: |
-          ssh vm 'uname -a; grep -E "^(# )?CONFIG_(SOUND|SND|SND_PCM|SND_TIMER|SND_ALOOP)[= ]" /boot/config-$(uname -r); id'
+          ssh vm 'uname -a; grep -E "^(# )?CONFIG_(SOUND|SND|SND_PCM|SND_TIMER|SND_ALOOP|SND_DUMMY)[= ]" /boot/config-$(uname -r); id'
 
       - name: Load snd-aloop in the guest
         run: |
           ssh vm bash -s <<'EOF'
           set -e
-          if ! modinfo snd-aloop >/dev/null 2>&1; then
-            echo "snd-aloop is not in linux-modules, installing linux-modules-extra"
+          if ! modinfo snd-aloop snd-dummy >/dev/null 2>&1; then
+            echo "snd-aloop or snd-dummy is not in linux-modules, installing linux-modules-extra"
             sudo apt-get update -q
             sudo apt-get install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
           fi
           sudo apt-get install -y -q --no-install-recommends alsa-utils
           sudo modprobe snd-aloop pcm_substreams=2
+          sudo modprobe snd-dummy
+          # The minimal image's default user is not in the audio group. Every step is a
+          # new ssh login, so the group applies from the next one on.
+          sudo usermod -aG audio ubuntu
           cat /proc/asound/cards
           ls -l /dev/snd
           EOF
@@ -181,6 +185,39 @@ jobs:
                 f"{crossings / seconds:.0f} rising zero crossings per s")
           assert peak > 0.25, "capture has no tone"
           PY
+          EOF
+
+      # The intended shape of the real suite: capture from the loopback, which the test
+      # feeds, and play to snd-dummy, so both sides are real ALSA devices with two
+      # independent clocks. The probe only asks whether it opens both and keeps
+      # running, timeout's 124 means it was still going when killed.
+      - name: Capture from the loopback and play to snd-dummy with camilladsp
+        run: |
+          ssh vm bash -s <<'EOF'
+          set -e
+          cat > dummy.yml <<'YML'
+          devices:
+            samplerate: 48000
+            chunksize: 1024
+            capture:
+              type: Alsa
+              channels: 2
+              device: "hw:Loopback,1,0"
+              format: S16_LE
+            playback:
+              type: Alsa
+              channels: 2
+              device: "hw:Dummy"
+              format: S16_LE
+          YML
+          aplay -q -D hw:Loopback,0,0 -f S16_LE -r 48000 -c 2 -t raw -d 6 /dev/urandom &
+          feed=$!
+          sleep 0.5
+          timeout 4 ./camilladsp -v dummy.yml > dummy.log 2>&1 || status=$?
+          kill $feed 2>/dev/null || true
+          echo "camilladsp exit status ${status:-0}"
+          tail -30 dummy.log
+          test "${status:-0}" = 124
           EOF
 
       - name: Guest console on failure
