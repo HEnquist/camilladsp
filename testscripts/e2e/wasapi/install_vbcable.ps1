@@ -113,7 +113,26 @@ public static class DevInstall {
 }
 '@
 
+function Get-CableEndpoints {
+    Get-PnpDevice -Class AudioEndpoint -Status OK -ErrorAction SilentlyContinue |
+        Where-Object FriendlyName -like '*(VB-Audio Virtual Cable)'
+}
+
+$before = @(Get-CableEndpoints).Count
 for ($i = 1; $i -le $Instances; $i++) {
     $reboot = [DevInstall]::Install($Inf, $HardwareId)
     Write-Host "instance $i installed, reboot requested: $reboot"
 }
+
+# The install returns before the audio endpoints exist, and a client that looks for them
+# too early finds nothing. Each instance brings three: two playback, one capture.
+$start = Get-Date
+$wanted = $before + 3 * $Instances
+while (@(Get-CableEndpoints).Count -lt $wanted) {
+    if (((Get-Date) - $start).TotalSeconds -gt 60) {
+        Get-CableEndpoints | Format-Table Status, FriendlyName -AutoSize
+        throw "only $(@(Get-CableEndpoints).Count) of $wanted endpoints after 60 s"
+    }
+    Start-Sleep -Milliseconds 200
+}
+Write-Host "$wanted endpoints after $([int]((Get-Date) - $start).TotalMilliseconds) ms"
