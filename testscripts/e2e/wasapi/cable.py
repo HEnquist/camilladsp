@@ -134,6 +134,29 @@ def record(frames, rate=RATE):
     return np.ascontiguousarray(data)
 
 
+def opens_exclusive(output):
+    """Whether PortAudio can open an endpoint of the cable in exclusive mode right now.
+
+    At S16 and 48 kHz, which the cable has in exclusive mode, so a refusal means someone
+    else holds the endpoint rather than a format it lacks.
+    """
+    sd = _sounddevice()
+    stream_type = sd.OutputStream if output else sd.InputStream
+    device = render_endpoint()[0] if output else capture_endpoint()[0]
+    try:
+        stream = stream_type(
+            device=device,
+            samplerate=RATE,
+            channels=CHANNELS,
+            dtype="int16",
+            extra_settings=sd.WasapiSettings(exclusive=True),
+        )
+    except sd.PortAudioError:
+        return False
+    stream.close()
+    return True
+
+
 def peak_frequency(column, rate=RATE):
     spectrum = np.abs(np.fft.rfft(column * np.hanning(len(column))))
     return np.fft.rfftfreq(len(column), 1 / rate)[spectrum.argmax()]
@@ -150,7 +173,8 @@ def assert_tone(data, rate=RATE, level_db=LEVEL_DB, freq=TONE_HZ, skip=0.5):
 
     The first `skip` seconds are left out, since the two ends start at different times.
     One FFT bin of frequency error is allowed, and 1 dB of level, since the cable is not
-    bit exact and a dropout on a busy runner takes a little off the RMS.
+    bit exact and a dropout on a busy runner takes a little off the RMS. A `level_db` of
+    None checks only the frequency.
     """
     body = data[int(skip * rate) :]
     assert len(body) >= rate // 2, f"only {len(body)} frames after the first {skip} s"
@@ -158,7 +182,8 @@ def assert_tone(data, rate=RATE, level_db=LEVEL_DB, freq=TONE_HZ, skip=0.5):
     for channel in range(body.shape[1]):
         column = body[:, channel]
         level = sine_level_db(column)
-        assert abs(level - level_db) < 1.0, f"channel {channel} at {level:.2f} dB"
+        if level_db is not None:
+            assert abs(level - level_db) < 1.0, f"channel {channel} at {level:.2f} dB"
         found = peak_frequency(column, rate)
         assert abs(found - freq) <= bin_width, f"channel {channel} peaks at {found:.1f} Hz"
 
