@@ -183,7 +183,10 @@ def assert_tone(data, rate=RATE, level_db=LEVEL_DB, freq=TONE_HZ, skip=0.5):
         column = body[:, channel]
         level = sine_level_db(column)
         if level_db is not None:
-            assert abs(level - level_db) < 1.0, f"channel {channel} at {level:.2f} dB"
+            assert abs(level - level_db) < 1.0, (
+                f"channel {channel} at {level:.2f} dB, peak {np.abs(column).max():.4f}, "
+                f"samples {column[:12]}"
+            )
         found = peak_frequency(column, rate)
         assert abs(found - freq) <= bin_width, f"channel {channel} peaks at {found:.1f} Hz"
 

@@ -68,7 +68,9 @@ def capture_to_stdout(start_cdsp, config, seconds, rate=RATE):
     to the capture, and the state never gets there. The read is the gate instead, and
     the state is checked once the audio is in.
     """
-    cdsp = start_cdsp(config=config, pipe_stdout=True, wait_for_running=False)
+    cdsp = start_cdsp(
+        config=config, extra_args=["-v"], pipe_stdout=True, wait_for_running=False
+    )
     data = read_exactly(cdsp.process.stdout, int(seconds * rate) * FRAME_BYTES)
     assert cdsp.send("GetState") == "Running"
     assert cdsp.exit() == EXIT_OK
