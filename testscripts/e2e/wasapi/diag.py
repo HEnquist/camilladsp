@@ -40,23 +40,22 @@ for dtype in ("int16", "int24", "int32", "float32"):
               np.round(col[:6], 4))
 feed.stop()
 
-# PortAudio's loopback of the render endpoint, while the feeder plays into it.
+# An independent loopback of the render endpoint, through the soundcard package.
 from wasapi.cable import render_endpoint  # noqa: E402
 
-print(sd.get_portaudio_version())
+import soundcard as sc  # noqa: E402
+
 render_name = render_endpoint()[1]
-for index, dev in enumerate(sd.query_devices()):
-    if "oopback" in dev["name"]:
-        print("loopback device", index, dev["name"], dev["max_input_channels"])
+for mic in sc.all_microphones(include_loopback=True):
+    print("soundcard input", repr(mic.name), mic.isloopback)
 feed = Feeder()
 time.sleep(0.5)
-for index, dev in enumerate(sd.query_devices()):
-    if "oopback" in dev["name"] and render_name.split(" (")[0] in dev["name"] and dev["max_input_channels"] >= 2:
+for mic in sc.all_microphones(include_loopback=True):
+    if mic.isloopback and "VB-Audio" in mic.name:
         try:
-            with sd.InputStream(device=index, samplerate=RATE, channels=2, dtype="float32") as stream:
-                data, _ = stream.read(RATE)
+            data = mic.record(samplerate=RATE, numframes=RATE)
             col = data[RATE // 4 :, 0].astype(np.float64)
-            print("PortAudio loopback", dev["name"], f"{sine_level_db(col):.2f} dB", np.round(col[:6], 4))
+            print("soundcard loopback", mic.name, f"{sine_level_db(col):.2f} dB", np.round(col[:6], 4))
         except Exception as err:  # noqa: BLE001
-            print("PortAudio loopback", dev["name"], "error", err)
+            print("soundcard loopback", mic.name, "error", err)
 feed.stop()

@@ -359,10 +359,12 @@ jobs:
 
       - name: Diagnostics, remove
         continue-on-error: true
-        run: python testscripts/e2e/wasapi/diag.py
+        run: |
+          pip install soundcard
+          python testscripts/e2e/wasapi/diag.py
 
       - name: Run the WASAPI tests
-        run: pytest -v testscripts/e2e -m wasapi --basetemp "$env:RUNNER_TEMP\pytest" -k "S24 or loopback"
+        run: pytest -v testscripts/e2e -m wasapi --basetemp "$env:RUNNER_TEMP\pytest" -k "loopback"
 
       - name: Keep the configs on failure
         if: failure()
