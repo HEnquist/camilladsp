@@ -357,14 +357,8 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pytest-timeout websocket-client numpy sounddevice
 
-      - name: Diagnostics, remove
-        continue-on-error: true
-        run: |
-          pip install soundcard
-          python testscripts/e2e/wasapi/diag.py
-
       - name: Run the WASAPI tests
-        run: pytest -v testscripts/e2e -m wasapi --basetemp "$env:RUNNER_TEMP\pytest" -k "loopback"
+        run: pytest -v testscripts/e2e -m wasapi --basetemp "$env:RUNNER_TEMP\pytest"
 
       - name: Keep the configs on failure
         if: failure()

@@ -7,6 +7,10 @@ loops and the buffers between them and the engine.
 
 Nothing through the cable is bit exact, so every test asserts the level and the
 frequency of a tone, see cable.py.
+
+Loopback capture is not here. A loopback of either render endpoint of the cable gets
+only zeros on the runner, through the soundcard package as well as through CamillaDSP,
+so it says nothing about the backend.
 """
 
 import numpy as np
@@ -68,9 +72,7 @@ def capture_to_stdout(start_cdsp, config, seconds, rate=RATE):
     to the capture, and the state never gets there. The read is the gate instead, and
     the state is checked once the audio is in.
     """
-    cdsp = start_cdsp(
-        config=config, extra_args=["-v"], pipe_stdout=True, wait_for_running=False
-    )
+    cdsp = start_cdsp(config=config, pipe_stdout=True, wait_for_running=False)
     data = read_exactly(cdsp.process.stdout, int(seconds * rate) * FRAME_BYTES)
     assert cdsp.send("GetState") == "Running"
     assert cdsp.exit() == EXIT_OK
@@ -153,13 +155,3 @@ def test_an_exclusive_format_the_device_lacks_is_refused(start_cdsp, win_config,
     assert cdsp.is_running()
     assert cdsp.exit() == EXIT_OK
 
-
-def test_loopback_capture(start_cdsp, win_config, feeder):
-    """Capturing the render endpoint itself, in loopback, gets what is played into it.
-
-    The one capture path that opens a render endpoint, and no other suite reaches it.
-    """
-    feeder()
-    loopback = wasapi_block("capture", render_endpoint()[1], extra={"loopback": True})
-    config = win_config(direction="capture", capture=loopback)
-    assert_tone(capture_to_stdout(start_cdsp, config, 2.5))
