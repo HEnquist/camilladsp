@@ -81,7 +81,6 @@ fn fail_and_restart(
         *active_cfg_shared = None;
         *prev_cfg_shared = Some(active_config);
     }
-    crate::set_capture_state(&status_structs.capture, ProcessingState::Inactive);
     trace!("All threads stopped, returning");
     Ok(ExitState::Restart)
 }

@@ -1527,7 +1527,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit.");
                 innerhandle.join().unwrap_or(());
-                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

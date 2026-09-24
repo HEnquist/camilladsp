@@ -430,7 +430,6 @@ fn capture_loop(
             break;
         }
     }
-    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 /// Run the playback device, and return the status message that says how it ended.

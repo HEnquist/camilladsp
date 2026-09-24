@@ -1234,7 +1234,6 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     };
                 }
-                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

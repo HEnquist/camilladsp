@@ -638,7 +638,6 @@ fn capture_loop(
             sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
-    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 /// Start a capture thread providing AudioMessages via a channel

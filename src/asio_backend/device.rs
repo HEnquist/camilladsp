@@ -2346,7 +2346,6 @@ impl CaptureDevice for AsioCaptureDevice {
                 // Harmless if already nulled by release_shared_asio
                 CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                 let _ = unsafe { Box::from_raw(ctx_raw) };
-                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

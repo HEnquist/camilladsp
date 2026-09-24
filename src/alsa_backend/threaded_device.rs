@@ -1658,10 +1658,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     };
                                 }
-                                crate::set_capture_state(
-                                    &cap_params.capture_status,
-                                    ProcessingState::Inactive,
-                                );
                             }
                             Err(err) => {
                                 tx_state_dev
@@ -1905,7 +1901,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             };
                         }
-                        crate::set_capture_state(&capture_status, ProcessingState::Inactive);
                     }
                     Ok(AlsaThreadState::Error(err)) => {
                         status_channel
