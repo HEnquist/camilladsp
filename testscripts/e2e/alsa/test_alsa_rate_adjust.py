@@ -120,11 +120,16 @@ def test_rate_adjust_matches_the_capture_to_a_skewed_sink(start_cdsp, alsa_confi
     set_rate_shift(PLAYBACK_CABLE, sink_shift)
     feeder()
     cdsp = start_cdsp(config=alsa_config(devices=RATE_ADJUST))
+    # The card is written on every adjust, but the reported speed is a status snapshot
+    # refreshed once per update interval. At the default second that is two adjusts
+    # behind at worst, and after an underrun on a jittery runner the loop moves enough
+    # between them to pull the median off. A tenth of a second keeps most pairs on the
+    # same adjust.
+    cdsp.send("SetUpdateInterval", 100)
     wait_for_capture_shift(sink_shift)
-    # What the engine reports asking for against what reached the card. The report is a
-    # status snapshot refreshed on its own interval, so a single pair of readings
-    # compares two different moments of a loop that is moving. Interleaved readings
-    # and a median of the differences compare where the two sit.
+    # What the engine reports asking for against what reached the card. Interleaved
+    # readings and a median of the differences compare where the two sit, rather than
+    # trusting one pair to land between two adjusts.
     differences = []
     for _ in range(10):
         reported = NOMINAL_SHIFT / cdsp.send("GetRateAdjust")

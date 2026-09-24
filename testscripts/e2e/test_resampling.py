@@ -31,6 +31,7 @@ SYNCHRONOUS = {RESAMPLER: "    type: Synchronous"}
 NO_RESAMPLER = {
     f"  resampler:\n{RESAMPLER}\n": "  resampler: null\n",
 }
+NO_RATE_ADJUST = {"enable_rate_adjust: true": "enable_rate_adjust: false"}
 
 # 64 log spaced bins from 20 Hz to 20 kHz are 11.6 % apart, so a peak in the right bin is
 # within 15 % of the tone and one bin out is already outside that.
@@ -177,8 +178,13 @@ def test_the_resampled_tone_keeps_its_frequency(control_cdsp):
     The playback side of the spectrum is measured after the resampler, so this is the whole
     path: generated at 96 kHz, resampled to 48 kHz, and still 984 Hz at the far end. A
     resampler fed the wrong ratio would put it at half or double.
+
+    Rate adjust is off here. It works through the resampler ratio, so while it pulls the
+    buffer level in after startup it moves the tone too, up to half a percent at the
+    clamp. That is 0.4 of a bin, and the scalloping loss at that offset is most of a dB,
+    which is what the level assertion below caught on a slow runner.
     """
-    cdsp = start(control_cdsp)
+    cdsp = start(control_cdsp, NO_RATE_ADJUST)
     frequency, magnitude = peak_of(spectrum(cdsp))
     assert frequency == pytest.approx(TONE_HZ, rel=BIN_TOLERANCE)
     # And with the level intact, so nothing scaled the samples on the way through.

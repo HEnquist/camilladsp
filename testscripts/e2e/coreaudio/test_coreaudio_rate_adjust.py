@@ -117,10 +117,15 @@ def test_rate_adjust_matches_the_capture_to_a_skewed_sink(start_cdsp, ca_config,
     set_pitch(SINK_DEVICE, 1.0 + skew)
     feeder()
     cdsp = start_cdsp(config=ca_config(devices=RATE_ADJUST))
+    # The device is written on every adjust, but the reported speed is a status snapshot
+    # refreshed once per update interval, two adjusts behind at worst at the default
+    # second. A tenth of a second keeps most pairs on the same adjust, see the same test
+    # in alsa/test_alsa_rate_adjust.py for the flake this avoids.
+    cdsp.send("SetUpdateInterval", 100)
     wait_for_capture_pitch(1.0 + skew)
-    # What the engine reports asking for against what reached the device. The report is
-    # a status snapshot refreshed on its own interval, so interleaved readings and a
-    # median of the differences compare where the two sit rather than two moments.
+    # What the engine reports asking for against what reached the device. Interleaved
+    # readings and a median of the differences compare where the two sit rather than
+    # trusting one pair to land between two adjusts.
     differences = []
     for _ in range(10):
         differences.append(cdsp.send("GetRateAdjust") - pitch(FEED_DEVICE))
