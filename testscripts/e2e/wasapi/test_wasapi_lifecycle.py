@@ -11,32 +11,17 @@ import time
 import pytest
 
 from .cable import (
-    LEVEL_DB,
+    EXIT_OK,
     SIXTEEN,
     capture_endpoint,
     opens_exclusive,
     render_endpoint,
+    wait_for_peak,
+    wait_for_stop,
     wasapi_block,
 )
 
 pytestmark = pytest.mark.wasapi
-
-EXIT_OK = 0
-
-
-def wait_for_peak(cdsp, command, level=LEVEL_DB, timeout=10.0):
-    return cdsp.poll_until_true(
-        command,
-        lambda peaks: len(peaks) == 2 and all(abs(peak - level) < 0.5 for peak in peaks),
-        timeout=timeout,
-    )
-
-
-def wait_for_stop(cdsp):
-    """Wait for the engine to have stopped, and return the reason. See test_failures.py."""
-    reason = cdsp.poll_until_true("GetStopReason", lambda value: value != "None")
-    cdsp.poll_until("GetState", "Inactive")
-    return reason
 
 
 def wait_for_exclusive(output, expected, timeout=5.0):

@@ -82,6 +82,25 @@ def devices_present():
     return True
 
 
+# The Steinberg built-in ASIO Driver, on top of the cable. It needs no configuring: it
+# opens the Windows default devices, which on the runner can only be the cable. Its only
+# sample type is 32 bit float.
+STEINBERG = "Steinberg built-in ASIO Driver"
+
+
+def steinberg_present():
+    """Whether the Steinberg driver is registered, which the ASIO tests need on top."""
+    if sys.platform != "win32":
+        return False
+    import winreg
+
+    try:
+        winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\ASIO\{STEINBERG}").Close()
+    except OSError:
+        return False
+    return True
+
+
 def _wasapi_settings():
     return _sounddevice().WasapiSettings(auto_convert=True)
 
@@ -191,6 +210,50 @@ def assert_tone(data, rate=RATE, level_db=LEVEL_DB, freq=TONE_HZ, skip=0.5):
         assert abs(found - freq) <= bin_width, f"channel {channel} peaks at {found:.1f} Hz"
 
 
+# Helpers for the tests, shared between the WASAPI and ASIO files.
+
+EXIT_OK = 0
+# F32_LE on stdout.
+FRAME_BYTES = CHANNELS * 4
+
+
+def wait_for_peak(cdsp, command, level=LEVEL_DB, timeout=10.0):
+    """Wait for both channels of a peak meter to read `level`, and return them."""
+    return cdsp.poll_until_true(
+        command,
+        lambda peaks: len(peaks) == 2 and all(abs(peak - level) < 0.5 for peak in peaks),
+        timeout=timeout,
+    )
+
+
+def wait_for_stop(cdsp):
+    """Wait for the engine to have stopped, and return the reason.
+
+    Same gate as test_failures.py: the stop reason is what the tests assert on, so it is
+    what gets polled, and the state is only checked after it.
+    """
+    reason = cdsp.poll_until_true("GetStopReason", lambda value: value != "None")
+    cdsp.poll_until("GetState", "Inactive")
+    return reason
+
+
+def capture_to_stdout(start_cdsp, config, seconds, rate=RATE):
+    """Run a config that captures into stdout, take `seconds` of it, and stop.
+
+    Not waited on for Running before the read. The capture runs in real time, so until
+    something drains the pipe the Stdout device blocks on a full one, the chain backs up
+    to the capture, and the state never gets there. The read is the gate instead, and
+    the state is checked once the audio is in.
+    """
+    from swdevices import read_exactly
+
+    cdsp = start_cdsp(config=config, pipe_stdout=True, wait_for_running=False)
+    data = read_exactly(cdsp.process.stdout, int(seconds * rate) * FRAME_BYTES)
+    assert cdsp.send("GetState") == "Running"
+    assert cdsp.exit() == EXIT_OK
+    return np.frombuffer(data, dtype="<f4").reshape(-1, CHANNELS)
+
+
 # Config blocks, as text like the rest of the suite's device configs. Each returns the
 # lines of one side, to go under `devices:`.
 
@@ -206,6 +269,13 @@ def wasapi_block(side, device, exclusive=False, fmt=None, extra=None):
     if fmt is not None:
         lines.append(f"    format: {fmt}")
     lines += [f"    {key}: {_yaml(value)}" for key, value in (extra or {}).items()]
+    return lines
+
+
+def asio_block(side, device=STEINBERG, fmt=None):
+    lines = [f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}", f'    device: "{device}"']
+    if fmt is not None:
+        lines.append(f"    format: {fmt}")
     return lines
 
 

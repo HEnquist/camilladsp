@@ -338,6 +338,19 @@ jobs:
           testscripts/e2e/wasapi/install_vbcable.ps1 -Dir "$env:RUNNER_TEMP\vbcable"
           Get-PnpDevice -FriendlyName '*CABLE*' | Format-Table Class, Status, FriendlyName -AutoSize
 
+      # Steinberg's free generic ASIO driver, for the ASIO backend. It has no settings
+      # file and opens the Windows default devices, which on the runner can only be the
+      # cable.
+      - name: Install the Steinberg built-in ASIO Driver
+        run: |
+          $zip = "$env:RUNNER_TEMP\steinberg_asio.zip"
+          Invoke-WebRequest https://download.steinberg.net/static_content/runtime-components/asio/1.0.9.26-1973a36d-45e1-3b89-b1ba-ee79d9eb03a8/Steinberg_built_in_ASIO_Driver.zip -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\steinberg_asio"
+          $msi = Get-ChildItem "$env:RUNNER_TEMP\steinberg_asio" -Recurse -Filter *64bit.msi | Select-Object -First 1
+          $p = Start-Process msiexec -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn', '/norestart' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec exit code $($p.ExitCode)" }
+          Get-Item 'HKLM:\SOFTWARE\ASIO\Steinberg built-in ASIO Driver'
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
 

@@ -17,6 +17,7 @@ from .cable import (
     devices_present,
     generator_block,
     render_endpoint,
+    steinberg_present,
     stdout_block,
     wasapi_block,
 )
@@ -26,6 +27,14 @@ from .cable import (
 def cable():
     if not devices_present():
         pytest.skip("needs VB-Cable installed, see wasapi/conftest.py")
+
+
+@pytest.fixture
+def steinberg():
+    """Skip without the Steinberg built-in ASIO Driver. For the ASIO tests, on top of the
+    cable, which the autouse fixture above already asks for."""
+    if not steinberg_present():
+        pytest.skip("needs the Steinberg built-in ASIO Driver installed")
 
 
 @pytest.fixture
