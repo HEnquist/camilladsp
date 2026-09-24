@@ -1,4 +1,20 @@
-on: [push, pull_request]
+# Runs on a change to the engine, the shared e2e fixtures or this backend, and skips a
+# change that is only inside another backend. ASIO rides along, and so does the dummy
+# backend, which the rate adjust tests use as the second clock.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/coreaudio_backend/**"
+      - "!src/pipewire_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - testscripts/e2e/wasapi/**
+      - .github/workflows/e2e_wasapi.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
 
 name: End-to-end, WASAPI and ASIO
 

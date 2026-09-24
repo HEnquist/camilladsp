@@ -1,4 +1,20 @@
-on: [push, pull_request]
+# Runs on a change to the engine or the shared e2e fixtures, and skips a change that is
+# only inside a hardware backend, since those have workflows of their own.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/asio_backend/**"
+      - "!src/coreaudio_backend/**"
+      - "!src/pipewire_backend/**"
+      - "!src/wasapi_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - .github/workflows/e2e_software.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
 
 name: End-to-end, software backends
 

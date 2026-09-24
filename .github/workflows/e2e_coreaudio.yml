@@ -1,4 +1,21 @@
-on: [push, pull_request]
+# Runs on a change to the engine, the shared e2e fixtures or this backend, and skips a
+# change that is only inside another backend. The dummy backend is not in this build.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/asio_backend/**"
+      - "!src/dummy_backend/**"
+      - "!src/pipewire_backend/**"
+      - "!src/wasapi_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - testscripts/e2e/coreaudio/**
+      - .github/workflows/e2e_coreaudio.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
 
 name: End-to-end, CoreAudio
 
