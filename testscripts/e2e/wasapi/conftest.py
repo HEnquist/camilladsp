@@ -1,7 +1,7 @@
 """Fixtures for the WASAPI and ASIO suite, which runs on VB-Cable.
 
 In CI these run on a Windows runner with the cable installed from the vendor's driver
-pack, see the `wasapi` job in .github/workflows/e2e.yml. Anywhere the cable is missing
+pack, see the `wasapi` job in .github/workflows/e2e_wasapi.yml. Anywhere the cable is missing
 the whole directory skips, so selecting it by accident is harmless.
 
 The shared fixtures in the parent conftest.py still do the process handling:

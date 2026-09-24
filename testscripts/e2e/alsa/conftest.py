@@ -1,7 +1,7 @@
 """Fixtures for the ALSA suite, which runs on snd-aloop and snd-dummy.
 
 The GitHub runners' kernel is built without sound, so in CI these run inside a VM, see
-the `alsa` job in .github/workflows/e2e.yml. Anywhere the two cards are not loaded the
+the `alsa` job in .github/workflows/e2e_alsa.yml. Anywhere the two cards are not loaded the
 whole directory skips, so selecting it by accident on another machine is harmless.
 
 The shared fixtures in the parent conftest.py still do the process handling:

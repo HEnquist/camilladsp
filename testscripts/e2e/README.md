@@ -61,8 +61,8 @@ pytest -v testscripts/e2e -m stock
 Both builds land on the same path, so whichever was built last is the one the suite finds, and
 running the whole suite in one go against one binary is not a thing to do: `-m "not stock"` needs
 the feature and `-m stock` asserts it is absent. The split is what the two jobs in
-`.github/workflows/e2e.yml` do. The stock job runs on Linux and Windows rather than all three,
-because the file backend has two reader implementations, `NonBlockingReader` on Linux and
+`.github/workflows/e2e_software.yml` do. The stock job runs on Linux and Windows rather than all
+three, because the file backend has two reader implementations, `NonBlockingReader` on Linux and
 `BlockingReader` everywhere else, see `src/file_backend/mod.rs`, and one runner covers one of them.
 
 Anything marked `stock` has to keep away from the dummy devices, since a stock build rejects their
@@ -77,8 +77,8 @@ with nothing behind it. They are the only tests that reach the ALSA code at all.
 explains which cable is which and the three loopback properties the tests are built on.
 
 The GitHub runners' kernel is built without sound, so in CI the `alsa` job in
-`.github/workflows/e2e.yml` boots an Ubuntu minimal cloud image under KVM, copies the binary and
-this directory in, and runs the suite there, once for each ALSA backend. On a Linux machine of
+`.github/workflows/e2e_alsa.yml` boots an Ubuntu minimal cloud image under KVM, copies the binary
+and this directory in, and runs the suite there, once for each ALSA backend. On a Linux machine of
 your own it is only the modules, with your user in the `audio` group:
 
 ```sh
@@ -107,8 +107,8 @@ tests are built on.
 
 BlackHole is a HAL plugin, so the casks install on a stock runner. The installer asks for a reboot,
 and what it actually needs is a restart of coreaudiod, which the `coreaudio` job in
-`.github/workflows/e2e.yml` does before the tests. On a Mac of your own it is the same two casks,
-plus sounddevice for the feeder and the recorder:
+`.github/workflows/e2e_coreaudio.yml` does before the tests. On a Mac of your own it is the same two
+casks, plus sounddevice for the feeder and the recorder:
 
 ```sh
 brew install --cask blackhole-2ch blackhole-16ch

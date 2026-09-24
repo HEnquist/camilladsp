@@ -1,7 +1,7 @@
 """Fixtures for the CoreAudio suite, which runs on two BlackHole devices.
 
 In CI these run on a macOS runner with the latest blackhole-2ch and blackhole-16ch
-casks, see the `coreaudio` job in .github/workflows/e2e.yml. Anywhere the two devices
+casks, see the `coreaudio` job in .github/workflows/e2e_coreaudio.yml. Anywhere the two devices
 are missing the whole directory skips, so selecting it by accident is harmless.
 
 The shared fixtures in the parent conftest.py still do the process handling:
