@@ -84,7 +84,7 @@ any channels above the specified count are simply ignored.
 ### Sample format
 The supported sample formats are:
 - `S16_LE` - 16-bit signed integer
-- `S24_4_LE` - 24-bit signed integer (in 32-bit container)
+- `S24_4_LE` - 24-bit signed integer (right justified in 32-bit container)
 - `S24_3_LE` - 24-bit signed integer (packed 3-byte)
 - `S32_LE` - 32-bit signed integer
 - `F32_LE` - 32-bit float
@@ -95,6 +95,12 @@ for its native sample format and use it automatically.
 ASIO drivers do not perform sample format conversion,
 so if a format is specified it must match the device's native format.
 A mismatch will result in an error at startup.
+
+The formats above cover what drivers use in practice.
+A few rare ones, such as the 16, 18 and 20-bit variants of the 32-bit integer formats,
+are not supported.
+A device using one of these fails at startup with an "unsupported sample type" error,
+and it is listed with no capabilities when querying the device capabilities.
 
 ## Using one or two devices
 Capture and playback may use the same ASIO device, or two different ones.

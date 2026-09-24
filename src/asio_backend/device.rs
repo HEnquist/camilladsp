@@ -47,10 +47,11 @@ use crate::asio_backend::driver::{
     teardown_asio_driver, with_driver,
 };
 use crate::asio_backend::utils::{
-    ChannelBuffers, asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset,
-    create_asio_buffers, dispose_asio_buffers, get_preferred_buffer_size, log_asio_latencies,
-    make_channel_ids, read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,
-    start_asio_stream, stop_asio_stream,
+    ChannelBuffers, asio_format_to_str, asio_sample_type_name, asio_sample_type_to_format,
+    copy_from_queue_at_offset, create_asio_buffers, dispose_asio_buffers,
+    get_preferred_buffer_size, log_asio_latencies, make_channel_ids, query_device_format,
+    read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format, start_asio_stream,
+    stop_asio_stream,
 };
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
@@ -1241,17 +1242,17 @@ fn probe_device_capabilities(
     .unwrap_or_default();
 
     // ASIO uses one fixed format for all channels and rates within a driver.
+    // A native format we do not support gives empty capabilities, not an error.
     let direction_name = if input { "capture" } else { "playback" };
-    let fmt = match resolve_format(device_name, &None, input) {
-        Ok(fmt) => fmt,
-        Err(_) => {
+    let fmt = match query_device_format(device_name, input) {
+        Ok(sample_type) => asio_sample_type_to_format(sample_type),
+        Err(err) => {
             teardown_asio_driver(device_name);
             return Err(crate::DeviceError::Other(format!(
-                "Failed to detect {direction_name} sample format for ASIO device '{device_name}'"
+                "Failed to detect {direction_name} sample format for ASIO device '{device_name}': {err}"
             )));
         }
     };
-    let fmt_str = asio_format_to_str(fmt).to_string();
 
     // Get channel count for the requested direction.
     // A failure from getChannels indicates a real driver error; treat it as a probe
@@ -1280,14 +1281,19 @@ fn probe_device_capabilities(
 
     // A driver that only supports the opposite direction will report 0 channels
     // for the requested direction — filter that out rather than emitting a
-    // zero-channel capability entry.
-    if channels == 0 || supported_rates.is_empty() {
-        return Ok(crate::AudioDeviceDescriptor {
-            name: device_name.to_string(),
-            description: device_name.to_string(),
-            capability_sets: Vec::new(),
-        });
-    }
+    // zero-channel capability entry. Same for a native format we do not support.
+    let fmt_str = match fmt {
+        Some(fmt) if channels > 0 && !supported_rates.is_empty() => {
+            asio_format_to_str(fmt).to_string()
+        }
+        _ => {
+            return Ok(crate::AudioDeviceDescriptor {
+                name: device_name.to_string(),
+                description: device_name.to_string(),
+                capability_sets: Vec::new(),
+            });
+        }
+    };
 
     let samplerates: Vec<crate::SamplerateCapability> = supported_rates
         .iter()
