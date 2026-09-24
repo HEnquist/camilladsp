@@ -1915,6 +1915,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                         barrier.wait();
                     }
                 }
+                // The outer loop can end without telling the inner thread, for example
+                // on a rate change. Hanging up both channels to it is what makes it exit:
+                // it sees the command channel disconnect, and its blocking EndOfStream
+                // send fails at once instead of waiting on a full channel nobody reads.
+                drop(tx_inner_command);
+                drop(rx_dev);
                 innerhandle.join().unwrap_or(());
             })
             .unwrap();
