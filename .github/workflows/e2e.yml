@@ -20,15 +20,15 @@ jobs:
         include:
           # The pacing tests run here and nowhere else. What they cover, the rate
           # control loop and the buffer accounting, is portable code with no cfg in it,
-          # so one OS proves the logic. The stock, alsa and coreaudio tests are
-          # deselected everywhere, since they need another build, a VM or BlackHole,
-          # and have jobs of their own below.
+          # so one OS proves the logic. The stock, alsa, coreaudio and wasapi tests are
+          # deselected everywhere, since they need another build, a VM, BlackHole or
+          # VB-Cable, and have jobs of their own below.
           - os: ubuntu-latest
-            pytest_args: -m "not stock and not alsa and not coreaudio"
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi"
           - os: macos-latest
-            pytest_args: -m "not stock and not alsa and not coreaudio and not pacing"
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi and not pacing"
           - os: windows-latest
-            pytest_args: -m "not stock and not alsa and not coreaudio and not pacing"
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi and not pacing"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
@@ -303,3 +303,66 @@ jobs:
 
       - name: Run the CoreAudio tests
         run: pytest -v testscripts/e2e -m coreaudio
+
+  # The wasapi tests, on VB-Cable, which also carry the ASIO backend through the
+  # Steinberg built-in ASIO Driver on top of the cable. The driver pack is fetched from
+  # the vendor at run time and installed through SetupAPI, with no devcon and no reboot,
+  # see testscripts/e2e/wasapi/install_vbcable.ps1. The free cable is a single one, so
+  # every test runs one way through it.
+  wasapi:
+    name: WASAPI, VB-Cable
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # Capture is behind the microphone privacy setting. Without it a capture does not
+      # fail, it delivers silence.
+      - name: Start the audio service and allow microphone access
+        run: |
+          Set-Service audiosrv -StartupType Automatic
+          Start-Service audiosrv
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name LetAppsAccessMicrophone -Value 1 -PropertyType DWord -Force | Out-Null
+
+      - name: Install VB-Cable
+        run: |
+          $zip = "$env:RUNNER_TEMP\vbcable.zip"
+          Invoke-WebRequest https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\vbcable"
+          testscripts/e2e/wasapi/install_vbcable.ps1 -Dir "$env:RUNNER_TEMP\vbcable"
+          Get-PnpDevice -FriendlyName '*CABLE*' | Format-Table Class, Status, FriendlyName -AutoSize
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasapi
+
+      # No --features, the WASAPI and ASIO backends are in every Windows build.
+      - name: Build
+        run: cargo build --profile e2e
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout websocket-client numpy sounddevice
+
+      - name: Run the WASAPI tests
+        run: pytest -v testscripts/e2e -m wasapi --basetemp "$env:RUNNER_TEMP\pytest"
+
+      - name: Keep the configs on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: wasapi-configs
+          path: ${{ runner.temp }}/pytest
