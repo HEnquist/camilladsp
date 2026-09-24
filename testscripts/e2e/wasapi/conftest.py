@@ -37,6 +37,17 @@ def steinberg():
         pytest.skip("needs the Steinberg built-in ASIO Driver installed")
 
 
+@pytest.fixture(scope="session")
+def dummy_backend(camilladsp_bin):
+    """Skip without the Dummy devices, which only a dummy-backend build has. For the rate
+    adjust tests, where a drifting Dummy is the second clock."""
+    import subprocess
+
+    out = subprocess.run([camilladsp_bin, "--help"], capture_output=True, text=True).stdout
+    if "Dummy" not in out:
+        pytest.skip("needs a build with the dummy-backend feature")
+
+
 @pytest.fixture
 def feeder():
     """Factory for a running Feeder on the cable's render endpoint, stopped when the test

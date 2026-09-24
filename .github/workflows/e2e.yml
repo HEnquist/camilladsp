@@ -358,9 +358,10 @@ jobs:
         with:
           key: wasapi
 
-      # No --features, the WASAPI and ASIO backends are in every Windows build.
+      # The WASAPI and ASIO backends are in every Windows build. The dummy backend is
+      # for the rate adjust tests, where a drifting Dummy device is the second clock.
       - name: Build
-        run: cargo build --profile e2e
+        run: cargo build --profile e2e --features dummy-backend
 
       - name: Install Python
         uses: actions/setup-python@v6

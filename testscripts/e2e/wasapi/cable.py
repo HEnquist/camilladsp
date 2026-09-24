@@ -26,6 +26,7 @@ The audio goes through sounddevice on PortAudio's WASAPI host API, in shared mod
 auto conversion, so the test side opens at whatever rate it likes.
 """
 
+import socket
 import sys
 import threading
 
@@ -276,6 +277,27 @@ def asio_block(side, device=STEINBERG, fmt=None):
     lines = [f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}", f'    device: "{device}"']
     if fmt is not None:
         lines.append(f"    format: {fmt}")
+    return lines
+
+
+def free_port():
+    """A port the OS says is free, for a Dummy device's control socket."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def dummy_block(side, control_port, level_db=LEVEL_DB, freq=TONE_HZ):
+    """A Dummy device with a control socket, for the rate adjust tests. Needs a build with
+    the dummy-backend feature. The capture side plays the suite's usual tone."""
+    lines = [
+        f"  {side}:",
+        "    type: Dummy",
+        f"    channels: {CHANNELS}",
+        f"    control_port: {control_port}",
+    ]
+    if side == "capture":
+        lines.append(f"    signal: {{type: Sine, freq: {freq}, level: {level_db}}}")
     return lines
 
 
