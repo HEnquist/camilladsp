@@ -81,6 +81,22 @@ def test_stop_and_reload(start_cdsp, win_config):
     assert cdsp.exit() == EXIT_OK
 
 
+def wait_for_probe(cdsp, timeout=5.0):
+    """Poll a capabilities probe until it succeeds.
+
+    Inactive is reported before the device thread has released the driver, so a probe
+    straight after it can still find the driver loaded.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        reply = cdsp.send_raw("GetPlaybackDeviceCapabilities", backend="Asio", device=STEINBERG)
+        if reply["result"] == "Ok":
+            return reply
+        if time.monotonic() > deadline:
+            raise AssertionError(f"probe still {reply['result']} after {timeout} s")
+        time.sleep(0.05)
+
+
 def test_the_driver_can_be_probed_after_a_stop(start_cdsp, win_config):
     """A probe is refused while a stream has the driver loaded, and works once it stops."""
     cdsp = start_cdsp(config=playback_config(win_config), extra_args=["--wait"])
@@ -89,8 +105,7 @@ def test_the_driver_can_be_probed_after_a_stop(start_cdsp, win_config):
     assert reply["result"] != "Ok"
     cdsp.send("Stop")
     cdsp.poll_until("GetState", "Inactive")
-    reply = cdsp.send_raw("GetPlaybackDeviceCapabilities", backend="Asio", device=STEINBERG)
-    assert reply["result"] == "Ok"
+    wait_for_probe(cdsp)
     assert cdsp.exit() == EXIT_OK
 
 
