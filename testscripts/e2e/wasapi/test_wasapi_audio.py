@@ -32,9 +32,16 @@ def wait_for_peak(cdsp, command, level=LEVEL_DB, timeout=10.0):
 
 
 def capture_to_stdout(start_cdsp, config, seconds):
-    """Run a config that captures into stdout, take `seconds` of it, and stop."""
-    cdsp = start_cdsp(config=config, pipe_stdout=True)
+    """Run a config that captures into stdout, take `seconds` of it, and stop.
+
+    Not waited on for Running before the read. The capture runs in real time, so until
+    something drains the pipe the Stdout device blocks on a full one, the chain backs up
+    to the capture, and the state never gets there. The read is the gate instead, and
+    the state is checked once the audio is in.
+    """
+    cdsp = start_cdsp(config=config, pipe_stdout=True, wait_for_running=False)
     data = read_exactly(cdsp.process.stdout, int(seconds * RATE) * FRAME_BYTES)
+    assert cdsp.send("GetState") == "Running"
     assert cdsp.exit() == EXIT_OK
     return np.frombuffer(data, dtype="<f4").reshape(-1, CHANNELS)
 
