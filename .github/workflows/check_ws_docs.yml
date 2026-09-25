@@ -1,4 +1,14 @@
-on: [push, pull_request]
+# Skips a change that is only to the docs or the example configs. websocket.md
+# is what this checks, so it stays in.
+on:
+  push:
+    paths: &paths
+      - "**"
+      - "!**.md"
+      - websocket.md
+      - "!exampleconfigs/**"
+  pull_request:
+    paths: *paths
 
 name: Check websocket docs are up to date
 

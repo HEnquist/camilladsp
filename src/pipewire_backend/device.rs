@@ -1201,10 +1201,6 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             }
                         };
                     }
-                    crate::set_capture_state(
-                        &capture_status_clone,
-                        ProcessingState::Inactive,
-                    );
                     // Signal mainloop to quit - pw_main_loop_quit is thread-safe
                     quitter.quit();
                 });

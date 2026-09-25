@@ -306,6 +306,10 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
             }
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { channels, .. } => {
+                *channels = chans;
+            }
         }
     }
     if let Some(fmt) = overrides.sample_format {
@@ -360,6 +364,8 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 }
             }
             CaptureDevice::SignalGenerator { .. } => {}
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { .. } => {}
         }
     }
     Ok(())

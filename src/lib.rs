@@ -197,6 +197,9 @@ pub mod config;
 /// CoreAudio backend (macOS only).
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
+
+#[cfg(feature = "dummy-backend")]
+pub mod dummy_backend;
 /// Top-level engine: device startup, supervisor loop, and restart logic.
 pub mod engine;
 /// Structural wrapper for pipeline signals and channels.
@@ -741,6 +744,10 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     if cfg!(target_os = "windows") {
         playbacktypes.push("Asio".to_owned());
         capturetypes.push("Asio".to_owned());
+    }
+    if cfg!(feature = "dummy-backend") {
+        playbacktypes.push("Dummy".to_owned());
+        capturetypes.push("Dummy".to_owned());
     }
     (playbacktypes, capturetypes)
 }

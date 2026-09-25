@@ -1,4 +1,14 @@
-on: [push, pull_request]
+# Skips a change that is only to the docs or the example configs. README.crates.md
+# is the crate's rustdoc, see src/lib.rs, so it stays in.
+on:
+  push:
+    paths: &paths
+      - "**"
+      - "!**.md"
+      - README.crates.md
+      - "!exampleconfigs/**"
+  pull_request:
+    paths: *paths
 
 name: CI test and lint
 

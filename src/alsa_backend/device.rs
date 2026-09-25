@@ -1035,7 +1035,6 @@ fn capture_loop_bytes(
                 info!("Capture stopped");
                 let msg = AudioMessage::EndOfStream;
                 channels.audio.send(msg).unwrap_or(());
-                crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
                 return;
             }
             Err(msg) => {
@@ -1099,7 +1098,6 @@ fn capture_loop_bytes(
             }
         };
     }
-    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 fn update_avail_min(

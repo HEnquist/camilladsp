@@ -369,6 +369,17 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
+    /// Test-only paced capture device, see `src/dummy_backend`.
+    #[cfg(feature = "dummy-backend")]
+    Dummy {
+        channels: NonZeroUsize,
+        signal: Signal,
+        #[serde(default)]
+        labels: Option<Vec<Option<String>>>,
+        /// Port of the test control socket, see `src/dummy_backend/control.rs`.
+        #[serde(default)]
+        control_port: Option<u16>,
+    },
 }
 
 impl CaptureDevice {
@@ -390,6 +401,8 @@ impl CaptureDevice {
             #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.channels.get(),
             CaptureDevice::SignalGenerator { channels, .. } => channels.get(),
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 
@@ -409,6 +422,8 @@ impl CaptureDevice {
             #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.labels.clone(),
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { labels, .. } => labels.clone(),
         }
     }
 }
@@ -602,6 +617,21 @@ pub enum PlaybackDevice {
     Wasapi(PlaybackDeviceWasapi),
     #[cfg(target_os = "windows")]
     Asio(PlaybackDeviceAsio),
+    /// Test-only paced playback device, see `src/dummy_backend`.
+    #[cfg(feature = "dummy-backend")]
+    Dummy {
+        channels: NonZeroUsize,
+        /// Sample format to convert each chunk to before discarding it.
+        ///
+        /// Without one the audio is dropped as it arrives, which is cheaper. With one the
+        /// device converts the way a real one does on its way to the hardware, which is
+        /// where clipping happens and where `clipped_samples` comes from.
+        #[serde(default)]
+        format: Option<BinarySampleFormat>,
+        /// Port of the test control socket, see `src/dummy_backend/control.rs`.
+        #[serde(default)]
+        control_port: Option<u16>,
+    },
 }
 
 impl PlaybackDevice {
@@ -619,6 +649,8 @@ impl PlaybackDevice {
             PlaybackDevice::Wasapi(dev) => dev.channels.get(),
             #[cfg(target_os = "windows")]
             PlaybackDevice::Asio(dev) => dev.channels.get(),
+            #[cfg(feature = "dummy-backend")]
+            PlaybackDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 }

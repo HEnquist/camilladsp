@@ -827,7 +827,11 @@ fn capture_loop(
             //if flags.data_discontinuity {
             //    warn!("Capture device reported a buffer overrun");
 
-            let pushed_bytes = channels.ringbuf.push_slice(&data[0..nbr_bytes]);
+            // Push whole frames only. The ring buffer is sized for 4 byte samples, so with
+            // S24_3 a partial push could end inside a frame and shift every later sample.
+            let whole_frames_bytes =
+                nbr_bytes.min(channels.ringbuf.vacant_len() / blockalign * blockalign);
+            let pushed_bytes = channels.ringbuf.push_slice(&data[0..whole_frames_bytes]);
             if pushed_bytes < nbr_bytes {
                 debug!(
                     "Capture ring buffer is full, dropped {} out of {} bytes",
@@ -1523,7 +1527,6 @@ impl CaptureDevice for WasapiCaptureDevice {
                 stop_signal.store(true, Ordering::Relaxed);
                 debug!("Wait for inner capture thread to exit.");
                 innerhandle.join().unwrap_or(());
-                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

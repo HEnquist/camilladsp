@@ -1658,10 +1658,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     };
                                 }
-                                crate::set_capture_state(
-                                    &cap_params.capture_status,
-                                    ProcessingState::Inactive,
-                                );
                             }
                             Err(err) => {
                                 tx_state_dev
@@ -1905,7 +1901,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             };
                         }
-                        crate::set_capture_state(&capture_status, ProcessingState::Inactive);
                     }
                     Ok(AlsaThreadState::Error(err)) => {
                         status_channel
@@ -1920,6 +1915,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                         barrier.wait();
                     }
                 }
+                // The outer loop can end without telling the inner thread, for example
+                // on a rate change. Hanging up both channels to it is what makes it exit:
+                // it sees the command channel disconnect, and its blocking EndOfStream
+                // send fails at once instead of waiting on a full channel nobody reads.
+                drop(tx_inner_command);
+                drop(rx_dev);
                 innerhandle.join().unwrap_or(());
             })
             .unwrap();
