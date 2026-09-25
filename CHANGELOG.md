@@ -62,6 +62,8 @@ Bugfixes:
 - `chunksize` must now be larger than zero. A `chunksize` of zero was accepted as a valid
   configuration and then hung on startup without producing any audio. A samplerate override that
   would scale a small `chunksize` down to zero now keeps one frame instead.
+- CoreAudio and WASAPI playback copy the audio data as whole slices instead of one byte at a time,
+  which lowers the CPU load of the real-time playback thread.
 
 Changes:
 - The ASIO backend no longer uses the ASIO SDK from Steinberg. It talks to the ASIO drivers

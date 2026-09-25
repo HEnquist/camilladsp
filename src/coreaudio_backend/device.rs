@@ -23,6 +23,7 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::ringbuffer::append_from_ringbuffer;
 use crossbeam_channel::{TryRecvError, TrySendError, bounded};
 use dispatch::Semaphore;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -606,18 +607,12 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                         warn!("Restarting playback after buffer underrun.");
                                     }
                                     debug!("Inserting {target_level} silent frames to reach target delay.");
-                                    for _ in 0..(blockalign * target_level) {
-                                        sample_queue.push_back(0);
-                                    }
+                                    sample_queue.resize(sample_queue.len() + blockalign * target_level, 0);
                                 }
-                                for element in device_consumer.pop_iter().take(bytes) {
-                                    sample_queue.push_back(element);
-                                }
+                                append_from_ringbuffer(&mut device_consumer, &mut sample_queue, bytes);
                             }
                             Err(_) => {
-                                for _ in 0..((blockalign * num_frames) - sample_queue.len()) {
-                                    sample_queue.push_back(0);
-                                }
+                                sample_queue.resize(blockalign * num_frames, 0);
                                 if running {
                                     running = false;
                                     warn!("Playback interrupted, no data available.");
@@ -625,10 +620,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             }
                         }
                     }
-                    for bufferbyte in data.buffer.iter_mut() {
-                        let byte = sample_queue.pop_front().unwrap_or(0);
-                        *bufferbyte = byte;
-                    }
+                    let nbr_bytes = data.buffer.len();
+                    data.buffer.copy_from_slice(&sample_queue.make_contiguous()[..nbr_bytes]);
+                    sample_queue.drain(..nbr_bytes);
                     let curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
                     if let Ok(mut estimator) = buffer_fill_clone.try_lock() {

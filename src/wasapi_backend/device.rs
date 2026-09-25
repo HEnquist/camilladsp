@@ -22,6 +22,7 @@ use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
+use crate::utils::ringbuffer::append_from_ringbuffer;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
@@ -581,13 +582,9 @@ fn playback_loop(
                         debug!(
                             "Playback, inserting {target_level} silent frames to reach target delay."
                         );
-                        for _ in 0..(blockalign * target_level) {
-                            sample_queue.push_back(0);
-                        }
+                        sample_queue.resize(sample_queue.len() + blockalign * target_level, 0);
                     }
-                    for element in ringbuffer.pop_iter().take(bytes) {
-                        sample_queue.push_back(element);
-                    }
+                    append_from_ringbuffer(&mut ringbuffer, &mut sample_queue, bytes);
                 }
                 Ok(PlaybackDeviceMessage::Stop) => {
                     debug!("Stopping inner playback loop.");
@@ -595,11 +592,7 @@ fn playback_loop(
                     return Ok(());
                 }
                 Err(TryRecvError::Empty) => {
-                    for _ in
-                        0..((blockalign * buffer_free_frame_count as usize) - sample_queue.len())
-                    {
-                        sample_queue.push_back(0);
-                    }
+                    sample_queue.resize(blockalign * buffer_free_frame_count as usize, 0);
                     // While prefilling (before the stream is started) a short
                     // fill just gets padded with silence and is not an
                     // interruption, so skip the underrun handling until started.
@@ -614,11 +607,13 @@ fn playback_loop(
                 }
             }
         }
-        render_client.write_to_device_from_deque(
+        let nbr_bytes = blockalign * buffer_free_frame_count as usize;
+        render_client.write_to_device(
             buffer_free_frame_count as usize,
-            &mut sample_queue,
+            &sample_queue.make_contiguous()[..nbr_bytes],
             None,
         )?;
+        sample_queue.drain(..nbr_bytes);
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
         if let Ok(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
