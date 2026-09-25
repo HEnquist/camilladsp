@@ -1,0 +1,320 @@
+"""VB-Cable, the device the WASAPI and ASIO suite runs on, and the tools that drive it.
+
+The free VB-Cable is one cable. Its render side has two endpoints, a 2 channel one and
+"CABLE In 16 Ch", and whatever any client plays into either comes out of the capture
+endpoint "CABLE Output". A second instance of the driver installs but brings no new
+endpoints, so every test runs one way:
+
+- Playback: CamillaDSP plays into the 2 channel render endpoint, and the test records
+  CABLE Output with `record`.
+- Capture: the test plays a tone into the render endpoint with a `Feeder`, and
+  CamillaDSP captures CABLE Output.
+
+Installed without the vendor's setup, see install_vbcable.ps1, the 2 channel render
+endpoint is called "Speakers (VB-Audio Virtual Cable)" rather than "CABLE Input". So it is
+found by the driver name, and by not being the 16 channel one.
+
+Three properties of the cable decide how the tests are written:
+
+- Nothing through it is bit exact, in shared or exclusive mode, since it processes
+  internally. Tests assert level and frequency, never samples.
+- It keeps its own rate, 48 kHz, whatever rate an exclusive client asks for, and converts.
+- Its measured capture rate swings between about 47000 and 48600 Hz per 1 s reading, so a
+  rate is only checked with a wide band or an average.
+
+The audio goes through sounddevice on PortAudio's WASAPI host API, in shared mode with
+auto conversion, so the test side opens at whatever rate it likes.
+"""
+
+import socket
+import sys
+import threading
+
+import numpy as np
+
+RATE = 48000
+CHANNELS = 2
+DRIVER = "(VB-Audio Virtual Cable)"
+CAPTURE_NAME = "CABLE Output"
+SIXTEEN = "16 Ch"
+
+LEVEL_DB = -6.0
+# On an FFT bin centre at 48 kHz, as in the rest of the suite. See test_spectrum.py.
+TONE_HZ = 984.375
+
+
+def _sounddevice():
+    import sounddevice
+
+    return sounddevice
+
+
+def _wasapi_devices(output):
+    """(index, name) of every WASAPI device of the cable facing the given way."""
+    sd = _sounddevice()
+    hostapi = next(i for i, api in enumerate(sd.query_hostapis()) if "WASAPI" in api["name"])
+    key = "max_output_channels" if output else "max_input_channels"
+    return [
+        (index, dev["name"])
+        for index, dev in enumerate(sd.query_devices())
+        if dev["hostapi"] == hostapi and DRIVER in dev["name"] and dev[key] > 0
+    ]
+
+
+def render_endpoint():
+    """(index, name) of the cable's 2 channel render endpoint."""
+    return next(dev for dev in _wasapi_devices(output=True) if SIXTEEN not in dev[1])
+
+
+def capture_endpoint():
+    """(index, name) of CABLE Output."""
+    return next(dev for dev in _wasapi_devices(output=False) if CAPTURE_NAME in dev[1])
+
+
+def devices_present():
+    """Whether the cable is installed, which is what every test here needs."""
+    if sys.platform != "win32":
+        return False
+    try:
+        render_endpoint()
+        capture_endpoint()
+    except (ImportError, OSError, StopIteration):
+        return False
+    return True
+
+
+# The Steinberg built-in ASIO Driver, on top of the cable. It needs no configuring: it
+# opens the Windows default devices, which on the runner can only be the cable. Its only
+# sample type is 32 bit float.
+STEINBERG = "Steinberg built-in ASIO Driver"
+
+
+def steinberg_present():
+    """Whether the Steinberg driver is registered, which the ASIO tests need on top."""
+    if sys.platform != "win32":
+        return False
+    import winreg
+
+    try:
+        winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\ASIO\{STEINBERG}").Close()
+    except OSError:
+        return False
+    return True
+
+
+def _wasapi_settings():
+    return _sounddevice().WasapiSettings(auto_convert=True)
+
+
+class Feeder:
+    """A sine played into the cable's render endpoint, until stopped.
+
+    Generated in the callback from a running frame count, so it is continuous for as long
+    as it plays, at any rate.
+    """
+
+    def __init__(self, level_db=LEVEL_DB, freq=TONE_HZ, rate=RATE):
+        sd = _sounddevice()
+        self._amplitude = 10 ** (level_db / 20)
+        self._step = 2 * np.pi * freq / rate
+        self._position = 0
+        self._lock = threading.Lock()
+        self.stream = sd.OutputStream(
+            device=render_endpoint()[0],
+            samplerate=rate,
+            channels=CHANNELS,
+            dtype="float32",
+            callback=self._callback,
+            extra_settings=_wasapi_settings(),
+        )
+        self.stream.start()
+
+    def _callback(self, outdata, frames, _time, _status):
+        with self._lock:
+            phase = self._step * (self._position + np.arange(frames))
+            outdata[:] = (self._amplitude * np.sin(phase)).astype(np.float32)[:, None]
+            self._position += frames
+
+    def stop(self):
+        self.stream.abort()
+        self.stream.close()
+
+
+def record(frames, rate=RATE):
+    """Record `frames` from CABLE Output, as float32."""
+    sd = _sounddevice()
+    with sd.InputStream(
+        device=capture_endpoint()[0],
+        samplerate=rate,
+        channels=CHANNELS,
+        dtype="float32",
+        extra_settings=_wasapi_settings(),
+    ) as stream:
+        data, _overflowed = stream.read(frames)
+    return np.ascontiguousarray(data)
+
+
+def opens_exclusive(output):
+    """Whether PortAudio can open an endpoint of the cable in exclusive mode right now.
+
+    At S16 and 48 kHz, which the cable has in exclusive mode, so a refusal means someone
+    else holds the endpoint rather than a format it lacks.
+    """
+    sd = _sounddevice()
+    stream_type = sd.OutputStream if output else sd.InputStream
+    device = render_endpoint()[0] if output else capture_endpoint()[0]
+    try:
+        stream = stream_type(
+            device=device,
+            samplerate=RATE,
+            channels=CHANNELS,
+            dtype="int16",
+            extra_settings=sd.WasapiSettings(exclusive=True),
+        )
+    except sd.PortAudioError:
+        return False
+    stream.close()
+    return True
+
+
+def peak_frequency(column, rate=RATE):
+    spectrum = np.abs(np.fft.rfft(column * np.hanning(len(column))))
+    return np.fft.rfftfreq(len(column), 1 / rate)[spectrum.argmax()]
+
+
+def sine_level_db(column):
+    """The peak level of a sine in dB, from its RMS, so a stray sample does not move it."""
+    rms = np.sqrt((column.astype(np.float64) ** 2).mean())
+    return 20 * np.log10(rms * np.sqrt(2))
+
+
+def assert_tone(data, rate=RATE, level_db=LEVEL_DB, freq=TONE_HZ, skip=0.5):
+    """Every channel of `data` carries the tone, at its level and frequency.
+
+    The first `skip` seconds are left out, since the two ends start at different times.
+    One FFT bin of frequency error is allowed, and 1 dB of level, since the cable is not
+    bit exact and a dropout on a busy runner takes a little off the RMS. A `level_db` of
+    None checks only the frequency.
+    """
+    body = data[int(skip * rate) :]
+    assert len(body) >= rate // 2, f"only {len(body)} frames after the first {skip} s"
+    bin_width = rate / len(body)
+    for channel in range(body.shape[1]):
+        column = body[:, channel]
+        level = sine_level_db(column)
+        if level_db is not None:
+            assert abs(level - level_db) < 1.0, (
+                f"channel {channel} at {level:.2f} dB, peak {np.abs(column).max():.4f}, "
+                f"samples {column[:12]}"
+            )
+        found = peak_frequency(column, rate)
+        assert abs(found - freq) <= bin_width, f"channel {channel} peaks at {found:.1f} Hz"
+
+
+# Helpers for the tests, shared between the WASAPI and ASIO files.
+
+EXIT_OK = 0
+# F32_LE on stdout.
+FRAME_BYTES = CHANNELS * 4
+
+
+def wait_for_peak(cdsp, command, level=LEVEL_DB, timeout=10.0):
+    """Wait for both channels of a peak meter to read `level`, and return them."""
+    return cdsp.poll_until_true(
+        command,
+        lambda peaks: len(peaks) == 2 and all(abs(peak - level) < 0.5 for peak in peaks),
+        timeout=timeout,
+    )
+
+
+def wait_for_stop(cdsp):
+    """Wait for the engine to have stopped, and return the reason.
+
+    Same gate as test_failures.py: the stop reason is what the tests assert on, so it is
+    what gets polled, and the state is only checked after it.
+    """
+    reason = cdsp.poll_until_true("GetStopReason", lambda value: value != "None")
+    cdsp.poll_until("GetState", "Inactive")
+    return reason
+
+
+def capture_to_stdout(start_cdsp, config, seconds, rate=RATE):
+    """Run a config that captures into stdout, take `seconds` of it, and stop.
+
+    Not waited on for Running before the read. The capture runs in real time, so until
+    something drains the pipe the Stdout device blocks on a full one, the chain backs up
+    to the capture, and the state never gets there. The read is the gate instead, and
+    the state is checked once the audio is in.
+    """
+    from swdevices import read_exactly
+
+    cdsp = start_cdsp(config=config, pipe_stdout=True, wait_for_running=False)
+    data = read_exactly(cdsp.process.stdout, int(seconds * rate) * FRAME_BYTES)
+    assert cdsp.send("GetState") == "Running"
+    assert cdsp.exit() == EXIT_OK
+    return np.frombuffer(data, dtype="<f4").reshape(-1, CHANNELS)
+
+
+# Config blocks, as text like the rest of the suite's device configs. Each returns the
+# lines of one side, to go under `devices:`.
+
+
+def wasapi_block(side, device, exclusive=False, fmt=None, extra=None):
+    lines = [
+        f"  {side}:",
+        "    type: Wasapi",
+        f"    channels: {CHANNELS}",
+        f'    device: "{device}"',
+        f"    exclusive: {str(exclusive).lower()}",
+    ]
+    if fmt is not None:
+        lines.append(f"    format: {fmt}")
+    lines += [f"    {key}: {_yaml(value)}" for key, value in (extra or {}).items()]
+    return lines
+
+
+def asio_block(side, device=STEINBERG, fmt=None):
+    lines = [f"  {side}:", "    type: Asio", f"    channels: {CHANNELS}", f'    device: "{device}"']
+    if fmt is not None:
+        lines.append(f"    format: {fmt}")
+    return lines
+
+
+def free_port():
+    """A port the OS says is free, for a Dummy device's control socket."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def dummy_block(side, control_port, level_db=LEVEL_DB, freq=TONE_HZ):
+    """A Dummy device with a control socket, for the rate adjust tests. Needs a build with
+    the dummy-backend feature. The capture side plays the suite's usual tone."""
+    lines = [
+        f"  {side}:",
+        "    type: Dummy",
+        f"    channels: {CHANNELS}",
+        f"    control_port: {control_port}",
+    ]
+    if side == "capture":
+        lines.append(f"    signal: {{type: Sine, freq: {freq}, level: {level_db}}}")
+    return lines
+
+
+def generator_block(level_db=LEVEL_DB, freq=TONE_HZ):
+    return [
+        "  capture:",
+        "    type: SignalGenerator",
+        f"    channels: {CHANNELS}",
+        f"    signal: {{type: Sine, freq: {freq}, level: {level_db}}}",
+    ]
+
+
+def stdout_block(fmt="F32_LE"):
+    return ["  playback:", "    type: Stdout", f"    channels: {CHANNELS}", f"    format: {fmt}"]
+
+
+def _yaml(value):
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)

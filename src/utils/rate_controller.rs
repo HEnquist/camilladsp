@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-// A simple PI controller for rate adjustments
+/// PI controller that adjusts the resampling ratio to keep the capture buffer at a target level.
 pub struct PIRateController {
     target_level: f64,
     interval: f64,
@@ -46,6 +46,7 @@ impl PIRateController {
         )
     }
 
+    /// Create a controller with explicit proportional (`k_p`) and integral (`k_i`) gains.
     pub fn new(
         fs: usize,
         interval: f64,

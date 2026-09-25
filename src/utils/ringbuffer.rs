@@ -15,6 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use ringbuf::traits::*;
+use std::collections::VecDeque;
 
 /// Copy available bytes from a ring buffer consumer into `out_slice`,
 /// then zero-fill any remaining tail.
@@ -46,10 +47,30 @@ pub fn fill_playback_output_from_ringbuffer(
     (available_bytes, bytes_from_rb)
 }
 
+/// Move up to `max_bytes` bytes from a ring buffer consumer to the back of `queue`.
+///
+/// The bytes are copied as whole slices, instead of one at a time,
+/// to keep the work in real-time playback callbacks low.
+///
+/// Returns the number of bytes moved.
+pub fn append_from_ringbuffer(
+    consumer: &mut impl Consumer<Item = u8>,
+    queue: &mut VecDeque<u8>,
+    max_bytes: usize,
+) -> usize {
+    let (first, second) = consumer.as_slices();
+    let from_first = first.len().min(max_bytes);
+    let from_second = second.len().min(max_bytes - from_first);
+    queue.extend(&first[..from_first]);
+    queue.extend(&second[..from_second]);
+    consumer.skip(from_first + from_second)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::fill_playback_output_from_ringbuffer;
+    use super::{append_from_ringbuffer, fill_playback_output_from_ringbuffer};
     use ringbuf::{HeapRb, traits::*};
+    use std::collections::VecDeque;
 
     #[test]
     fn full_underrun_outputs_silence() {
@@ -135,5 +156,28 @@ mod tests {
         assert!(out.is_empty());
         // Nothing was consumed
         assert_eq!(consumer.occupied_len(), 3);
+    }
+
+    #[test]
+    fn append_from_wrapped_ringbuffer() {
+        // Advance the read position so that the content wraps around the end of the buffer.
+        let mut ring = HeapRb::<u8>::new(8);
+        ring.push_slice(&[0; 6]);
+        ring.skip(6);
+        ring.push_slice(&[1, 2, 3, 4, 5]);
+        let (_producer, mut consumer) = ring.split();
+        let (first, second) = consumer.as_slices();
+        assert!(!first.is_empty() && !second.is_empty());
+
+        let mut queue = VecDeque::from(vec![9]);
+        let moved = append_from_ringbuffer(&mut consumer, &mut queue, 4);
+        assert_eq!(moved, 4);
+        assert_eq!(queue, vec![9, 1, 2, 3, 4]);
+        assert_eq!(consumer.occupied_len(), 1);
+
+        let moved = append_from_ringbuffer(&mut consumer, &mut queue, 10);
+        assert_eq!(moved, 1);
+        assert_eq!(queue, vec![9, 1, 2, 3, 4, 5]);
+        assert_eq!(consumer.occupied_len(), 0);
     }
 }

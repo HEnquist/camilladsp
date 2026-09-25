@@ -14,12 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::NewValue;
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::ProcessingState;
+use crate::ToCamillaFloat;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+/// Estimates the current device buffer level by extrapolating from the last known value.
 pub struct DeviceBufferEstimator {
     update_time: Instant,
     frames: usize,
@@ -27,6 +28,7 @@ pub struct DeviceBufferEstimator {
 }
 
 impl DeviceBufferEstimator {
+    /// Create a new estimator for a device running at `sample_rate` Hz.
     pub fn new(sample_rate: usize) -> Self {
         DeviceBufferEstimator {
             update_time: Instant::now(),
@@ -54,21 +56,24 @@ impl DeviceBufferEstimator {
 /// A counter for watching if the signal has been silent
 /// for longer than a given limit.
 pub struct SilenceCounter {
-    silence_threshold: PrcFmt,
+    silence_threshold: CamillaFloat,
     silence_limit_nbr: usize,
     silent_nbr: usize,
 }
 
 impl SilenceCounter {
+    /// Create a counter that triggers pause after `silence_timeout` seconds below `silence_threshold_db`.
     pub fn new(
-        silence_threshold_db: PrcFmt,
-        silence_timeout: PrcFmt,
+        silence_threshold_db: f64,
+        silence_timeout: f64,
         samplerate: usize,
         chunksize: usize,
     ) -> SilenceCounter {
-        let silence_threshold = PrcFmt::coerce(10.0).powf(silence_threshold_db / 20.0);
+        // Setup math in f64; only the finished threshold, which is compared
+        // against sample values, crosses into the processing precision.
+        let silence_threshold = 10.0f64.powf(silence_threshold_db / 20.0).to_camilla_float();
         let silence_limit_nbr =
-            (silence_timeout * samplerate as PrcFmt / chunksize as PrcFmt).round() as usize;
+            (silence_timeout * samplerate as f64 / chunksize as f64).round() as usize;
         SilenceCounter {
             silence_threshold,
             silence_limit_nbr,
@@ -76,7 +81,7 @@ impl SilenceCounter {
         }
     }
 
-    pub fn update(&mut self, value_range: PrcFmt) -> ProcessingState {
+    pub fn update(&mut self, value_range: CamillaFloat) -> ProcessingState {
         let mut state = ProcessingState::Running;
         if self.silence_limit_nbr > 0 {
             if value_range > self.silence_threshold {
@@ -106,6 +111,7 @@ pub struct Stopwatch {
 }
 
 impl Stopwatch {
+    /// Create a new stopwatch, started at the current instant.
     pub fn new() -> Stopwatch {
         let start_time = Instant::now();
         let value = Duration::new(0, 0);
@@ -150,6 +156,7 @@ pub struct Averager {
 }
 
 impl Averager {
+    /// Create a new, empty averager.
     pub fn new() -> Averager {
         Averager {
             sum: 0.0,
@@ -191,6 +198,7 @@ pub struct TimeAverage {
 }
 
 impl TimeAverage {
+    /// Create a new time-average counter, started at the current instant.
     pub fn new() -> TimeAverage {
         TimeAverage {
             sum: 0,
@@ -235,6 +243,7 @@ pub struct ValueWatcher {
 }
 
 impl ValueWatcher {
+    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`.
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
         let min_value = target_value / (1.0 + max_rel_diff);
         let max_value = target_value * (1.0 + max_rel_diff);
@@ -260,12 +269,16 @@ impl ValueWatcher {
     }
 }
 
+/// A timestamped snapshot of per-channel values.
 #[derive(Clone, Debug)]
 pub struct HistoryRecord {
+    /// Instant at which this record was captured.
     pub time: Instant,
+    /// Per-channel signal values for this record.
     pub values: Vec<f32>,
 }
 
+/// Rolling history of timestamped per-channel values, with time-windowed average and peak queries.
 #[derive(Clone, Debug)]
 pub struct ValueHistory {
     buffer: VecDeque<HistoryRecord>,
@@ -276,6 +289,7 @@ pub struct ValueHistory {
 }
 
 impl ValueHistory {
+    /// Create a history buffer holding `history_length` records, each with `nbr_values` channels.
     pub fn new(history_length: usize, nbr_values: usize) -> Self {
         let mut history = Self {
             buffer: VecDeque::<HistoryRecord>::with_capacity(history_length),
