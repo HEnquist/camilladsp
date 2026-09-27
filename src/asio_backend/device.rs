@@ -135,6 +135,8 @@ struct AsioCaptureContext {
     /// Preallocated interleaved capture buffer reused by callback.
     interleaved_tmp: Vec<u8>,
     chunk_counter: u64,
+    /// Whether the ring buffer was full on the last push, to warn once per episode.
+    ring_full: bool,
 }
 
 static PLAYBACK_CONTEXT: AtomicPtr<AsioPlaybackContext> = AtomicPtr::new(ptr::null_mut());
@@ -445,22 +447,24 @@ pub unsafe extern "system" fn buffer_switch_capture(buffer_index: c_long, _direc
     let pushed_bytes = ctx.device_producer.push_slice(buf);
     if pushed_bytes < buf.len() {
         // Ring buffer full — data will be lost
-        warn!(
-            "ASIO capture callback: ringbuffer full, dropped {} of {} bytes.",
+        if !ctx.ring_full {
+            warn!("Capture ring buffer is full, dropping samples");
+            ctx.ring_full = true;
+        }
+        trace!(
+            "Capture ring buffer is full, dropped {} out of {} bytes",
             buf.len() - pushed_bytes,
             buf.len()
         );
+    } else {
+        ctx.ring_full = false;
     }
     match ctx.tx_dev.try_send((ctx.chunk_counter, pushed_bytes)) {
         Ok(()) => {}
         Err(TrySendError::Full((nbr, length_bytes))) => {
-            // Channel full, drop notification
-            xtrace!(
-                "ASIO capture callback: notify channel full, dropped notification chunk={}, bytes={}",
-                nbr,
-                length_bytes
+            trace!(
+                "Capture notification channel full, dropped notification for chunk {nbr} with {length_bytes} bytes"
             );
-            let _ = (nbr, length_bytes);
         }
         Err(_) => {
             // Channel disconnected
@@ -1993,6 +1997,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         bytes_per_sample,
                         interleaved_tmp: vec![0u8; asio_buffer_size * bytes_per_sample * channels],
                         chunk_counter: 0,
+                        ring_full: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -2062,6 +2067,7 @@ impl CaptureDevice for AsioCaptureDevice {
                             (preferred_buf as usize) * bytes_per_sample * channels
                         ],
                         chunk_counter: 0,
+                        ring_full: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);

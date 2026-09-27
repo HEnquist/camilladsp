@@ -652,6 +652,7 @@ fn capture_loop(
     stop_signal: Arc<AtomicBool>,
 ) -> Res<()> {
     let mut chunk_nbr: u64 = 0;
+    let mut ring_full = false;
 
     let mut callbacks = wasapi::EventCallbacks::new();
     callbacks.set_disconnected_callback(move |reason| {
@@ -828,17 +829,23 @@ fn capture_loop(
                 nbr_bytes.min(channels.ringbuf.vacant_len() / blockalign * blockalign);
             let pushed_bytes = channels.ringbuf.push_slice(&data[0..whole_frames_bytes]);
             if pushed_bytes < nbr_bytes {
-                debug!(
+                if !ring_full {
+                    warn!("Capture ring buffer is full, dropping samples");
+                    ring_full = true;
+                }
+                trace!(
                     "Capture ring buffer is full, dropped {} out of {} bytes",
                     nbr_bytes - pushed_bytes,
                     nbr_bytes
                 );
+            } else {
+                ring_full = false;
             }
             match channels.tx_filled.try_send((chunk_nbr, pushed_bytes)) {
                 Ok(()) => {}
                 Err(TrySendError::Full((nbr, length))) => {
-                    warn!(
-                        "Capture, notification channel full, dropping chunk nbr {nbr} with len {length}."
+                    trace!(
+                        "Capture notification channel full, dropped notification for chunk {nbr} with {length} bytes"
                     );
                 }
                 Err(TrySendError::Disconnected(_)) => {

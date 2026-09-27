@@ -1431,6 +1431,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let capture_frames = chunksize as Frames;
                                 let mut buffer = vec![0u8; capture_bytes];
                                 let mut chunk_nbr = 0usize;
+                                let mut ring_full = false;
 
                                 let pcminfo = pcmdevice.info().unwrap();
                                 let card = pcminfo.get_card();
@@ -1589,18 +1590,31 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             let pushed_bytes =
                                                 device_producer.push_slice(&buffer[0..bytes_read]);
                                             if pushed_bytes < bytes_read {
-                                                warn!(
+                                                if !ring_full {
+                                                    warn!(
+                                                        "Capture ring buffer is full, dropping samples"
+                                                    );
+                                                    ring_full = true;
+                                                }
+                                                trace!(
                                                     "Capture ring buffer is full, dropped {} out of {} bytes",
                                                     bytes_read - pushed_bytes,
                                                     bytes_read
                                                 );
+                                            } else {
+                                                ring_full = false;
                                             }
-                                            tx_dev
+                                            if tx_dev
                                                 .try_send(CaptureDeviceMessage::Data {
                                                     chunk_nbr,
                                                     nbr_bytes: pushed_bytes,
                                                 })
-                                                .unwrap_or_default();
+                                                .is_err()
+                                            {
+                                                trace!(
+                                                    "Capture notification channel full, dropped notification for chunk {chunk_nbr} with {pushed_bytes} bytes"
+                                                );
+                                            }
                                         }
                                         Ok((CaptureResult::Stalled, _)) => {
                                             debug!("Capture device stalled, no data received");

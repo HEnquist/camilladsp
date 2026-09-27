@@ -935,6 +935,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 };
 
                 let mut chunk_counter = 0;
+                let mut ring_full = false;
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
@@ -946,18 +947,24 @@ impl CaptureDevice for CoreaudioCaptureDevice {
 
                     let pushed_bytes = device_producer.push_slice(data.buffer);
                     if pushed_bytes < data.buffer.len() {
-                        debug!(
-                            "Capture ring buffer is full, dropped {} out of {} bytes.",
+                        if !ring_full {
+                            warn!("Capture ring buffer is full, dropping samples");
+                            ring_full = true;
+                        }
+                        trace!(
+                            "Capture ring buffer is full, dropped {} out of {} bytes",
                             data.buffer.len() - pushed_bytes,
                             data.buffer.len()
                         );
+                    } else {
+                        ring_full = false;
                     }
                     match tx_dev.try_send((chunk_counter, pushed_bytes)) {
                         Ok(()) => {
                             device_sph.signal();
                         },
                         Err(TrySendError::Full((nbr, length_bytes))) => {
-                            debug!("Dropping captured chunk {nbr} with len {length_bytes}.");
+                            trace!("Capture notification channel full, dropped notification for chunk {nbr} with {length_bytes} bytes");
                         }
                         Err(_) => {
                             error!("Error sending, channel disconnected");

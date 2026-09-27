@@ -871,6 +871,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 let rb_producer_clone = rb_producer.clone();
                 let notify_tx_clone = notify_tx.clone();
                 let mut logged_capture_quantum = false;
+                let mut ring_full = false;
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -928,7 +929,17 @@ impl CaptureDevice for PipeWireCaptureDevice {
                         let mut producer = rb_producer_clone.borrow_mut();
                         let pushed = producer.push_slice(in_slice);
                         if pushed < size {
-                            warn!("Capture ring buffer full, dropped {} bytes", size - pushed);
+                            if !ring_full {
+                                warn!("Capture ring buffer is full, dropping samples");
+                                ring_full = true;
+                            }
+                            trace!(
+                                "Capture ring buffer is full, dropped {} out of {} bytes",
+                                size - pushed,
+                                size
+                            );
+                        } else {
+                            ring_full = false;
                         }
 
                         // Notify processing thread that data is available
