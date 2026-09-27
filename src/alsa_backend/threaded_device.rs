@@ -17,7 +17,7 @@
 use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
-use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
+use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rt_priority::{
@@ -1002,8 +1002,10 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
     }
 }
 
-enum AlsaThreadState {
-    Ready(BinarySampleFormat),
+/// Sent by an inner device thread once the device is open. Playback reports the negotiated
+/// format, capture also reports whether the device has a pitch control for rate adjust.
+enum AlsaThreadState<T> {
+    Ready(T),
     Error(String),
 }
 
@@ -1417,8 +1419,47 @@ impl CaptureDevice for AlsaCaptureDevice {
                         ) {
                             Ok((pcmdevice, sample_format)) => {
                                 let binary_format = sample_format.to_binary_format();
+
+                                let pcminfo = pcmdevice.info().unwrap();
+                                let card = pcminfo.get_card();
+                                let device = pcminfo.get_device();
+                                let subdevice = pcminfo.get_subdevice();
+
+                                let hctl =
+                                    (card >= 0).then(|| HCtl::new(&format!("hw:{card}"), true).unwrap());
+                                let ctl =
+                                    (card >= 0).then(|| Ctl::new(&format!("hw:{card}"), true).unwrap());
+
+                                if let Some(c) = &ctl {
+                                    c.subscribe_events(true).unwrap();
+                                }
+
+                                // Looked up before reporting ready, so the outer thread knows
+                                // whether rate adjust goes to the device or to the resampler.
+                                let mut element_loopback: Option<ElemData> = None;
+                                let mut element_uac2_gadget: Option<ElemData> = None;
+                                if let Some(h) = &hctl {
+                                    h.load().unwrap();
+                                    element_loopback = find_elem(
+                                        h,
+                                        ElemIface::PCM,
+                                        Some(device),
+                                        Some(subdevice),
+                                        "PCM Rate Shift 100000",
+                                    );
+                                    element_uac2_gadget = find_elem(
+                                        h,
+                                        ElemIface::PCM,
+                                        Some(device),
+                                        Some(subdevice),
+                                        "Capture Pitch 1000000",
+                                    );
+                                }
+                                let pitch_supported =
+                                    element_loopback.is_some() || element_uac2_gadget.is_some();
+
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(binary_format))
+                                    .send(AlsaThreadState::Ready((binary_format, pitch_supported)))
                                     .unwrap_or(());
                                 if rx_start_inner.recv().is_err() {
                                     return;
@@ -1433,27 +1474,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let mut chunk_nbr = 0usize;
                                 let mut ring_full = false;
 
-                                let pcminfo = pcmdevice.info().unwrap();
-                                let card = pcminfo.get_card();
-                                let device = pcminfo.get_device();
-                                let subdevice = pcminfo.get_subdevice();
-
                                 let fds = pcmdevice.get().unwrap();
                                 let nbr_pcm_fds = fds.len();
                                 let mut file_descriptors = FileDescriptors { fds, nbr_pcm_fds };
 
-                                let mut element_loopback: Option<ElemData> = None;
-                                let mut element_uac2_gadget: Option<ElemData> = None;
                                 let mut capture_elements = CaptureElements::default();
-
-                                let hctl =
-                                    (card >= 0).then(|| HCtl::new(&format!("hw:{card}"), true).unwrap());
-                                let ctl =
-                                    (card >= 0).then(|| Ctl::new(&format!("hw:{card}"), true).unwrap());
-
-                                if let Some(c) = &ctl {
-                                    c.subscribe_events(true).unwrap();
-                                }
 
                                 let mut cap_params = CaptureParams {
                                     channels,
@@ -1479,21 +1504,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 if let Some(h) = &hctl {
                                     let ctl_fds = h.get().unwrap();
                                     file_descriptors.fds.extend(ctl_fds.iter());
-                                    h.load().unwrap();
-                                    element_loopback = find_elem(
-                                        h,
-                                        ElemIface::PCM,
-                                        Some(device),
-                                        Some(subdevice),
-                                        "PCM Rate Shift 100000",
-                                    );
-                                    element_uac2_gadget = find_elem(
-                                        h,
-                                        ElemIface::PCM,
-                                        Some(device),
-                                        Some(subdevice),
-                                        "Capture Pitch 1000000",
-                                    );
 
                                     capture_elements.find_elements(
                                         h,
@@ -1681,7 +1691,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format)) => {
+                    Ok(AlsaThreadState::Ready((binary_format, pitch_supported))) => {
                         let bytes_per_sample = binary_format.bytes_per_sample();
                         let blockalign = bytes_per_sample * channels;
 
@@ -1745,7 +1755,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                                 Ok(CommandMessage::SetSpeed { speed }) => {
                                     rate_adjust = speed;
-                                    if let Some(resampl) = &mut resampler {
+                                    if pitch_supported {
+                                        tx_inner_command
+                                            .try_send(CommandMessage::SetSpeed { speed })
+                                            .unwrap_or_default();
+                                    } else if let Some(resampl) = &mut resampler {
                                         if async_src {
                                             if resampl
                                                 .set_resample_ratio_relative(speed, true)
@@ -1759,9 +1773,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             );
                                         }
                                     }
-                                    tx_inner_command
-                                        .try_send(CommandMessage::SetSpeed { speed })
-                                        .unwrap_or_default();
                                 }
                                 Err(crossbeam_channel::TryRecvError::Empty) => {}
                                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
