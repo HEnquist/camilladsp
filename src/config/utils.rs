@@ -15,6 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config::*;
+use crate::fader;
 use crate::filters;
 use crate::filters::fftconv::ImpulseCache;
 use crate::mixer;
@@ -879,6 +880,7 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
         );
         return Err(ConfigError::new(&msg).into());
     }
+    fader::validate_fader_settings(conf)?;
     Ok(impulses)
 }
 

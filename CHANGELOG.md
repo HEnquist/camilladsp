@@ -66,6 +66,9 @@ Bugfixes:
   which lowers the CPU load of the real-time playback thread.
 
 Changes:
+- `Volume` filters in the pipeline that use the same fader must now have the same `ramp_time_ms`
+  and `limit`, since these now belong to the fader. A `Loudness` filter on an Aux fader without a
+  `Volume` filter now also follows `SetFaderVolume`, not only `SetFaderExternalVolume`.
 - The ASIO backend no longer uses the ASIO SDK from Steinberg. It talks to the ASIO drivers
   directly through the COM interfaces they expose, using the `azo` crate. Windows builds with ASIO
   are therefore no longer restricted to GPLv3, and the usual dual license applies to every build.
@@ -165,6 +168,7 @@ Config changes (breaking):
 - Delay and RACE now also accept `s` (seconds) as a unit.
 - The `Limiter` filter is renamed to `Clipper` (`type: Limiter` becomes `type: Clipper`), to avoid
   confusion with the new `LookaheadLimiter`. Its parameters are unchanged.
+- General tweaks and improvements.
 
 Websocket protocol changes (breaking):
 - Messages are now internally tagged with a uniform object shape.

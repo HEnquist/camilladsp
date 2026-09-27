@@ -17,6 +17,7 @@
 use crate::ProcessingParameters;
 use crate::audiochunk::AudioChunk;
 use crate::config;
+use crate::fader::{FaderLevels, Faders};
 use crate::filters;
 use crate::filters::Filter;
 use crate::filters::fftconv::ConvCoeffCache;
@@ -44,7 +45,7 @@ impl FilterGroup {
         filter_configs: HashMap<String, config::Filter>,
         waveform_length: usize,
         sample_freq: usize,
-        processing_params: Arc<ProcessingParameters>,
+        fader_levels: &Arc<FaderLevels>,
         cache: &mut ConvCoeffCache,
     ) -> Self {
         debug!("Build filter group from config");
@@ -88,8 +89,7 @@ impl FilterGroup {
                         name,
                         parameters,
                         waveform_length,
-                        sample_freq,
-                        processing_params.clone(),
+                        fader_levels.clone(),
                     ))
                 }
                 config::Filter::Loudness { parameters, .. } => {
@@ -97,7 +97,7 @@ impl FilterGroup {
                         name,
                         parameters,
                         sample_freq,
-                        processing_params.clone(),
+                        fader_levels.clone(),
                     ))
                 }
                 config::Filter::Dither { parameters, .. } => {
@@ -404,6 +404,7 @@ pub enum PipelineStep {
 /// with a master volume applied before the first step.
 pub struct Pipeline {
     steps: Vec<PipelineStep>,
+    faders: Faders,
     volume: filters::basicfilters::Volume,
     secs_per_chunk: f32,
     processing_params: Arc<ProcessingParameters>,
@@ -429,6 +430,9 @@ impl Pipeline {
     ) -> Self {
         debug!("Build new pipeline");
         trace!("Pipeline config {:?}", conf.pipeline);
+        // Built first, so the filters read valid fader levels as they are created.
+        let faders = Faders::from_config(&conf, processing_params.clone());
+        let fader_levels = faders.levels();
         let mut steps = Vec::<PipelineStep>::new();
         let mut num_channels = conf.devices.capture.channels();
         for step in conf.pipeline.unwrap_or_default() {
@@ -482,7 +486,7 @@ impl Pipeline {
                         // whole step used to run channel by channel. Each
                         // channel still sees its filters in the configured
                         // order; only filters that share state across channels
-                        // can tell, which `parallelize_filters` describes.
+                        // could tell, see `parallelize_filters`.
                         for run in biquad_runs(&step.names, filter_configs) {
                             let names = &step.names[run.names.clone()];
                             if run.biquads {
@@ -501,7 +505,7 @@ impl Pipeline {
                                     filter_configs.clone(),
                                     conf.devices.chunksize(),
                                     conf.devices.samplerate(),
-                                    processing_params.clone(),
+                                    &fader_levels,
                                     coeff_cache,
                                 );
                                 steps.push(PipelineStep::FilterStep(fltgrp));
@@ -556,18 +560,11 @@ impl Pipeline {
                 }
             }
         }
-        let current_volume = processing_params.current_volume(0);
-        let mute = processing_params.is_mute(0);
         let volume = filters::basicfilters::Volume::new(
             "default",
-            conf.devices.volume_ramp_time_ms(),
-            conf.devices.volume_limit(),
-            current_volume,
-            mute,
-            conf.devices.chunksize(),
-            conf.devices.samplerate(),
-            processing_params.clone(),
             0,
+            conf.devices.chunksize(),
+            fader_levels,
         );
         let secs_per_chunk = conf.devices.chunksize() as f32 / conf.devices.samplerate() as f32;
         // When a rayon pool is available, merge the per-channel filter
@@ -578,6 +575,7 @@ impl Pipeline {
         }
         Pipeline {
             steps,
+            faders,
             volume,
             secs_per_chunk,
             processing_params,
@@ -599,6 +597,7 @@ impl Pipeline {
         coeff_cache: &mut ConvCoeffCache,
     ) {
         debug!("Updating parameters");
+        self.faders.update_parameters(&conf);
         for mut step in &mut self.steps {
             match &mut step {
                 // Mixer changes always trigger a pipeline rebuild, never a parameter update.
@@ -634,6 +633,8 @@ impl Pipeline {
     /// Process an AudioChunk by calling either a MixerStep or a FilterStep
     pub fn process_chunk(&mut self, mut chunk: AudioChunk) -> AudioChunk {
         let start = Instant::now();
+        // Advance the faders once for the whole chunk, before any filter reads them.
+        self.faders.prepare_chunk();
         self.volume.process_chunk(&mut chunk);
         for mut step in &mut self.steps {
             match &mut step {
@@ -682,22 +683,10 @@ impl Pipeline {
 /// has each channel running its whole chain, and the channels run at the same
 /// time as each other.
 ///
-/// One pairing can tell, and is accepted rather than fixed. `Volume` writes its
-/// fader's current level while processing, and `Loudness` reads that level to
-/// size its compensation. Put them on the same fader but on different channels
-/// and the `Loudness` can read the level one chunk late while the volume is
-/// moving. Both on the same channel is not affected, the chain there keeping
-/// the order the configuration gave.
-///
-/// This is not only the pool's doing. A compiled biquad run splits a step for
-/// every channel at once, so a biquad between a `Volume` and a `Loudness` puts
-/// the same cross-channel interleaving in the default single threaded path.
-/// The pool widens the reordering, it does not introduce it.
-///
-/// The cost is one chunk of lag on a compensation curve that moves over
-/// hundreds of milliseconds, which is not audible. Before giving up the
-/// parallelism to preserve the order exactly, check that there is a listener
-/// who can hear the difference.
+/// No filter shares state with the other channels while it runs, so none can
+/// tell. `Volume` and `Loudness` read fader levels that [`Faders`] publishes
+/// before the first step. A filter that comes to share state across channels
+/// while processing would bring the order back into play.
 fn parallelize_filters(
     steps: &mut Vec<PipelineStep>,
     nbr_channels: usize,

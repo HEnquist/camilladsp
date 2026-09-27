@@ -1727,6 +1727,8 @@ The range of the volume control can be limited via the optional `limit` paramete
 This sets a limit for the maximum value of the volume.
 If left out or set to `null`, it defaults to +50 dB.
 
+All Volume filters that use the same fader must have the same `ramp_time_ms` and `limit`.
+
 Example Volume filter:
 ```
 filters:
