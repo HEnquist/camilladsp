@@ -26,6 +26,7 @@ use crate::config;
 use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
@@ -202,54 +203,28 @@ fn capture_loop(
 
     crate::set_capture_state(&params.capture_status, state);
     loop {
-        match msg_channels.command.try_recv() {
-            Ok(CommandMessage::Exit) => {
-                debug!("Exit message received, sending EndOfStream");
-                let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap_or(());
-                msg_channels
-                    .status
-                    .send(StatusMessage::CaptureDone)
-                    .unwrap_or(());
-                break;
-            }
-            Ok(CommandMessage::SetSpeed { speed: new_speed }) => {
-                trace!("Dummy capture setting speed to {new_speed}");
-                rate_adjust = new_speed;
-                match &mut resampler {
-                    Some(resampl) => {
-                        if params.async_src {
-                            // The ratio is what changes, exactly as in the file backend
-                            // at `src/file_backend/device.rs:441`.
-                            if resampl
-                                .set_resample_ratio_relative(new_speed, true)
-                                .is_err()
-                            {
-                                debug!("Failed to set resampling speed to {new_speed}");
-                            }
-                        } else {
-                            warn!(
-                                "Requested rate adjust of synchronous resampler. Ignoring request."
-                            );
-                        }
-                    }
-                    // With no resampler the device does what a clock-slave device does and
-                    // runs its own clock faster or slower. That is the same shape as the
-                    // ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
-                    None => pacer.set_rate(capture_clock_rate(
-                        device_rate,
-                        drift_ppm,
-                        rate_adjust,
-                        false,
-                    )),
-                }
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                error!("Command channel was closed");
-                break;
-            }
+        // With no resampler the device does what a clock-slave device does and runs its own
+        // clock faster or slower, like the ALSA Loopback and UAC2 gadget pitch controls.
+        let mut set_clock = |speed: f64| {
+            pacer.set_rate(capture_clock_rate(device_rate, drift_ppm, speed, false));
         };
+        let set_pitch = resampler
+            .is_none()
+            .then_some(&mut set_clock as &mut dyn FnMut(f64));
+        match handle_capture_command(
+            msg_channels.command.try_recv(),
+            &mut rate_adjust,
+            &mut resampler,
+            params.async_src,
+            set_pitch,
+        ) {
+            CommandOutcome::Continue => {}
+            CommandOutcome::Exit => {
+                send_capture_done(&msg_channels.audio, &msg_channels.status);
+                break;
+            }
+            CommandOutcome::Disconnected => break,
+        }
 
         // Checked ahead of the stall below, so a device that is already stalled can still
         // be told to fail. On every way out from here the status message goes first and

@@ -19,6 +19,7 @@ use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::{BinarySampleFormat, ConfigError, CoreAudioSampleFormat};
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
@@ -1059,37 +1060,15 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                 };
                 'deviceloop: loop {
-                    match command_channel.try_recv() {
-                        Ok(CommandMessage::Exit) => {
-                            debug!("Exit message received, sending EndOfStream.");
-                            let msg = AudioMessage::EndOfStream;
-                            channel.send(msg).unwrap_or(());
-                            status_channel.send(StatusMessage::CaptureDone).unwrap_or(());
+                    let mut device_pitch = |speed: f64| set_pitch(device_id, speed as f32);
+                    let pitch = pitch_supported.then_some(&mut device_pitch as &mut dyn FnMut(f64));
+                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, pitch) {
+                        CommandOutcome::Continue => {}
+                        CommandOutcome::Exit => {
+                            send_capture_done(&channel, &status_channel);
                             break;
                         }
-                        Ok(CommandMessage::SetSpeed { speed }) => {
-                            rate_adjust = speed;
-                            debug!("Requested to adjust capture speed to {speed}.");
-                            if pitch_supported {
-                                set_pitch(device_id, speed as f32);
-                            }
-                            else if let Some(resampl) = &mut resampler {
-                                debug!("Adjusting resampler rate to {speed}.");
-                                if async_src {
-                                    if resampl.set_resample_ratio_relative(speed, true).is_err() {
-                                        debug!("Failed to set resampling speed to {speed}.");
-                                    }
-                                }
-                                else {
-                                    warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
-                                }
-                            }
-                        },
-                        Err(crossbeam_channel::TryRecvError::Empty) => {}
-                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                            error!("Command channel was closed");
-                            break;
-                        }
+                        CommandOutcome::Disconnected => break,
                     }
                     match rate_rx.try_recv() {
                         Ok(rate) => {

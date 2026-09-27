@@ -19,6 +19,7 @@ use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 
@@ -431,35 +432,20 @@ fn capture_loop(
     let mut prev_state = ProcessingState::Running;
     let mut stalled = false;
     loop {
-        match msg_channels.command.try_recv() {
-            Ok(CommandMessage::Exit) => {
-                debug!("Exit message received, sending EndOfStream");
-                let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap_or(());
-                msg_channels
-                    .status
-                    .send(StatusMessage::CaptureDone)
-                    .unwrap_or(());
+        match handle_capture_command(
+            msg_channels.command.try_recv(),
+            &mut rate_adjust,
+            &mut resampler,
+            params.async_src,
+            None,
+        ) {
+            CommandOutcome::Continue => {}
+            CommandOutcome::Exit => {
+                send_capture_done(&msg_channels.audio, &msg_channels.status);
                 break;
             }
-            Ok(CommandMessage::SetSpeed { speed }) => {
-                rate_adjust = speed;
-                if let Some(resampl) = &mut resampler {
-                    if params.async_src {
-                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
-                            debug!("Failed to set resampling speed to {speed}");
-                        }
-                    } else {
-                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
-                    }
-                }
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                error!("Command channel was closed");
-                break;
-            }
-        };
+            CommandOutcome::Disconnected => break,
+        }
         bytes_to_capture = nbr_capture_bytes(
             &resampler,
             bytes_to_capture,

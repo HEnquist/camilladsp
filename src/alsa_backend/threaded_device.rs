@@ -18,6 +18,7 @@ use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rt_priority::{
@@ -1749,33 +1750,25 @@ impl CaptureDevice for AlsaCaptureDevice {
                         };
 
                         'outer: loop {
-                            match command_channel.try_recv() {
-                                Ok(CommandMessage::Exit) => {
-                                    tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
-                                }
-                                Ok(CommandMessage::SetSpeed { speed }) => {
-                                    rate_adjust = speed;
-                                    if pitch_supported {
-                                        tx_inner_command
-                                            .try_send(CommandMessage::SetSpeed { speed })
-                                            .unwrap_or_default();
-                                    } else if let Some(resampl) = &mut resampler {
-                                        if async_src {
-                                            if resampl
-                                                .set_resample_ratio_relative(speed, true)
-                                                .is_err()
-                                            {
-                                                debug!("Failed to set resampling speed to {speed}");
-                                            }
-                                        } else {
-                                            warn!(
-                                                "Requested rate adjust of synchronous resampler. Ignoring request."
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(crossbeam_channel::TryRecvError::Empty) => {}
-                                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                            // The pitch control lives on the inner thread, so a speed for it
+                            // is forwarded there. Exit goes there too: the inner thread ends
+                            // the stream, and this loop follows when it reports the end.
+                            let mut forward_pitch = |speed: f64| {
+                                tx_inner_command
+                                    .try_send(CommandMessage::SetSpeed { speed })
+                                    .unwrap_or_default();
+                            };
+                            let pitch = pitch_supported
+                                .then_some(&mut forward_pitch as &mut dyn FnMut(f64));
+                            match handle_capture_command(
+                                command_channel.try_recv(),
+                                &mut rate_adjust,
+                                &mut resampler,
+                                async_src,
+                                pitch,
+                            ) {
+                                CommandOutcome::Continue => {}
+                                CommandOutcome::Exit | CommandOutcome::Disconnected => {
                                     tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
                                 }
                             }

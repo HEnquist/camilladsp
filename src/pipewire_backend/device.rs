@@ -32,6 +32,7 @@ use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
@@ -1073,34 +1074,15 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                     loop {
                         // Check for commands
-                        match command_channel.try_recv() {
-                            Ok(CommandMessage::Exit) => {
-                                debug!("Exit message received, sending EndOfStream");
+                        match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, None) {
+                            CommandOutcome::Continue => {}
+                            CommandOutcome::Exit => {
                                 exit_flag.store(true, Ordering::Relaxed);
-                                let msg = AudioMessage::EndOfStream;
-                                channel.send(msg).unwrap();
-                                status_channel_clone.send(StatusMessage::CaptureDone).unwrap();
+                                send_capture_done(&channel, &status_channel_clone);
                                 break;
                             }
-                            Ok(CommandMessage::SetSpeed { speed }) => {
-                                rate_adjust = speed;
-                                debug!("Requested to adjust capture speed to {speed}");
-                                if let Some(resampl) = &mut resampler {
-                                    if async_src {
-                                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
-                                            debug!("Failed to set resampling speed to {}", speed);
-                                        }
-                                    } else {
-                                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
-                                    }
-                                }
-                            }
-                            Err(crossbeam_channel::TryRecvError::Empty) => {}
-                            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                                error!("Command channel was closed");
-                                break;
-                            }
-                        };
+                            CommandOutcome::Disconnected => break,
+                        }
 
                         // Calculate needed bytes for resampler or direct output
                         let capture_bytes = nbr_capture_bytes(
