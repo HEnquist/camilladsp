@@ -1718,20 +1718,18 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             let sleep_duration = std::time::Duration::from_micros(
                                 (1_000_000 * chunksize / samplerate / 2) as u64
                             );
-                            let max_retries = 8;
+                            let max_retries = 16;
                             for _ in 0..max_retries {
                                 if device_producer.vacant_len() >= bytes_to_write {
                                     break;
                                 }
                                 std::thread::sleep(sleep_duration);
                             }
-                            let pushed_bytes =
+                            if device_producer.vacant_len() >= bytes_to_write {
                                 device_producer.push_slice(&buf[0..bytes_to_write]);
-                            if pushed_bytes < bytes_to_write {
+                            } else {
                                 debug!(
-                                    "Playback ring buffer is full, dropped {} out of {} bytes.",
-                                    bytes_to_write - pushed_bytes,
-                                    bytes_to_write
+                                    "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes",
                                 );
                             }
                         }

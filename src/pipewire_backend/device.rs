@@ -635,28 +635,29 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                 let sleep_duration = std::time::Duration::from_micros(
                                     (1_000_000 * chunksize / samplerate / 2) as u64
                                 );
-                                let max_retries = 8;
+                                let max_retries = 16;
                                 for _ in 0..max_retries {
                                     if rb_producer.vacant_len() >= bytes_to_write {
                                         break;
                                     }
                                     std::thread::sleep(sleep_duration);
                                 }
-                                let pushed = rb_producer.push_slice(&raw_buffer[..bytes_to_write]);
-                                if pushed < bytes_to_write {
+                                if rb_producer.vacant_len() < bytes_to_write {
                                     trace!(
-                                       "Playback ring buffer full, dropped {} bytes",
-                                       bytes_to_write - pushed
+                                       "Playback ring buffer full, dropped chunk of {} bytes",
+                                       bytes_to_write
                                     );
                                     if running {
                                         warn!("Playback ring buffer full, dropping audio data");
                                         running = false;
                                     }
                                 }
-                                else if !running {
-                                    running = true;
-                                    debug!("PipeWire playback running")
-
+                                else {
+                                    rb_producer.push_slice(&raw_buffer[..bytes_to_write]);
+                                    if !running {
+                                        running = true;
+                                        debug!("PipeWire playback running")
+                                    }
                                 }
                             }
                             Ok(AudioMessage::Pause) => {
