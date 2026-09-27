@@ -671,8 +671,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             Err(err) => {
                                 error!("Message channel error: {}", err);
                                 status_channel_clone
-                                    .send(StatusMessage::PlaybackDone)
-                                    .unwrap();
+                                    .send(StatusMessage::PlaybackError(err.to_string()))
+                                    .unwrap_or(());
                                 break;
                             }
                         }
