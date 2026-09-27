@@ -401,7 +401,8 @@ pub(crate) enum WsCommand {
     /// Get the current adjustment factor applied to the asynchronous resampler.
     GetRateAdjust,
 
-    /// Get the number of samples that have been clipped since the config was loaded.
+    /// Get the number of samples that have been clipped since start, or since the
+    /// counter was last reset. Loading a new config does not reset it.
     GetClippedSamples,
 
     /// Reset the clipped-samples counter to zero.
@@ -993,7 +994,7 @@ pub(crate) enum WsReply {
     GetClippedSamples {
         #[serde(flatten)]
         result: WsResult,
-        /// Number of clipped samples since the config was loaded.
+        /// Number of clipped samples since start or the last reset.
         value: usize,
     },
     ResetClippedSamples {

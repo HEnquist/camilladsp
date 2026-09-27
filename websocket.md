@@ -216,9 +216,11 @@ Returns: `integer (≥ 0)` — Playback device buffer fill level in frames; 0 if
 
 #### `GetClippedSamples`
 
-Get the number of samples that have been clipped since the config was loaded.
+Get the number of samples that have been clipped since CamillaDSP was started,
+or since the counter was last reset with `ResetClippedSamples`.
+Loading a new config does not reset it.
 
-Returns: `integer (≥ 0)` — Number of clipped samples since the config was loaded.
+Returns: `integer (≥ 0)` — Number of clipped samples since start or the last reset.
 
 #### `ResetClippedSamples`
 
