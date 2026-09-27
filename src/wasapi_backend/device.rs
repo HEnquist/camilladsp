@@ -23,7 +23,7 @@ use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::PIRateController;
-use crate::utils::ringbuffer::append_from_ringbuffer;
+use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
@@ -1005,7 +1005,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     ];
 
                 debug!("Playback device starts now!");
-                let mut ring_full = false;
+                let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                 loop {
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok(_)) => {}
@@ -1065,34 +1065,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 conversion_result.1,
                                 &clipped_counter,
                             );
-                            // Wait for enough space in the ring buffer before pushing.
-                            // This is essential when the capture side is not rate-limited
-                            // (e.g. signal generator): without this wait the data would
-                            // arrive far faster than the playback callback can drain it
-                            // and most of it would be dropped.  The sleep duration is
-                            // based on the time it takes to play back one chunksize.
                             let bytes_to_write = conversion_result.0;
-                            let sleep_duration = std::time::Duration::from_micros(
-                                (1_000_000 * chunksize / samplerate / 2) as u64
-                            );
-                            let max_retries = 16;
-                            for _ in 0..max_retries {
-                                if device_producer.vacant_len() >= bytes_to_write {
-                                    break;
-                                }
-                                std::thread::sleep(sleep_duration);
-                            }
-                            if device_producer.vacant_len() >= bytes_to_write {
-                                device_producer.push_slice(&buf[0..bytes_to_write]);
-                                ring_full = false;
-                            } else {
-                                if !ring_full {
-                                    warn!("Playback ring buffer is full, dropping chunks");
-                                    ring_full = true;
-                                }
-                                trace!(
-                                    "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes",
-                                );
+                            if !feeder.push(&mut device_producer, &buf[0..bytes_to_write]) {
                                 continue;
                             }
                             match tx_dev.send(PlaybackDeviceMessage::Data(bytes_to_write)) {

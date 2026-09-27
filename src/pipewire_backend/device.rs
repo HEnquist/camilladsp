@@ -15,7 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::ToF32;
-use crate::utils::ringbuffer::fill_playback_output_from_ringbuffer;
+use crate::utils::ringbuffer::{RingBufferFeeder, fill_playback_output_from_ringbuffer};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -582,7 +582,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let mut rate_adjust_value = 1.0;
                     let mut conversion_result;
 
-                    let mut ring_full = false;
+                    let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
@@ -637,35 +637,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     &clipped_counter,
                                 );
 
-                                // Wait for enough space in the ring buffer before pushing.
-                                // This is essential when the capture side is not rate-limited
-                                // (e.g. signal generator): without this wait the data would
-                                // arrive far faster than the playback callback can drain it
-                                // and most of it would be dropped.  The sleep duration is
-                                // based on the time it takes to play back one chunksize.
-                                let bytes_to_write = conversion_result.0;
-                                let sleep_duration = std::time::Duration::from_micros(
-                                    (1_000_000 * chunksize / samplerate / 2) as u64
-                                );
-                                let max_retries = 16;
-                                for _ in 0..max_retries {
-                                    if rb_producer.vacant_len() >= bytes_to_write {
-                                        break;
-                                    }
-                                    std::thread::sleep(sleep_duration);
-                                }
-                                if rb_producer.vacant_len() >= bytes_to_write {
-                                    rb_producer.push_slice(&raw_buffer[..bytes_to_write]);
-                                    ring_full = false;
-                                } else {
-                                    if !ring_full {
-                                        warn!("Playback ring buffer is full, dropping chunks");
-                                        ring_full = true;
-                                    }
-                                    trace!(
-                                        "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes"
-                                    );
-                                }
+                                feeder.push(&mut rb_producer, &raw_buffer[..conversion_result.0]);
                             }
                             Ok(AudioMessage::Pause) => {
                                 trace!("Pause message received");

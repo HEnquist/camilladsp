@@ -21,6 +21,7 @@ use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -39,7 +40,7 @@ use std::fmt::Debug;
 use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::CommandMessage;
 use crate::ProcessingState;
@@ -1184,7 +1185,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period as f64,
                             target_level,
                         );
-                        let mut ring_full = false;
+                        let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
 
                         loop {
                             match channel.recv() {
@@ -1237,27 +1238,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     );
 
                                     let bytes_to_write = conversion_result.0;
-                                    let sleep_duration = Duration::from_micros(
-                                        (1_000_000 * chunksize / samplerate / 2) as u64,
-                                    );
-                                    let max_retries = 16;
-                                    for _ in 0..max_retries {
-                                        if device_producer.vacant_len() >= bytes_to_write {
-                                            break;
-                                        }
-                                        std::thread::sleep(sleep_duration);
-                                    }
-                                    if device_producer.vacant_len() >= bytes_to_write {
-                                        device_producer.push_slice(&buf[0..bytes_to_write]);
-                                        ring_full = false;
-                                    } else {
-                                        if !ring_full {
-                                            warn!("Playback ring buffer is full, dropping chunks");
-                                            ring_full = true;
-                                        }
-                                        trace!(
-                                            "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes"
-                                        );
+                                    if !feeder.push(&mut device_producer, &buf[0..bytes_to_write])
+                                    {
                                         continue;
                                     }
                                     if !send_playback_device_message(
