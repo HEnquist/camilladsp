@@ -485,7 +485,7 @@ fn main_process() -> i32 {
 
     let mut initial_volumes = if let Some(s) = &state {
         debug!("Using statefile for initial volume");
-        s.volume
+        s.volumes()
     } else {
         debug!("Using default initial volume");
         [
@@ -584,15 +584,15 @@ fn main_process() -> i32 {
 
     // All state variables are prepared, save to the statefile if needed
     if let Some(fname) = &statefilename {
-        let state_to_save = statefile::State {
-            config_path: configname.clone(),
-            volume: initial_volumes,
-            mute: initial_mutes,
-        };
-        if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
-            statefile::save_state_to_file(fname, &state_to_save);
-        } else {
-            debug!("No change to state from {fname}, not overwriting.");
+        match statefile::State::new(configname.clone(), initial_mutes, initial_volumes) {
+            Ok(state_to_save) => {
+                if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
+                    statefile::save_state_to_file(fname, &state_to_save);
+                } else {
+                    debug!("No change to state from {fname}, not overwriting.");
+                }
+            }
+            Err(err) => error!("Not saving state to '{fname}', error: {err}"),
         }
     }
 
