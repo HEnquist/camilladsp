@@ -577,7 +577,7 @@ fn playback_loop(
                         if starting {
                             starting = false;
                         } else {
-                            warn!("Restarting playback after buffer underrun.");
+                            info!("Restarting playback after buffer underrun.");
                         }
                         debug!(
                             "Playback, inserting {target_level} silent frames to reach target delay."

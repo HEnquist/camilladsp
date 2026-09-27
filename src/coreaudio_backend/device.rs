@@ -605,7 +605,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                         starting = false;
                                     }
                                     else {
-                                        warn!("Restarting playback after buffer underrun.");
+                                        info!("Restarting playback after buffer underrun.");
                                     }
                                     debug!("Inserting {target_level} silent frames to reach target delay.");
                                     sample_queue.resize(sample_queue.len() + blockalign * target_level, 0);

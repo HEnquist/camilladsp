@@ -117,6 +117,8 @@ struct AsioPlaybackContext {
     buffer_fill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
     /// Whether the stream is currently running (receiving data).
     running: bool,
+    /// Whether the stream stopped because of an underrun, as opposed to not having started.
+    interrupted: bool,
 }
 
 /// Context passed to the ASIO capture callback via a global AtomicPtr.
@@ -306,18 +308,24 @@ pub unsafe extern "system" fn buffer_switch_playback(buffer_index: c_long, _dire
         let available = ctx.device_consumer.occupied_len();
         if available == 0 {
             // No data — fill remainder with silence
-            warn!(
+            if ctx.running {
+                warn!("Playback interrupted, no data available.");
+                ctx.running = false;
+                ctx.interrupted = true;
+            }
+            trace!(
                 "ASIO playback callback: underrun, filled {} bytes of silence.",
                 needed_bytes - ctx.sample_queue.len()
             );
             ctx.sample_queue.resize(needed_bytes, 0);
-            if ctx.running {
-                ctx.running = false;
-            }
             break;
         }
         if !ctx.running {
             ctx.running = true;
+            if ctx.interrupted {
+                info!("Restarting playback after buffer underrun.");
+                ctx.interrupted = false;
+            }
             // Prefill at least one full callback's worth of frames so the loop
             // below doesn't immediately re-drain the ring buffer to empty and
             // re-trigger an underrun when target_level is smaller than the
@@ -1521,6 +1529,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
+                        interrupted: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -1592,6 +1601,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
+                        interrupted: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);

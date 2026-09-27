@@ -380,6 +380,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 // Set up stream listener
                 let rb_consumer_clone = rb_consumer.clone();
                 let mut logged_playback_quantum = false;
+                let mut running = false;
+                let mut interrupted = false;
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -448,13 +450,22 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             &mut out_slice[..callback_bytes],
                         );
 
-                        if available_bytes == 0 {
-                            warn!("PipeWire playback: buffer empty, outputting silence");
-                        } else if bytes_from_rb < callback_bytes {
-                            debug!(
-                                "PipeWire playback: partial underrun, had {} of {} bytes",
-                                bytes_from_rb, callback_bytes
+                        if bytes_from_rb < callback_bytes {
+                            if running {
+                                warn!("Playback interrupted, no data available.");
+                                running = false;
+                                interrupted = true;
+                            }
+                            trace!(
+                                "PipeWire playback: underrun, had {} of {} bytes, {} available",
+                                bytes_from_rb, callback_bytes, available_bytes
                             );
+                        } else if !running {
+                            running = true;
+                            if interrupted {
+                                info!("Restarting playback after buffer underrun.");
+                                interrupted = false;
+                            }
                         }
 
                         // CRITICAL: Tell PipeWire how much data we wrote
