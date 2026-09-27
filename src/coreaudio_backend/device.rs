@@ -559,7 +559,6 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let blockalign = 4 * channels;
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
-                let mut rate_adjust_value = 1.0;
                 trace!("Build output stream.");
                 let mut conversion_result;
                 let mut sample_queue: VecDeque<u8> =
@@ -728,28 +727,16 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 && let Some(av_delay) = buffer_avg.average()
                             {
                                 let speed = rate_controller.next(av_delay);
-                                let changed = (speed - rate_adjust_value).abs() > 0.000_001;
-
                                 timer.restart();
                                 buffer_avg.restart();
-                                if changed {
-                                    debug!(
-                                        "Current buffer level {:.1}, set capture rate to {:.4}%.",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                    rate_adjust_value = speed;
-                                }
-                                else {
-                                    debug!(
-                                        "Current buffer level {:.1}, leaving capture rate at {:.4}%.",
-                                        av_delay,
-                                        100.0 * rate_adjust_value
-                                    );
-                                }
+                                debug!(
+                                    "Current buffer level {:.1}, set capture rate to {:.4}%.",
+                                    av_delay,
+                                    100.0 * speed
+                                );
+                                status_channel
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
                                 if let Some(mut playback_status) = playback_status.try_write() {
                                     playback_status.buffer_level = av_delay as usize;
                                 } else {
