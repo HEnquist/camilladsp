@@ -230,6 +230,26 @@ pub fn new_resampler(
     }
 }
 
+/// The longest capture chunk the devices can deliver: the most input the
+/// configured resampler can ask for, or the chunksize when there is none.
+///
+/// The number only exists once a resampler is built, so this builds one and
+/// throws it away. Meant for a control thread, never an audio thread.
+pub fn max_capture_frames(devices: &config::Devices) -> usize {
+    let chunksize = devices.chunksize();
+    new_resampler(
+        &devices.resampler,
+        devices.capture.channels(),
+        devices.samplerate(),
+        devices.capture_samplerate(),
+        chunksize,
+        Arc::new(ProcessingParameters::default()),
+    )
+    .map_or(chunksize, |resampler| {
+        resampler.resampler.input_frames_max().max(chunksize)
+    })
+}
+
 impl ChunkResampler {
     /// Adjust the resample ratio relative to the original ratio.
     ///

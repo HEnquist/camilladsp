@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use crate::engine_pipeline::{EnginePipeline, start_pipeline};
 use crate::engine_process_signals::launch_process_signals_thread;
+use crate::utils::stash;
 use crate::websocket_server;
 use crate::{
     CommandMessage, ControllerMessage, ExitState, ProcessingState, SHUTDOWN_REQUESTED,
@@ -124,6 +125,11 @@ pub fn run(
                             config::ConfigChange::Pipeline
                             | config::ConfigChange::MixerParameters
                             | config::ConfigChange::FilterParameters { .. } => {
+                                // A new mixer can widen the pipeline, so top up the
+                                // stash before the processing thread gets to it.
+                                if !matches!(comp, config::ConfigChange::FilterParameters { .. }) {
+                                    stash::prefill_for_config(&new_conf);
+                                }
                                 // Transforming the coefficients happens here, so a
                                 // config whose files went missing since it was
                                 // validated fails before anything is changed, and

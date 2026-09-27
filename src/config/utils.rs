@@ -884,6 +884,29 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     Ok(impulses)
 }
 
+/// The largest number of channels anywhere in the pipeline: the devices and
+/// both sides of every mixer that is not bypassed.
+pub fn max_channels(conf: &Configuration) -> usize {
+    let mut max_channels = conf
+        .devices
+        .capture
+        .channels()
+        .max(conf.devices.playback.channels());
+    if let (Some(pipeline), Some(mixers)) = (&conf.pipeline, &conf.mixers) {
+        for step in pipeline {
+            if let PipelineStep::Mixer(step) = step
+                && !step.is_bypassed()
+                && let Some(mixer) = mixers.get(&step.name)
+            {
+                max_channels = max_channels
+                    .max(mixer.channels.input())
+                    .max(mixer.channels.output());
+            }
+        }
+    }
+    max_channels
+}
+
 /// Get a vector telling which channels are actually used in the pipeline
 pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
     if let Some(pipeline) = &conf.pipeline {
@@ -931,7 +954,7 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 
 #[cfg(test)]
 mod tests {
-    use super::{check_all_finite, validate_resampler};
+    use super::{check_all_finite, max_channels, validate_resampler};
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
 
     fn free_sinc(
@@ -1107,5 +1130,37 @@ devices:
         assert!(validate_resampler(&free_sinc(64, cubic, 256, Some(1.5))).is_err());
         // A non-finite cutoff cannot reach here at all, `FiniteF32` cannot hold one. The
         // parsing side of that is covered by `non_finite_rejected_while_parsing`.
+    }
+
+    fn with_mixers(bypassed: bool) -> String {
+        format!(
+            "{BASE}mixers:
+  wide:
+    channels: {{in: 2, out: 6}}
+    mapping:
+      - dest: 0
+        sources: [{{channel: 0}}]
+  narrow:
+    channels: {{in: 6, out: 2}}
+    mapping:
+      - dest: 0
+        sources: [{{channel: 0}}]
+pipeline:
+  - type: Mixer
+    name: wide
+    bypassed: {bypassed}
+  - type: Mixer
+    name: narrow
+    bypassed: {bypassed}
+"
+        )
+    }
+
+    #[test]
+    fn max_channels_includes_mixers() {
+        assert_eq!(max_channels(&parse(BASE).unwrap()), 2);
+        assert_eq!(max_channels(&parse(&with_mixers(false)).unwrap()), 6);
+        // Bypassed mixers do not widen anything.
+        assert_eq!(max_channels(&parse(&with_mixers(true)).unwrap()), 2);
     }
 }

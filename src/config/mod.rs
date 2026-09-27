@@ -1800,6 +1800,7 @@ pub use self::utils::check_all_finite;
 pub use self::utils::config_diff;
 pub use self::utils::load_config;
 pub use self::utils::load_validate_config;
+pub use self::utils::max_channels;
 pub use self::utils::playback_channel_labels;
 pub use self::utils::used_capture_channels;
 pub use self::utils::validate_config;

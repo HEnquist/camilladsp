@@ -19,6 +19,8 @@ use std::sync::LazyLock;
 
 use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
+use crate::config;
+use crate::utils::resampling::max_capture_frames;
 
 const MAX_STASH_SIZE: usize = 1024;
 const MAX_CONTAINER_STASH_SIZE: usize = 128;
@@ -103,6 +105,83 @@ fn recycle_container_to_queue(
     }
 }
 
+/// A vector of `frames` zeros, with every element written. `vec![0.0; n]`
+/// gets zeroed memory from the allocator, which the OS may only map when it is
+/// first written, and that write would then happen on an audio thread.
+fn touched_vec(frames: usize) -> Vec<CamillaFloat> {
+    let mut vector = Vec::with_capacity(frames);
+    vector.resize(frames, 0.0);
+    vector
+}
+
+fn prefill_queues(
+    container_queue: &ArrayQueue<Vec<Vec<CamillaFloat>>>,
+    vector_queue: &ArrayQueue<Vec<CamillaFloat>>,
+    frames: usize,
+    channels: usize,
+    chunks: usize,
+) {
+    // Grow what is already stashed. Each one is taken out and put back once,
+    // so the audio threads can keep borrowing and returning meanwhile.
+    for _ in 0..vector_queue.len() {
+        if let Some(mut vector) = vector_queue.pop() {
+            if vector.capacity() < frames {
+                vector.resize(frames, 0.0);
+            }
+            let _ = vector_queue.push(vector);
+        }
+    }
+    for _ in 0..container_queue.len() {
+        if let Some(mut container) = container_queue.pop() {
+            container.reserve_exact(channels);
+            let _ = container_queue.push(container);
+        }
+    }
+
+    let vectors = (chunks * channels).min(vector_queue.capacity());
+    while vector_queue.len() < vectors {
+        if vector_queue.push(touched_vec(frames)).is_err() {
+            break;
+        }
+    }
+    let containers = chunks.min(container_queue.capacity());
+    while container_queue.len() < containers {
+        if container_queue.push(Vec::with_capacity(channels)).is_err() {
+            break;
+        }
+    }
+}
+
+/// Fill the stash so that the audio threads never have to allocate. Stashed
+/// vectors are grown to hold `frames`, and more are added until there are
+/// enough for `chunks` chunks of `channels` channels.
+///
+/// Call it from a control thread before the devices start, and again when a
+/// config change can widen the pipeline. Without it the stash still reaches
+/// the same state by itself, but by allocating on the audio threads during
+/// the first chunks, which is the worst moment for it.
+pub fn prefill(frames: usize, channels: usize, chunks: usize) {
+    debug!("Prefill the stash for {chunks} chunks of {channels} channels and {frames} frames");
+    prefill_queues(&CONTAINERSTASH, &BUFFERSTASH, frames, channels, chunks);
+}
+
+/// Chunks in use beyond those waiting in the playback queue. The capture queue
+/// normally stays close to empty, so allow two there. The rest are being worked
+/// on: one being captured, the old and new while resampling, the old and new
+/// while mixing, and one being played. Over-estimating only costs memory.
+const CHUNKS_OUTSIDE_QUEUE: usize = 6;
+
+/// [`prefill`] with the sizes `conf` needs: vectors long enough for either
+/// side of the resampler, and enough of them for the widest part of the
+/// pipeline.
+pub fn prefill_for_config(conf: &config::Configuration) {
+    prefill(
+        max_capture_frames(&conf.devices),
+        config::max_channels(conf),
+        conf.devices.queuelimit() + CHUNKS_OUTSIDE_QUEUE,
+    );
+}
+
 /// Borrow a zeroed `Vec<CamillaFloat>` of the given length from the stash, allocating if empty.
 pub fn vec_from_stash(capacity: usize) -> Vec<CamillaFloat> {
     vec_from_queue(&BUFFERSTASH, capacity)
@@ -158,6 +237,37 @@ mod tests {
         let second = vec_from_queue(&vector_queue, 1);
         assert_eq!(first, vec![0.0, 0.0]);
         assert_eq!(second, vec![0.0]);
+    }
+
+    #[test]
+    fn prefill_grows_stashed_and_adds_missing() {
+        let vector_queue = ArrayQueue::new(16);
+        let container_queue = ArrayQueue::new(4);
+        recycle_vec_to_queue(&vector_queue, vec![1.0; 10]);
+        container_queue.push(Vec::with_capacity(1)).unwrap();
+
+        prefill_queues(&container_queue, &vector_queue, 100, 3, 2);
+
+        assert_eq!(vector_queue.len(), 6);
+        assert_eq!(container_queue.len(), 2);
+        while let Some(vector) = vector_queue.pop() {
+            assert!(vector.capacity() >= 100);
+            assert!(vector.iter().all(|v| *v == 0.0));
+        }
+        while let Some(container) = container_queue.pop() {
+            assert!(container.capacity() >= 3);
+        }
+    }
+
+    #[test]
+    fn prefill_stops_at_the_queue_size() {
+        let vector_queue = ArrayQueue::new(4);
+        let container_queue = ArrayQueue::new(1);
+
+        prefill_queues(&container_queue, &vector_queue, 8, 3, 2);
+
+        assert_eq!(vector_queue.len(), 4);
+        assert_eq!(container_queue.len(), 1);
     }
 
     #[test]
