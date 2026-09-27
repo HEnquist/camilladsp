@@ -17,7 +17,7 @@
 use crate::ToF32;
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
-use crate::config::{AlsaSampleFormat, Resampler};
+use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
@@ -26,7 +26,7 @@ use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
 use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
-use alsa::hctl::HCtl;
+use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
 use alsa::{Direction, ValueOr};
@@ -295,6 +295,28 @@ fn apply_playback_write_result(
     }
 }
 
+/// Open the control interface of the card that `pcmdevice` belongs to.
+fn open_card_hctl(pcmdevice: &alsa::PCM) -> Option<HCtl> {
+    let card = pcmdevice.info().ok()?.get_card();
+    if card < 0 {
+        return None;
+    }
+    let h = HCtl::new(&format!("hw:{card}"), false).ok()?;
+    h.load().unwrap_or_default();
+    Some(h)
+}
+
+/// The playback pitch control of a UAC2 gadget, if `pcmdevice` has one.
+fn find_playback_pitch<'a>(h: &'a HCtl, pcmdevice: &alsa::PCM) -> Option<Elem<'a>> {
+    let pcminfo = pcmdevice.info().ok()?;
+    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
+    elid_uac2_gadget.set_device(pcminfo.get_device());
+    elid_uac2_gadget.set_subdevice(pcminfo.get_subdevice());
+    let name = CString::new("Playback Pitch 1000000").ok()?;
+    elid_uac2_gadget.set_name(&name);
+    h.find_elem(&elid_uac2_gadget)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_playback_inner_loop<C>(
     rx_play: &crossbeam_channel::Receiver<PlaybackDeviceMessage>,
@@ -308,6 +330,7 @@ fn run_playback_inner_loop<C>(
     chunksize: usize,
     channels: usize,
     bytes_per_sample: usize,
+    pitch_elem: Option<Elem>,
 ) where
     C: Consumer<Item = u8> + Observer,
 {
@@ -325,26 +348,6 @@ fn run_playback_inner_loop<C>(
     let mut buffer = vec![0u8; 4 * chunksize * channels * bytes_per_sample];
     let mut sample_queue_bytes = 0usize;
     let mut write_remainder: Vec<u8> = Vec::with_capacity(chunksize * channels * bytes_per_sample);
-    let mut _pitch_hctl: Option<HCtl> = None;
-    let mut pitch_elem = None;
-    if let Ok(pcminfo) = pcmdevice.info() {
-        let card = pcminfo.get_card();
-        if card >= 0 {
-            if let Ok(h) = HCtl::new(&format!("hw:{card}"), false) {
-                h.load().unwrap_or_default();
-                _pitch_hctl = Some(h);
-            }
-            if let Some(ref h) = _pitch_hctl {
-                let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-                elid_uac2_gadget.set_device(pcminfo.get_device());
-                elid_uac2_gadget.set_subdevice(pcminfo.get_subdevice());
-                if let Ok(name) = CString::new("Playback Pitch 1000000") {
-                    elid_uac2_gadget.set_name(&name);
-                    pitch_elem = h.find_elem(&elid_uac2_gadget);
-                }
-            }
-        }
-    }
 
     // Pre-allocate an ElemValue for pitch control writes, avoiding
     // snd_ctl_elem_value_malloc on the RT hot path.
@@ -1004,10 +1007,10 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
     }
 }
 
-/// Sent by an inner device thread once the device is open. Playback reports the negotiated
-/// format, capture also reports whether the device has a pitch control for rate adjust.
-enum AlsaThreadState<T> {
-    Ready(T),
+/// Sent by an inner device thread once the device is open, with the negotiated sample format
+/// and whether the device has a pitch control for rate adjust.
+enum AlsaThreadState {
+    Ready(BinarySampleFormat, bool),
     Error(String),
 }
 
@@ -1084,8 +1087,17 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         ) {
                             Ok((pcmdevice, sample_format)) => {
                                 let binary_format = sample_format.to_binary_format();
+                                // Looked up before reporting ready, so the outer thread knows
+                                // whether rate adjust goes to the device or to capture.
+                                let pitch_hctl = open_card_hctl(&pcmdevice);
+                                let pitch_elem = pitch_hctl
+                                    .as_ref()
+                                    .and_then(|h| find_playback_pitch(h, &pcmdevice));
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(binary_format))
+                                    .send(AlsaThreadState::Ready(
+                                        binary_format,
+                                        pitch_elem.is_some(),
+                                    ))
                                     .unwrap_or(());
 
                                 let io = pcmdevice.io_bytes();
@@ -1117,6 +1129,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     chunksize,
                                     channels,
                                     binary_format.bytes_per_sample(),
+                                    pitch_elem,
                                 );
 
                                 if let Some(h) = thread_handle {
@@ -1144,7 +1157,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format)) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
                         status_channel
                             .send(StatusMessage::PlaybackReady)
                             .unwrap_or(());
@@ -1212,13 +1225,16 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             "PB: buffer level {:.1}, set capture rate to {:.6}",
                                             av_delay, speed
                                         );
-                                        status_channel
-                                            .send(StatusMessage::SetSpeed(speed))
-                                            .unwrap_or(());
-                                        let _ = send_playback_device_message(
-                                            &tx_dev,
-                                            PlaybackDeviceMessage::SetPitch(speed),
-                                        );
+                                        if pitch_supported {
+                                            let _ = send_playback_device_message(
+                                                &tx_dev,
+                                                PlaybackDeviceMessage::SetPitch(speed),
+                                            );
+                                        } else {
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap_or(());
+                                        }
                                         if let Some(mut ps) = playback_status.try_write() {
                                             ps.buffer_level = av_delay as usize;
                                         }
@@ -1442,7 +1458,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     element_loopback.is_some() || element_uac2_gadget.is_some();
 
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready((binary_format, pitch_supported)))
+                                    .send(AlsaThreadState::Ready(binary_format, pitch_supported))
                                     .unwrap_or(());
                                 if rx_start_inner.recv().is_err() {
                                     return;
@@ -1674,7 +1690,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready((binary_format, pitch_supported))) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
                         let bytes_per_sample = binary_format.bytes_per_sample();
                         let blockalign = bytes_per_sample * channels;
 
