@@ -896,6 +896,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 };
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
+                let clipped_counter = playback_status.read().clipped_samples.clone();
 
                 let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
 
@@ -1053,6 +1054,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 &mut rms_values,
                                 &mut peak_values,
                                 conversion_result.1,
+                                &clipped_counter,
                             );
                             // Wait for enough space in the ring buffer before pushing.
                             // This is essential when the capture side is not rate-limited

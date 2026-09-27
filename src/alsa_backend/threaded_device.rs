@@ -1178,6 +1178,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         };
                         let mut rms_values = Vec::new();
                         let mut peak_values = Vec::new();
+                        let clipped_counter = playback_status.read().clipped_samples.clone();
                         let mut buf =
                             vec![0u8; channels * chunksize * binary_format.bytes_per_sample()];
 
@@ -1238,6 +1239,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         &mut rms_values,
                                         &mut peak_values,
                                         conversion_result.1,
+                                        &clipped_counter,
                                     );
 
                                     let bytes_to_write = conversion_result.0;

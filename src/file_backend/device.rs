@@ -254,6 +254,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         };
                         let mut rms_values = Vec::new();
                         let mut peak_values = Vec::new();
+                        let clipped_counter = playback_status.read().clipped_samples.clone();
                         barrier.wait();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
@@ -293,6 +294,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         &mut rms_values,
                                         &mut peak_values,
                                         nbr_clipped,
+                                        &clipped_counter,
                                     );
                                 }
                                 Ok(AudioMessage::Pause) => {

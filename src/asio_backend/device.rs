@@ -1391,6 +1391,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 };
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
+                let clipped_counter = playback_status.read().clipped_samples.clone();
 
                 let mut rate_controller = PIRateController::new_with_default_gains(
                     samplerate,
@@ -1704,6 +1705,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 &mut rms_values,
                                 &mut peak_values,
                                 conversion_result.1,
+                                &clipped_counter,
                             );
 
                             // Wait for enough space in the ring buffer before pushing.

@@ -505,6 +505,7 @@ fn playback_loop_bytes(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
+    let clipped_counter = params.playback_status.read().clipped_samples.clone();
     let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
     let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
@@ -655,6 +656,7 @@ fn playback_loop_bytes(
                         &mut rms_values,
                         &mut peak_values,
                         conversion_result.1,
+                        &clipped_counter,
                     );
                     if let Some(avail) = avail_at_chunk_recvd {
                         let delay = buf_manager.current_delay(avail);

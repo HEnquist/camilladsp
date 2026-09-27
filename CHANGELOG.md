@@ -64,6 +64,9 @@ Bugfixes:
   would scale a small `chunksize` down to zero now keeps one frame instead.
 - CoreAudio and WASAPI playback copy the audio data as whole slices instead of one byte at a time,
   which lowers the CPU load of the real-time playback thread.
+- The clipped samples counter no longer loses counts. The clipped samples of a chunk were dropped
+  whenever the playback status was busy, for example while a websocket client read it, so the
+  counter read low on a loaded machine, which is when clipping is most likely.
 
 Changes:
 - `Volume` filters in the pipeline that use the same fader must now have the same `ramp_time_ms`

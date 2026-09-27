@@ -1059,12 +1059,12 @@ fn handle_command(
             let pbstat = shared_data_inst.playback_status.read();
             Some(WsReply::GetClippedSamples {
                 result: WsResult::Ok,
-                value: pbstat.clipped_samples,
+                value: pbstat.clipped_samples.load(Ordering::Relaxed),
             })
         }
         WsCommand::ResetClippedSamples => {
-            let mut pbstat = shared_data_inst.playback_status.write();
-            pbstat.clipped_samples = 0;
+            let pbstat = shared_data_inst.playback_status.read();
+            pbstat.clipped_samples.store(0, Ordering::Relaxed);
             Some(WsReply::ResetClippedSamples {
                 result: WsResult::Ok,
             })

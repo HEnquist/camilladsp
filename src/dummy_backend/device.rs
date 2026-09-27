@@ -449,6 +449,7 @@ fn playback_loop(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
+    let clipped_counter = params.playback_status.read().clipped_samples.clone();
     let max_deficit = max_deficit_frames(params.samplerate as f64, params.chunksize as f64);
     // The target level is where the buffer should sit, not how big it is, so the device
     // has room above it. Without that headroom the write below blocks as soon as the
@@ -533,6 +534,7 @@ fn playback_loop(
                     &mut rms_values,
                     &mut peak_values,
                     nbr_clipped,
+                    &clipped_counter,
                 );
                 // What is waiting behind this chunk is as much a part of the delay
                 // as what is already in the buffer, so it counts towards the level, as

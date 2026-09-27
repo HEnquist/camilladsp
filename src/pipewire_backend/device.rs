@@ -556,6 +556,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     };
                     let mut rms_values = Vec::new();
                     let mut peak_values = Vec::new();
+                    let clipped_counter = playback_status_clone.read().clipped_samples.clone();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
                     // Buffer level tracking with time-based estimation
@@ -621,6 +622,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     &mut rms_values,
                                     &mut peak_values,
                                     conversion_result.1,
+                                    &clipped_counter,
                                 );
 
                                 // Wait for enough space in the ring buffer before pushing.

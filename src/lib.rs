@@ -40,7 +40,7 @@ use std::error;
 use std::fmt;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 
 /// Global flag set to `true` when a graceful shutdown has been requested (e.g. by SIGTERM).
@@ -343,8 +343,11 @@ pub struct CaptureStatus {
 pub struct PlaybackStatus {
     /// How often (in milliseconds) the WebSocket server pushes status updates.
     pub update_interval: usize,
-    /// Cumulative number of clipped samples since the last config load.
-    pub clipped_samples: usize,
+    /// Cumulative number of clipped samples since the counter was last reset.
+    ///
+    /// Kept outside the lock, so that a playback thread never has to drop a
+    /// count when the lock is busy. Playback threads keep a clone of the `Arc`.
+    pub clipped_samples: Arc<AtomicUsize>,
     /// Current playback device buffer fill level in frames.
     pub buffer_level: usize,
     /// Rolling history of per-channel RMS levels (squared values).
@@ -423,19 +426,26 @@ pub fn set_stop_reason(processing_status: &Arc<RwLock<ProcessingStatus>>, stop_r
     update_stop_reason(&mut processing_status, stop_reason);
 }
 
+/// Record the levels of a played chunk, and add its clipped samples to
+/// `clipped_counter`, the [`PlaybackStatus::clipped_samples`] counter.
+///
+/// The levels are skipped when the status lock is busy, since one missing
+/// record is invisible. The clip count is a running total that must not lose
+/// anything, so it is added outside the lock.
 pub(crate) fn update_playback_signal_status(
     playback_status: &Arc<RwLock<PlaybackStatus>>,
     chunk_stats: &audiochunk::ChunkStats,
     rms_values: &mut Vec<f32>,
     peak_values: &mut Vec<f32>,
     clipped_samples: usize,
+    clipped_counter: &AtomicUsize,
 ) {
+    if clipped_samples > 0 {
+        clipped_counter.fetch_add(clipped_samples, Ordering::Relaxed);
+    }
     chunk_stats.rms_linear(rms_values);
     chunk_stats.peak_linear(peak_values);
     if let Some(mut playback_status) = playback_status.try_write() {
-        if clipped_samples > 0 {
-            playback_status.clipped_samples += clipped_samples;
-        }
         playback_status.signal_rms.add_record_squared(rms_values);
         playback_status.signal_peak.add_record(peak_values);
         signal_monitor::mark_playback_updated();
@@ -719,7 +729,7 @@ impl Default for PlaybackStatus {
     fn default() -> Self {
         Self {
             buffer_level: 0,
-            clipped_samples: 0,
+            clipped_samples: Arc::new(AtomicUsize::new(0)),
             update_interval: 1000,
             signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
             signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
@@ -902,5 +912,30 @@ pub fn get_device_capabilities(
         #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::get_device_capabilities(device_name, input),
         _ => Err(DeviceError::Other("Unsupported backend".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A websocket reader holding the status lock makes the level records get
+    /// skipped, but must not lose any clipped samples.
+    #[test]
+    fn clipped_samples_counted_while_status_is_locked() {
+        let status = Arc::new(RwLock::new(PlaybackStatus::default()));
+        let counter = status.read().clipped_samples.clone();
+        let chunk = audiochunk::AudioChunk::new(vec![vec![1.0; 4]; 2], 1.0, -1.0, 4, 4);
+        let stats = chunk.stats();
+        let mut rms = Vec::new();
+        let mut peak = Vec::new();
+
+        update_playback_signal_status(&status, &stats, &mut rms, &mut peak, 3, &counter);
+        {
+            let _reader = status.read();
+            update_playback_signal_status(&status, &stats, &mut rms, &mut peak, 5, &counter);
+        }
+
+        assert_eq!(status.read().clipped_samples.load(Ordering::Relaxed), 8);
     }
 }
