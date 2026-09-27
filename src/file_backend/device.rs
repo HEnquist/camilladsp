@@ -393,7 +393,7 @@ fn capture_loop(
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
-    let mut bytes_read = 0;
+    let mut bytes_read;
     let mut bytes_to_capture = chunksize_bytes;
     let mut bytes_to_capture_tmp;
     let mut capture_done: bool;
@@ -599,9 +599,14 @@ fn capture_loop(
             (Err(err), _) => {
                 debug!("Encountered a read error");
                 msg_channels
+                    .audio
+                    .send(AudioMessage::EndOfStream)
+                    .unwrap_or(());
+                msg_channels
                     .status
                     .send(StatusMessage::CaptureError(err.to_string()))
                     .unwrap_or(());
+                break;
             }
         };
         used_channels.copy_to(&mut channel_mask);
