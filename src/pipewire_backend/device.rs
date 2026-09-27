@@ -570,7 +570,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let mut rate_adjust_value = 1.0;
                     let mut conversion_result;
 
-                    let mut running = false;
+                    let mut ring_full = false;
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
@@ -642,22 +642,17 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     }
                                     std::thread::sleep(sleep_duration);
                                 }
-                                if rb_producer.vacant_len() < bytes_to_write {
-                                    trace!(
-                                       "Playback ring buffer full, dropped chunk of {} bytes",
-                                       bytes_to_write
-                                    );
-                                    if running {
-                                        warn!("Playback ring buffer full, dropping audio data");
-                                        running = false;
-                                    }
-                                }
-                                else {
+                                if rb_producer.vacant_len() >= bytes_to_write {
                                     rb_producer.push_slice(&raw_buffer[..bytes_to_write]);
-                                    if !running {
-                                        running = true;
-                                        debug!("PipeWire playback running")
+                                    ring_full = false;
+                                } else {
+                                    if !ring_full {
+                                        warn!("Playback ring buffer is full, dropping chunks");
+                                        ring_full = true;
                                     }
+                                    trace!(
+                                        "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes"
+                                    );
                                 }
                             }
                             Ok(AudioMessage::Pause) => {

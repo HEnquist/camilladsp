@@ -1181,6 +1181,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period as f64,
                             target_level,
                         );
+                        let mut ring_full = false;
 
                         loop {
                             match channel.recv() {
@@ -1245,8 +1246,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     if device_producer.vacant_len() >= bytes_to_write {
                                         device_producer.push_slice(&buf[0..bytes_to_write]);
+                                        ring_full = false;
                                     } else {
-                                        warn!(
+                                        if !ring_full {
+                                            warn!("Playback ring buffer is full, dropping chunks");
+                                            ring_full = true;
+                                        }
+                                        trace!(
                                             "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes"
                                         );
                                         continue;

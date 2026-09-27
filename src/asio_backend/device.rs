@@ -1638,6 +1638,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 debug!("Playback device starts now!");
 
                 let mut conversion_result;
+                let mut ring_full = false;
                 'deviceloop: loop {
                     if take_playback_rate_change_event() {
                         let new_rate = read_current_asio_sample_rate_hz(&devname).unwrap_or(0);
@@ -1727,8 +1728,13 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             }
                             if device_producer.vacant_len() >= bytes_to_write {
                                 device_producer.push_slice(&buf[0..bytes_to_write]);
+                                ring_full = false;
                             } else {
-                                debug!(
+                                if !ring_full {
+                                    warn!("Playback ring buffer is full, dropping chunks");
+                                    ring_full = true;
+                                }
+                                trace!(
                                     "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes",
                                 );
                             }

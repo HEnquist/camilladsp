@@ -692,6 +692,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         None
                     }
                 };
+                let mut ring_full = false;
                 'deviceloop: loop {
                     if !alive_listener.is_alive() {
                         error!("Playback device is no longer alive");
@@ -788,8 +789,13 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                             }
                             if device_producer.vacant_len() >= bytes_to_write {
                                 device_producer.push_slice(&buf[0..bytes_to_write]);
+                                ring_full = false;
                             } else {
-                                debug!(
+                                if !ring_full {
+                                    warn!("Playback ring buffer is full, dropping chunks");
+                                    ring_full = true;
+                                }
+                                trace!(
                                     "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes",
                                 );
                                 continue;

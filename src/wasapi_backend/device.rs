@@ -997,6 +997,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     ];
 
                 debug!("Playback device starts now!");
+                let mut ring_full = false;
                 loop {
                     match rx_state_dev.try_recv() {
                         Ok(DeviceState::Ok(_)) => {}
@@ -1075,8 +1076,13 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             }
                             if device_producer.vacant_len() >= bytes_to_write {
                                 device_producer.push_slice(&buf[0..bytes_to_write]);
+                                ring_full = false;
                             } else {
-                                debug!(
+                                if !ring_full {
+                                    warn!("Playback ring buffer is full, dropping chunks");
+                                    ring_full = true;
+                                }
+                                trace!(
                                     "Playback ring buffer is full, dropped chunk of {bytes_to_write} bytes",
                                 );
                                 continue;
