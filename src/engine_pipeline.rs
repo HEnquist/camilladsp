@@ -23,8 +23,8 @@ use parking_lot::RwLock;
 
 use crate::filters::fftconv::{ConvCoeffCache, ImpulseCache};
 use crate::{
-    CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice, config,
-    processing,
+    ChannelMask, CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice,
+    config, processing,
 };
 
 /// Supervisory handles for the running capture/processing/playback threads.
@@ -166,7 +166,7 @@ pub fn start_pipeline(
     {
         let mut capture_status = status_structs.capture.write();
         crate::update_capture_state(&mut capture_status, ProcessingState::Starting);
-        capture_status.used_channels = used_channels;
+        capture_status.used_channels = Arc::new(ChannelMask::new(&used_channels));
     }
 
     // Capture thread

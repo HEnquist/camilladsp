@@ -140,7 +140,11 @@ pub fn run(
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
                                 debug!("Using channels {used_channels:?}");
-                                status_structs.capture.write().used_channels = used_channels;
+                                status_structs
+                                    .capture
+                                    .read()
+                                    .used_channels
+                                    .set(&used_channels);
                                 debug!("Sent changes to pipeline");
                             }
                             config::ConfigChange::Devices => {

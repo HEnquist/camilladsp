@@ -1314,6 +1314,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
+                let used_channels = capture_status.read().used_channels.clone();
+                let mut channel_mask = Vec::with_capacity(channels);
                 let mut rate_adjust = 0.0;
                 // Sample rate measured over the last completed `rate_measure_interval` window,
                 // kept separate from the short update cadence.
@@ -1472,12 +1474,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 }
                             }
                         }
+                        used_channels.copy_to(&mut channel_mask);
                         let mut chunk = buffer_to_chunk_rawbytes(
                             &data_buffer[0..capture_bytes],
                             channels,
                             &binary_format,
                             capture_bytes,
-                            &capture_status.read().used_channels,
+                            &channel_mask,
                             false,
                         );
                         chunk.update_stats(&mut chunk_stats);

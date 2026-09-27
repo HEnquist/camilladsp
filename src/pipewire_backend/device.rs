@@ -1039,7 +1039,8 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     };
                     let mut rms_values = Vec::new();
                     let mut peak_values = Vec::new();
-                    let mut channel_mask = vec![true; channels];
+                    let used_channels = capture_status_clone.read().used_channels.clone();
+                    let mut channel_mask = Vec::with_capacity(channels);
                     let chunksize_bytes = channels * chunksize * store_bytes_per_sample;
                     // Pre-allocated buffer for capture data (sized for max resampler input)
                     let max_capture_bytes = if resampler.is_some() {
@@ -1118,11 +1119,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                             trace!("Measured sample rate is {measured_rate:.1} Hz");
                         }
 
-                        // Update channel mask from capture status
-                        {
-                            let status = capture_status_clone.read();
-                            channel_mask.copy_from_slice(&status.used_channels);
-                        }
+                        used_channels.copy_to(&mut channel_mask);
 
                         // Convert to audio chunk
                         let mut chunk = buffer_to_chunk_rawbytes(

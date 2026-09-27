@@ -891,6 +891,8 @@ fn capture_loop_bytes(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
+    let used_channels = params.capture_status.read().used_channels.clone();
+    let mut channel_mask = Vec::with_capacity(params.channels);
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
         params.samplerate as u32,
@@ -1047,12 +1049,13 @@ fn capture_loop_bytes(
                 return;
             }
         };
+        used_channels.copy_to(&mut channel_mask);
         let mut chunk = buffer_to_chunk_rawbytes(
             &buffer[0..capture_bytes],
             params.channels,
             &params.sample_format,
             capture_bytes,
-            &params.capture_status.read().used_channels,
+            &channel_mask,
             false,
         );
         chunk.update_stats(&mut chunk_stats);

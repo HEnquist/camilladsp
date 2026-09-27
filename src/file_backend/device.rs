@@ -418,6 +418,8 @@ fn capture_loop(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
+    let used_channels = params.capture_status.read().used_channels.clone();
+    let mut channel_mask = Vec::with_capacity(params.channels);
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     // Sample rate measured over the last completed `rate_measure_interval` window,
@@ -600,12 +602,13 @@ fn capture_loop(
                     .unwrap_or(());
             }
         };
+        used_channels.copy_to(&mut channel_mask);
         let mut chunk = buffer_to_chunk_rawbytes(
             &buf[0..bytes_to_capture],
             params.channels,
             &params.sample_format,
             bytes_read,
-            &params.capture_status.read().used_channels, //channel_mask??
+            &channel_mask,
             true,
         );
         chunk.update_stats(&mut chunk_stats);

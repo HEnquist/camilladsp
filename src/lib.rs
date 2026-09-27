@@ -329,7 +329,11 @@ pub struct CaptureStatus {
     /// Current sample-rate adjustment ratio applied by the async resampler.
     pub rate_adjust: f32,
     /// Which input channels are active (non-empty waveform).
-    pub used_channels: Vec<bool>,
+    ///
+    /// Replaced with a new mask when the devices start, and updated in place
+    /// after that. Capture threads keep a clone of the `Arc`, so they can read
+    /// it without taking the status lock.
+    pub used_channels: Arc<ChannelMask>,
     /// Ring buffer holding recent capture audio for spectrum analysis.
     pub audio_buffer: spectrum::AudioRingBuffer,
 }
@@ -615,6 +619,47 @@ impl Default for ProcessingParameters {
     }
 }
 
+/// Lock-free record of which capture channels the pipeline uses.
+///
+/// The engine updates it when a new config is applied, and the capture thread
+/// copies it once per chunk, so that unused channels can be skipped when
+/// converting. The size is the number of capture channels, which only changes
+/// with a restart of the devices.
+#[derive(Debug, Default)]
+pub struct ChannelMask {
+    used: Box<[AtomicBool]>,
+}
+
+impl ChannelMask {
+    /// Create a mask from `used`, with one entry per capture channel.
+    pub fn new(used: &[bool]) -> Self {
+        Self {
+            used: used.iter().map(|u| AtomicBool::new(*u)).collect(),
+        }
+    }
+
+    /// Update the mask. Entries beyond the size of the mask are ignored.
+    pub fn set(&self, used: &[bool]) {
+        for (slot, value) in self.used.iter().zip(used) {
+            slot.store(*value, Ordering::Relaxed);
+        }
+    }
+
+    /// Copy the mask into `used`, resizing it to match. Only allocates when the
+    /// size changes, which does not happen while a capture thread runs.
+    ///
+    /// The entries are read one by one, so a copy made while the engine
+    /// updates the mask can mix old and new values for one chunk. The
+    /// pipeline tolerates that, since it already sees chunks captured with the
+    /// old mask for as long as they take to pass through the queue.
+    pub fn copy_to(&self, used: &mut Vec<bool>) {
+        used.resize(self.used.len(), false);
+        for (value, slot) in used.iter_mut().zip(self.used.iter()) {
+            *value = slot.load(Ordering::Relaxed);
+        }
+    }
+}
+
 /// Shared status of the current processing run, primarily recording why it stopped.
 #[derive(Clone, Debug)]
 pub struct ProcessingStatus {
@@ -664,7 +709,7 @@ impl Default for CaptureStatus {
             state: ProcessingState::Inactive,
             signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
             signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
-            used_channels: Vec::new(),
+            used_channels: Arc::new(ChannelMask::default()),
             audio_buffer: Default::default(),
         }
     }
