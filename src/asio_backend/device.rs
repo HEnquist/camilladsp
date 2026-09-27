@@ -2234,8 +2234,12 @@ impl CaptureDevice for AsioCaptureDevice {
                         }
                     }
 
-                    // Read data from ring buffer
-                    device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                    // Read data from ring buffer. After a timeout it may hold less than
+                    // requested, so zero the rest rather than pass on the previous chunk.
+                    let popped = device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                    if popped < capture_bytes {
+                        data_buffer[popped..capture_bytes].fill(0);
+                    }
 
                     // Measure sample rate
                     averager.add_value(capture_frames);
