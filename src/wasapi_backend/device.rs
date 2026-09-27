@@ -22,7 +22,7 @@ use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -888,16 +888,14 @@ impl PlaybackDevice for WasapiPlaybackDevice {
             .spawn(move || {
                 // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = 8 * 1024 / chunksize + 3;
-                debug!(
-                    "Using a playback channel capacity of {channel_capacity} chunks."
-                );
+                debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
-                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(
+                    samplerate,
+                )));
                 let buffer_fill_clone = buffer_fill.clone();
-                let mut buffer_avg = countertimer::Averager::new();
-                let mut timer = countertimer::Stopwatch::new();
                 let mut chunk_stats = ChunkStats {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
@@ -906,38 +904,45 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let mut peak_values = Vec::new();
                 let clipped_counter = playback_status.read().clipped_samples.clone();
 
-                let mut rate_controller = PIRateController::new_with_default_gains(samplerate, adjust_period as f64, target_level);
+                let mut rate_reporter =
+                    RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
 
                 trace!("Build output stream.");
                 let mut conversion_result;
 
                 // Use 4 bytes per sample (the maximum) for the ring buffer
-                let ringbuffer = HeapRb::<u8>::new(channels * 4 * ( 2 * chunksize + 2048 ));
+                let ringbuffer = HeapRb::<u8>::new(channels * 4 * (2 * chunksize + 2048));
                 let (mut device_producer, device_consumer) = ringbuffer.split();
 
                 // wasapi device loop
                 let innerhandle = thread::Builder::new()
                     .name("WasapiPlaybackInner".to_string())
                     .spawn(move || {
-                        let (_device, audio_client, render_client, handle, _binary_format, wave_format) =
-                            match open_playback(
-                                &devname,
-                                samplerate,
-                                channels,
-                                &sample_format,
-                                exclusive,
-                                polling,
-                            ) {
-                                Ok(result) => {
-                                    tx_state_dev.send(DeviceState::Ok(result.4)).unwrap_or(());
-                                    result
-                                }
-                                Err(err) => {
-                                    let msg = format!("Playback error: {err}");
-                                    tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
-                                    return;
-                                }
-                            };
+                        let (
+                            _device,
+                            audio_client,
+                            render_client,
+                            handle,
+                            _binary_format,
+                            wave_format,
+                        ) = match open_playback(
+                            &devname,
+                            samplerate,
+                            channels,
+                            &sample_format,
+                            exclusive,
+                            polling,
+                        ) {
+                            Ok(result) => {
+                                tx_state_dev.send(DeviceState::Ok(result.4)).unwrap_or(());
+                                result
+                            }
+                            Err(err) => {
+                                let msg = format!("Playback error: {err}");
+                                tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
+                                return;
+                            }
+                        };
                         let blockalign = wave_format.get_blockalign();
                         let sync = PlaybackSync {
                             rx_play: rx_dev,
@@ -998,11 +1003,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                 };
 
-                let mut buf =
-                    vec![
-                        0u8;
-                        channels * chunksize * binary_format.bytes_per_sample()
-                    ];
+                let mut buf = vec![0u8; channels * chunksize * binary_format.bytes_per_sample()];
 
                 debug!("Playback device starts now!");
                 let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
@@ -1029,29 +1030,18 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
-                            buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
-
-                            if adjust
-                                && timer.larger_than_millis((1000.0 * adjust_period) as u64)
-                                && let Some(av_delay) = buffer_avg.average()
+                            let estimated_buffer_fill = buffer_fill
+                                .try_lock()
+                                .map(|b| b.estimate() as f64)
+                                .unwrap_or_default();
+                            let buffer_level =
+                                estimated_buffer_fill + (channel.len() * chunksize) as f64;
+                            if let Some(speed) =
+                                rate_reporter.update(buffer_level, &playback_status)
                             {
-                                let speed = rate_controller.next(av_delay);
-                                timer.restart();
-                                buffer_avg.restart();
-                                debug!(
-                                    "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
-                                    av_delay,
-                                    100.0 * speed
-                                );
                                 status_channel
                                     .send(StatusMessage::SetSpeed(speed))
                                     .unwrap_or(());
-                                if let Some(mut playback_status) = playback_status.try_write() {
-                                    playback_status.buffer_level = av_delay as usize;
-                                } else {
-                                    xtrace!("Playback status blocked, skip buffer level update.");
-                                }
                             }
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_playback_audio_buffer(&playback_status, &chunk);
@@ -1108,7 +1098,9 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             debug!("Playback outer thread returned to normal priority.")
                         }
                         Err(_) => {
-                            warn!("Could not bring the outer playback thread back to normal priority.")
+                            warn!(
+                                "Could not bring the outer playback thread back to normal priority."
+                            )
                         }
                     };
                 }

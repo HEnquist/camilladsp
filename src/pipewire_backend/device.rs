@@ -35,7 +35,7 @@ use crate::config::BinarySampleFormat;
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
@@ -571,14 +571,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let clipped_counter = playback_status_clone.read().clipped_samples.clone();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
-                    // Buffer level tracking with time-based estimation
-                    let mut buffer_avg = countertimer::Averager::new();
-                    let mut buffer_level_timer = countertimer::Stopwatch::new();
-                    let mut rate_controller = PIRateController::new_with_default_gains(
-                        samplerate,
-                        adjust_period as f64,
-                        target_level,
-                    );
+                    let mut rate_reporter =
+                        RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
                     let mut conversion_result;
 
                     let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
@@ -586,27 +580,9 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
-                                buffer_avg.add_value(estimated_buffer_fill + (channel.len() * chunksize) as f64);
-                                if adjust
-                                    && buffer_level_timer.larger_than_millis((1000.0 * adjust_period) as u64)
-                                    && let Some(av_delay) = buffer_avg.average()
-                                {
-                                    let speed = rate_controller.next(av_delay);
-                                    buffer_level_timer.restart();
-                                    buffer_avg.restart();
-                                    debug!(
-                                        "Current buffer level {:.1}, set capture rate to {:.4}%.",
-                                        av_delay,
-                                        100.0 * speed
-                                    );
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                    if let Some(mut playback_status) = playback_status.try_write() {
-                                        playback_status.buffer_level = av_delay as usize;
-                                    } else {
-                                        xtrace!("playback status blocked, skip buffer level update");
-                                    }
+                                let buffer_level = estimated_buffer_fill + (channel.len() * chunksize) as f64;
+                                if let Some(speed) = rate_reporter.update(buffer_level, &playback_status) {
+                                    status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                                 }
                                 chunk.update_stats(&mut chunk_stats);
                                 crate::push_playback_audio_buffer(&playback_status_clone, &chunk);

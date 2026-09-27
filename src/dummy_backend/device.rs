@@ -29,7 +29,7 @@ use crate::generatordevice::SignalSource;
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
 use crate::utils::countertimer;
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::stash::recycle_chunk;
 use crate::{CamillaFloat, ToCamillaFloat};
@@ -439,13 +439,12 @@ fn playback_loop(
     let mut pacer: Option<Pacer> = None;
     let mut prefilled = 0;
     let mut drift_ppm = 0;
-    let mut rate_controller = PIRateController::new_with_default_gains(
+    let mut rate_reporter = RateAdjustReporter::new(
         params.samplerate,
-        f64::from(params.adjust_period),
+        params.adjust_period,
         params.target_level,
+        params.enable_rate_adjust,
     );
-    let mut timer = countertimer::Stopwatch::new();
-    let mut buffer_avg = countertimer::Averager::new();
     // A real device converts every chunk to the format the hardware wants on its way out,
     // which is where clipping happens. Without a format configured the audio is dropped as
     // it arrives, which is what the rest of the suite wants and is one copy cheaper.
@@ -556,19 +555,10 @@ fn playback_loop(
                 } else {
                     xtrace!("playback status blocked, skip buffer level update");
                 }
-                buffer_avg.add_value(buffer_level);
-                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
-                    && let Some(avg_level) = buffer_avg.average()
-                {
-                    timer.restart();
-                    buffer_avg.restart();
-                    if params.enable_rate_adjust {
-                        let capture_speed = rate_controller.next(avg_level);
-                        debug!("PB: buffer level {avg_level:.1}, SetSpeed {capture_speed}");
-                        status_channel
-                            .send(StatusMessage::SetSpeed(capture_speed))
-                            .unwrap_or(());
-                    }
+                if let Some(speed) = rate_reporter.update(buffer_level, &params.playback_status) {
+                    status_channel
+                        .send(StatusMessage::SetSpeed(speed))
+                        .unwrap_or(());
                 }
                 let requested_drift = params.control.drift_ppm();
                 if requested_drift != drift_ppm {

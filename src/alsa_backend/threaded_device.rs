@@ -54,7 +54,7 @@ use crate::alsa_backend::utils::{
     list_channels_as_text, list_device_names, list_formats_as_text, list_samplerates_as_text,
     pick_preferred_format, process_events, recover_suspended_pcm, state_desc, sync_linked_controls,
 };
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -1189,42 +1189,26 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         let mut buf =
                             vec![0u8; channels * chunksize * binary_format.bytes_per_sample()];
 
-                        // Buffer level tracking with time-based estimation (like WASAPI)
-                        let adjust = adjust_period > 0.0 && adjust_enabled;
-                        let mut buffer_avg = countertimer::Averager::new();
-                        let mut timer = countertimer::Stopwatch::new();
-                        let mut rate_controller = PIRateController::new_with_default_gains(
+                        let mut rate_reporter = RateAdjustReporter::new(
                             samplerate,
-                            adjust_period as f64,
+                            adjust_period,
                             target_level,
+                            adjust_enabled,
                         );
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
 
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    // Sample the estimator on each chunk (like WASAPI)
                                     let estimated_buffer_fill = buffer_fill
                                         .try_lock()
                                         .map(|b| b.estimate() as f64)
                                         .unwrap_or_default();
-                                    buffer_avg.add_value(
-                                        estimated_buffer_fill
-                                            + (channel.len() * chunksize) as f64,
-                                    );
-                                    if adjust
-                                        && timer.larger_than_millis(
-                                            (1000.0 * adjust_period) as u64,
-                                        )
-                                        && let Some(av_delay) = buffer_avg.average()
+                                    let buffer_level =
+                                        estimated_buffer_fill + (channel.len() * chunksize) as f64;
+                                    if let Some(speed) =
+                                        rate_reporter.update(buffer_level, &playback_status)
                                     {
-                                        let speed = rate_controller.next(av_delay);
-                                        timer.restart();
-                                        buffer_avg.restart();
-                                        debug!(
-                                            "PB: buffer level {:.1}, set capture rate to {:.6}",
-                                            av_delay, speed
-                                        );
                                         if pitch_supported {
                                             let _ = send_playback_device_message(
                                                 &tx_dev,
@@ -1234,9 +1218,6 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                             status_channel
                                                 .send(StatusMessage::SetSpeed(speed))
                                                 .unwrap_or(());
-                                        }
-                                        if let Some(mut ps) = playback_status.try_write() {
-                                            ps.buffer_level = av_delay as usize;
                                         }
                                     }
 
