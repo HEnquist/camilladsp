@@ -1168,17 +1168,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
                                 resampl.resample_chunk(&mut chunk, chunksize, channels);
                             }
                             let msg = AudioMessage::Audio(chunk);
-                            // Use try_send to avoid blocking if pipeline is full
-                            match channel.try_send(msg) {
-                                Ok(()) => {}
-                                Err(crossbeam_channel::TrySendError::Full(_)) => {
-                                    warn!("Capture: processing pipeline full, dropping frame");
-                                }
-                                Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                                    info!("Processing thread has already stopped.");
-                                    exit_flag.store(true, Ordering::Relaxed);
-                                    break;
-                                }
+                            if channel.send(msg).is_err() {
+                                info!("Processing thread has already stopped.");
+                                exit_flag.store(true, Ordering::Relaxed);
+                                break;
                             }
                         } else if state == ProcessingState::Paused {
                             let msg = AudioMessage::Pause;

@@ -967,17 +967,7 @@ fn send_capture_audio(
     channel: &crossbeam_channel::Sender<AudioMessage>,
     msg: AudioMessage,
 ) -> bool {
-    match msg {
-        AudioMessage::EndOfStream => channel.send(AudioMessage::EndOfStream).is_ok(),
-        _ => match channel.try_send(msg) {
-            Ok(()) => true,
-            Err(crossbeam_channel::TrySendError::Full(_)) => {
-                trace!("Capture: downstream queue full, dropping message");
-                true
-            }
-            Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
-        },
-    }
+    channel.send(msg).is_ok()
 }
 
 fn send_playback_device_message(
