@@ -58,8 +58,16 @@ impl<'a, R: Read + AsRawFd + 'a> Reader for NonBlockingReader<'a, R> {
         let mut bytes_read = 0;
         let start = time::Instant::now();
         loop {
-            let res = nix::poll::ppoll(&mut self.poll, self.timeout, Some(self.signals))?;
-            //println!("loop...");
+            // ppoll is never restarted after a signal handler runs, so a signal
+            // such as SIGHUP for a config reload ends up here as EINTR.
+            let res = match nix::poll::ppoll(&mut self.poll, self.timeout, Some(self.signals)) {
+                Ok(res) => res,
+                Err(nix::errno::Errno::EINTR) => {
+                    debug!("poll was interrupted");
+                    continue;
+                }
+                Err(e) => return Err(Box::new(e)),
+            };
             if res == 0 {
                 return Ok(ReadResult::Timeout(bytes_read));
             } else {
