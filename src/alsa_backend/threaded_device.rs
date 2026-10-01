@@ -1707,6 +1707,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut device_stalled = false;
                         let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                         let mut expected_chunk_nbr = 0usize;
+                        let mut exit_forwarded = false;
 
                         status_channel.send(StatusMessage::CaptureReady).unwrap_or(());
                         barrier.wait();
@@ -1732,23 +1733,27 @@ impl CaptureDevice for AlsaCaptureDevice {
                             // The pitch control lives on the inner thread, so a speed for it
                             // is forwarded there. Exit goes there too: the inner thread ends
                             // the stream, and this loop follows when it reports the end.
-                            let mut forward_pitch = |speed: f64| {
-                                tx_inner_command
-                                    .try_send(CommandMessage::SetSpeed { speed })
-                                    .unwrap_or_default();
-                            };
-                            let pitch = pitch_supported
-                                .then_some(&mut forward_pitch as &mut dyn FnMut(f64));
-                            match handle_capture_command(
-                                command_channel.try_recv(),
-                                &mut rate_adjust,
-                                &mut resampler,
-                                async_src,
-                                pitch,
-                            ) {
-                                CommandOutcome::Continue => {}
-                                CommandOutcome::Exit | CommandOutcome::Disconnected => {
-                                    tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
+                            // Once it has been forwarded, the channel is not polled again.
+                            if !exit_forwarded {
+                                let mut forward_pitch = |speed: f64| {
+                                    tx_inner_command
+                                        .try_send(CommandMessage::SetSpeed { speed })
+                                        .unwrap_or_default();
+                                };
+                                let pitch = pitch_supported
+                                    .then_some(&mut forward_pitch as &mut dyn FnMut(f64));
+                                match handle_capture_command(
+                                    command_channel.try_recv(),
+                                    &mut rate_adjust,
+                                    &mut resampler,
+                                    async_src,
+                                    pitch,
+                                ) {
+                                    CommandOutcome::Continue => {}
+                                    CommandOutcome::Exit | CommandOutcome::Disconnected => {
+                                        tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
+                                        exit_forwarded = true;
+                                    }
                                 }
                             }
 
