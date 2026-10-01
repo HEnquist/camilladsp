@@ -58,33 +58,29 @@ impl<'a, R: Read + AsRawFd + 'a> Reader for NonBlockingReader<'a, R> {
         let mut bytes_read = 0;
         let start = time::Instant::now();
         loop {
-            // ppoll is never restarted after a signal handler runs, so a signal
-            // such as SIGHUP for a config reload ends up here as EINTR.
-            let res = match nix::poll::ppoll(&mut self.poll, self.timeout, Some(self.signals)) {
-                Ok(res) => res,
-                Err(nix::errno::Errno::EINTR) => {
-                    debug!("poll was interrupted");
-                    continue;
+            match nix::poll::ppoll(&mut self.poll, self.timeout, Some(self.signals)) {
+                Ok(0) => return Ok(ReadResult::Timeout(bytes_read)),
+                Ok(_) => {
+                    let n = self.inner.read(buf);
+                    match n {
+                        Ok(0) => return Ok(ReadResult::EndOfFile(bytes_read)),
+                        Ok(n) => {
+                            let tmp = buf;
+                            buf = &mut tmp[n..];
+                            bytes_read += n;
+                        }
+                        Err(ref e) if e.kind() == ErrorKind::Interrupted => {
+                            debug!("got Interrupted");
+                            std::thread::sleep(Duration::from_millis(10))
+                        }
+                        Err(e) => return Err(Box::new(e)),
+                    }
                 }
+                // ppoll is never restarted after a signal handler runs, so a signal
+                // such as SIGHUP for a config reload ends up here as EINTR. It goes on
+                // to the time limit check below like any other pass.
+                Err(nix::errno::Errno::EINTR) => debug!("poll was interrupted"),
                 Err(e) => return Err(Box::new(e)),
-            };
-            if res == 0 {
-                return Ok(ReadResult::Timeout(bytes_read));
-            } else {
-                let n = self.inner.read(buf);
-                match n {
-                    Ok(0) => return Ok(ReadResult::EndOfFile(bytes_read)),
-                    Ok(n) => {
-                        let tmp = buf;
-                        buf = &mut tmp[n..];
-                        bytes_read += n;
-                    }
-                    Err(ref e) if e.kind() == ErrorKind::Interrupted => {
-                        debug!("got Interrupted");
-                        std::thread::sleep(Duration::from_millis(10))
-                    }
-                    Err(e) => return Err(Box::new(e)),
-                }
             }
             if buf.is_empty() {
                 return Ok(ReadResult::Complete(bytes_read));
