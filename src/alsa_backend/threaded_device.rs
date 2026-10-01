@@ -25,7 +25,7 @@ use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
-use alsa::ctl::{Ctl, ElemId, ElemIface, ElemType, ElemValue};
+use alsa::ctl::{Ctl, ElemIface, ElemType, ElemValue};
 use alsa::hctl::{Elem, HCtl};
 use alsa::pcm::{Access, Format, Frames, HwParams};
 use alsa::poll::Descriptors;
@@ -35,7 +35,6 @@ use crossbeam_channel;
 use nix::errno::Errno;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
-use std::ffi::CString;
 use std::fmt::Debug;
 use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
@@ -309,12 +308,14 @@ fn open_card_hctl(pcmdevice: &alsa::PCM) -> Option<HCtl> {
 /// The playback pitch control of a UAC2 gadget, if `pcmdevice` has one.
 fn find_playback_pitch<'a>(h: &'a HCtl, pcmdevice: &alsa::PCM) -> Option<Elem<'a>> {
     let pcminfo = pcmdevice.info().ok()?;
-    let mut elid_uac2_gadget = ElemId::new(ElemIface::PCM);
-    elid_uac2_gadget.set_device(pcminfo.get_device());
-    elid_uac2_gadget.set_subdevice(pcminfo.get_subdevice());
-    let name = CString::new("Playback Pitch 1000000").ok()?;
-    elid_uac2_gadget.set_name(&name);
-    h.find_elem(&elid_uac2_gadget)
+    find_elem(
+        h,
+        ElemIface::PCM,
+        Some(pcminfo.get_device()),
+        Some(pcminfo.get_subdevice()),
+        "Playback Pitch 1000000",
+    )
+    .map(ElemData::into_element)
 }
 
 #[allow(clippy::too_many_arguments)]
