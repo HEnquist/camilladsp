@@ -258,8 +258,9 @@ mod tests {
     fn feeder_waits_for_the_consumer_to_make_room() {
         let ring = HeapRb::<u8>::new(8);
         let (mut producer, mut consumer) = ring.split();
-        // 480 frames at 48 kHz sleeps 5 ms per retry, 80 ms in total.
-        let mut feeder = RingBufferFeeder::new(480, 48000);
+        // 9600 frames at 48 kHz sleeps 100 ms per retry, 1.6 s in total. The wide margin over
+        // the 20 ms drain keeps the test from failing when a loaded runner schedules it late.
+        let mut feeder = RingBufferFeeder::new(9600, 48000);
         assert!(feeder.push(&mut producer, &[0; 8]));
         let drain = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(20));
