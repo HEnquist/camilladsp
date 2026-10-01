@@ -533,14 +533,21 @@ fn playback_loop(
                     return Ok(());
                 }
                 Err(TryRecvError::Empty) => {
-                    sample_queue.resize(blockalign * buffer_free_frame_count as usize, 0);
+                    let needed_bytes = blockalign * buffer_free_frame_count as usize;
                     // While prefilling (before the stream is started) a short
                     // fill just gets padded with silence and is not an
                     // interruption, so skip the underrun handling until started.
-                    if started && running {
-                        running = false;
-                        warn!("Playback interrupted, no data available.");
+                    if started {
+                        if running {
+                            running = false;
+                            warn!("Playback interrupted, no data available.");
+                        }
+                        trace!(
+                            "WASAPI playback: underrun, filled {} bytes of silence.",
+                            needed_bytes - sample_queue.len()
+                        );
                     }
+                    sample_queue.resize(needed_bytes, 0);
                 }
                 Err(TryRecvError::Disconnected) => {
                     error!("Playback, channel is closed.");

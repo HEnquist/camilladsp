@@ -611,11 +611,15 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 append_from_ringbuffer(&mut device_consumer, &mut sample_queue, bytes);
                             }
                             Err(_) => {
-                                sample_queue.resize(blockalign * num_frames, 0);
                                 if running {
                                     running = false;
                                     warn!("Playback interrupted, no data available.");
                                 }
+                                trace!(
+                                    "CoreAudio playback callback: underrun, filled {} bytes of silence.",
+                                    blockalign * num_frames - sample_queue.len()
+                                );
+                                sample_queue.resize(blockalign * num_frames, 0);
                             }
                         }
                     }
