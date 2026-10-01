@@ -174,7 +174,7 @@ This chart shows the most important parts:
 ![Overview](overview.png)
 
 ### Capture
-The capture thread reads a chunk samples from the audio device in the selected format.
+The capture thread reads a chunk of samples from the audio device in the selected format.
 It then converts the samples to 64-bit floats (or optionally 32-bit).
 If resampling is enabled, the audio data is sent to the resampler.
 At the end, the chunk of samples is packed as a message that is then posted to the input queue of the processing thread.
@@ -438,7 +438,7 @@ By default Cargo builds for a generic system, meaning the resulting binary might
 This means for example that it will not use AVX on an x86-64 CPU, or NEON on a Raspberry Pi.
 
 To make an optimized build for your system, you can specify this in your Cargo configuration file.
-Or, just set the RUSTFLAGS environment variable by adding RUSTFLAGS='...' in from of the "cargo build" or "cargo install" command.
+Or, just set the RUSTFLAGS environment variable by adding RUSTFLAGS='...' in front of the "cargo build" or "cargo install" command.
 
 Make an optimized build on x86-64:
 ```
@@ -697,7 +697,7 @@ These are the exit codes CamillaDSP will give:
 | 0         | Normal exit, no error |
 | 101       | Invalid config file, see the error message for details |
 | 102       | Error from DSP process, see the error message for details |
-| 103       | Forced exit by a second SIGINT before before a normal exit was completed |
+| 103       | Forced exit by a second SIGINT before a normal exit was completed |
 
 
 ## Reloading the configuration
@@ -923,7 +923,7 @@ Connect an A2DP device and try again. If a device is already connected, try remo
 
 The `service` property can be left out to get the default. This only needs changing if there is more than one instance of BlueALSA running.
 
-You have to specify correct capture sample rate, number of channel and sample format.
+You have to specify correct capture sample rate, number of channels and sample format.
 These parameters can be found with `bluealsa-aplay`:
 ```
 > bluealsa-aplay -L
@@ -1109,7 +1109,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   __Choosing chunk size for best performance__
 
   FIR filters are automatically padded as needed,
-  so there is no need match chunk size and filter length.
+  so there is no need to match chunk size and filter length.
 
   CamillaDSP uses FFT for convolution, with an FFT length of `2 * chunksize`.
   Therefore, the chunk size should be chosen for optimal FFT performance.
@@ -1147,7 +1147,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
   The value should only be changed if the capture device can provide data faster
   than the playback device can play it, like when using the ALSA "cdsp" plugin.
-  If this case, set `queuelimit` to a low value like 1.
+  In this case, set `queuelimit` to a low value like 1.
 
 * `enable_rate_adjust` (optional, defaults to false)
 
@@ -1394,7 +1394,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   It accepts the number of channels as `channels`.
   It also requires a block defining the signal properties, called `signal`.
 
-  The signal shape is give by `type`, which accepts `Sine`, `Square` and `WhiteNoise`.
+  The signal shape is given by `type`, which accepts `Sine`, `Square` and `WhiteNoise`.
   All types require the signal level, which is given in dB in the `level` parameter.
   `Sine` and `Square` also require a frequency, defined by the `freq` parameter.
 
@@ -1412,7 +1412,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
         level: -20.0
   ```
 
-  Example config for white noise ad -10 dB:
+  Example config for white noise at -10 dB:
   ```
     capture:
       type: SignalGenerator
@@ -1547,7 +1547,7 @@ Available interpolation types:
 | Cubic          | 3                 | 4              |
 
 See the [Rubato documentation](https://docs.rs/rubato/latest/rubato/index.html)
-for a desciption of the other parameters.
+for a description of the other parameters.
 
 For reference, the profiles are defined according to this table:
 
@@ -1796,7 +1796,7 @@ Note that the `invert` setting also inverts, so a gain of -0.5 with invert set t
 becomes inverted twice and the result is non-inverted.
 The linear gain is limited to a range of -10.0 to +10.0.
 
-The `mute` parameter determines if the the signal should be muted.
+The `mute` parameter determines if the signal should be muted.
 This is optional and defaults to not mute.
 
 Example Gain filter:
@@ -1858,7 +1858,7 @@ Setting fader to `Main` adds loudness compensation to the default volume control
 
 By setting `fader` to one of the Aux faders it can instead work with a Volume filter
 reacting to the same fader.
-When used like this, there should only be a single Volume filter assigned to the chosed fader.
+When used like this, there should only be a single Volume filter assigned to the chosen fader.
 
 It can also be used with a volume control external to CamillaDSP.
 The fader should then be set to one of the Aux faders, and the external volume control should update
@@ -1906,7 +1906,7 @@ The delay filter provides a delay in milliseconds, microseconds, millimetres or 
 The delay value must be positive or zero.
 
 The `unit` can be `ms`, `us`, `mm` or `samples`, and if left out it defaults to `ms`.
-When giving the delay in millimetres, the speed of sound of is assumed to be 343 m/s (dry air at 20 degrees Celsius).
+When giving the delay in millimetres, the speed of sound is assumed to be 343 m/s (dry air at 20 degrees Celsius).
 
 When `subsample` is set to `false`, the provided delay value is rounded to the nearest number of full samples.
 This is the default, and recommended for most applications.
@@ -1915,7 +1915,7 @@ This gets rounded to the nearest integer, 31, and the resulting delay is about 0
 This is then implemented by a delay line.
 
 Subsample delay precision can be achieved by setting the `subsample` parameter to `true`.
-In this mode it will also use use an IIR allpass filter in addition to the delay line.
+In this mode it will also use an IIR allpass filter in addition to the delay line.
 Using the same 0.7 ms example, the delay line is used to give a delay of 29 samples.
 A second order allpass filter is then used to give the remaining delay of 1.86 samples.
 Note that the allpass filter is an approximation that gives accurate delays at lower frequencies,
@@ -2268,7 +2268,7 @@ Other types such as Bessel filters can be built by combining several Biquads.
 
   The band frequencies are distributed evenly on the logarithmic frequency scale, and each band has the same relative bandwidth.
 
-  For example a 31-band equalizer on the default range gets a 1/3 octave bandwith,
+  For example a 31-band equalizer on the default range gets a 1/3 octave bandwidth,
   with the first three bands centered at 22.4, 27.9, 34.9 Hz, and the last two at 14.3 and 17.9 kHz.
 
   Example:
@@ -2479,7 +2479,7 @@ pipeline:
 ### RACE
 The "RACE" processor implements the recursive part of the
 [Recursive Ambiophonic Crosstalk Elimination (RACE)](http://www.filmaker.com/papers/RGRM-RACE_rev.pdf) algorithm.
-The RACE processor processes a aingle pair of channels.
+The RACE processor processes a single pair of channels.
 Multiple processors can be used to process additional channel pairs if needed.
 
 Parameters: 
@@ -2493,7 +2493,7 @@ Parameters:
 
 The RACE algorithm is normally used with filters,
 to only process a limited range of the audio spectrum.
-![RACE algoriths](race.png)
+![RACE algorithm](race.png)
 
 The RACE processor implements the recursive function block
 indicated by the dashed rectangle.
@@ -2672,7 +2672,7 @@ Finally a compressor is added as the last step.
 
 ### Filter step
 A filter step, `type: Filter`, can contain one or several filters.
-The chosen filters are given in the `names` property, which is an list of filter names.
+The chosen filters are given in the `names` property, which is a list of filter names.
 The filters must be defined in the `Filters` section.
 
 The chosen filters will be applied to the channels listed in the `channels` property.
@@ -2689,7 +2689,7 @@ compared to adding each filter in a separate step.
 
 ### Mixer and Processor step
 Mixer steps, `type: Mixer`, and processor steps, `type: Processor`, are defined in a similar way.
-These steps take just the the name of a mixer of processor defined in the `Mixers` or `Processors` section.
+These steps take just the name of a mixer or processor defined in the `Mixers` or `Processors` section.
 
 ### Tokens in names
 If the name of a mixer, processor or filter includes the tokens `$samplerate$` or `$channels$`,
@@ -2709,7 +2709,7 @@ REW V5.20.14 and later is able to export the filters in the CamillaDSP YAML form
 - Go to the "EQ Filters" screen. Expand the "Equalizer" section in the list on the right side.
 - Select "CamillaDSP" as Manufacturer and "Filters" as Model.
 - Expand the "Filter Task" section and click "Save filter settings to YAML file".
-  - This opens a popup with the the text "Enter the label to use for each filter, the filter number will be appended to the label".
+  - This opens a popup with the text "Enter the label to use for each filter, the filter number will be appended to the label".
     This allows identification of the filter set.
 
 Note that the generated YAML file is not a complete CamillaDSP configuration.
@@ -2764,4 +2764,4 @@ Creates phase-linear correction files (WAV/TXT) for Equalizer like APO, Roon, an
 See the [list of frequently asked questions.](./FAQ.md)
 
 ## Troubleshooting
-See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+See the [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
