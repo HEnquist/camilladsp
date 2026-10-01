@@ -26,9 +26,10 @@ use crate::config;
 use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
 use crate::generatordevice::SignalSource;
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
 use crate::utils::countertimer;
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::stash::recycle_chunk;
 use crate::{CamillaFloat, ToCamillaFloat};
@@ -202,54 +203,26 @@ fn capture_loop(
 
     crate::set_capture_state(&params.capture_status, state);
     loop {
-        match msg_channels.command.try_recv() {
-            Ok(CommandMessage::Exit) => {
-                debug!("Exit message received, sending EndOfStream");
-                let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap_or(());
-                msg_channels
-                    .status
-                    .send(StatusMessage::CaptureDone)
-                    .unwrap_or(());
+        // With no resampler the device does what a clock-slave device does and runs its own
+        // clock faster or slower, like the ALSA Loopback and UAC2 gadget pitch controls.
+        let device_pitch = resampler.is_none();
+        match handle_capture_command(
+            msg_channels.command.try_recv(),
+            &mut rate_adjust,
+            &mut resampler,
+            params.async_src,
+            device_pitch,
+        ) {
+            CommandOutcome::Continue => {}
+            CommandOutcome::SetPitch(speed) => {
+                pacer.set_rate(capture_clock_rate(device_rate, drift_ppm, speed, false));
+            }
+            CommandOutcome::Exit => {
+                send_capture_done(&msg_channels.audio, &msg_channels.status);
                 break;
             }
-            Ok(CommandMessage::SetSpeed { speed: new_speed }) => {
-                trace!("Dummy capture setting speed to {new_speed}");
-                rate_adjust = new_speed;
-                match &mut resampler {
-                    Some(resampl) => {
-                        if params.async_src {
-                            // The ratio is what changes, exactly as in the file backend
-                            // at `src/file_backend/device.rs:441`.
-                            if resampl
-                                .set_resample_ratio_relative(new_speed, true)
-                                .is_err()
-                            {
-                                debug!("Failed to set resampling speed to {new_speed}");
-                            }
-                        } else {
-                            warn!(
-                                "Requested rate adjust of synchronous resampler. Ignoring request."
-                            );
-                        }
-                    }
-                    // With no resampler the device does what a clock-slave device does and
-                    // runs its own clock faster or slower. That is the same shape as the
-                    // ALSA UAC2 gadget path, `src/alsa_backend/device.rs:671`.
-                    None => pacer.set_rate(capture_clock_rate(
-                        device_rate,
-                        drift_ppm,
-                        rate_adjust,
-                        false,
-                    )),
-                }
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                error!("Command channel was closed");
-                break;
-            }
-        };
+            CommandOutcome::Disconnected => break,
+        }
 
         // Checked ahead of the stall below, so a device that is already stalled can still
         // be told to fail. On every way out from here the status message goes first and
@@ -464,13 +437,12 @@ fn playback_loop(
     let mut pacer: Option<Pacer> = None;
     let mut prefilled = 0;
     let mut drift_ppm = 0;
-    let mut rate_controller = PIRateController::new_with_default_gains(
+    let mut rate_reporter = RateAdjustReporter::new(
         params.samplerate,
-        f64::from(params.adjust_period),
+        params.adjust_period,
         params.target_level,
+        params.enable_rate_adjust,
     );
-    let mut timer = countertimer::Stopwatch::new();
-    let mut buffer_avg = countertimer::Averager::new();
     // A real device converts every chunk to the format the hardware wants on its way out,
     // which is where clipping happens. Without a format configured the audio is dropped as
     // it arrives, which is what the rest of the suite wants and is one copy cheaper.
@@ -573,27 +545,20 @@ fn playback_loop(
                         prefilled as f64
                     }
                 };
+                // The controller uses the average over the adjust period, the way the
+                // real backends do.
+                if let Some(speed) = rate_reporter.update(buffer_level, &params.playback_status) {
+                    status_channel
+                        .send(StatusMessage::SetSpeed(speed))
+                        .unwrap_or(());
+                }
                 // Published every chunk rather than once per adjust period, so a test
-                // polling the getter does not have to wait one out. The controller below
-                // uses the average over the period, the way the real backends do.
+                // polling the getter does not have to wait one out. Written after the
+                // reporter, which publishes the period average, so this value wins.
                 if let Some(mut playback_status) = params.playback_status.try_write() {
                     playback_status.buffer_level = buffer_level as usize;
                 } else {
                     xtrace!("playback status blocked, skip buffer level update");
-                }
-                buffer_avg.add_value(buffer_level);
-                if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
-                    && let Some(avg_level) = buffer_avg.average()
-                {
-                    timer.restart();
-                    buffer_avg.restart();
-                    if params.enable_rate_adjust {
-                        let capture_speed = rate_controller.next(avg_level);
-                        debug!("PB: buffer level {avg_level:.1}, SetSpeed {capture_speed}");
-                        status_channel
-                            .send(StatusMessage::SetSpeed(capture_speed))
-                            .unwrap_or(());
-                    }
                 }
                 let requested_drift = params.control.drift_ppm();
                 if requested_drift != drift_ppm {

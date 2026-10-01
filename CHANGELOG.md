@@ -67,6 +67,17 @@ Bugfixes:
 - The clipped samples counter no longer loses counts. The clipped samples of a chunk were dropped
   whenever the playback status was busy, for example while a websocket client read it, so the
   counter read low on a loaded machine, which is when clipping is most likely.
+- Threaded ALSA (`threaded-alsa` feature): rate adjust no longer corrects twice when the device has
+  a pitch control. Capture from a Loopback or UAC2 gadget with an async resampler adjusted both
+  the pitch control and the resampler, and playback to a UAC2 gadget adjusted both the gadget pitch
+  and the capture speed. Like the default ALSA backend, it now uses the pitch control when there
+  is one, and otherwise the resampler or the capture speed.
+- File capture now stops on a read error. It previously reported the error but kept going, passing
+  on the data of the previous read as if it were new.
+- ASIO: when capture timed out waiting for the driver, the part of the chunk that had not arrived
+  was filled with leftover audio from the previous chunk. It is now filled with silence.
+- PipeWire: losing the connection to the processing thread is now reported as a playback error
+  rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
   which cannot tell packed 24-bit samples from padded ones. A driver could accept the format there
   and then treat the samples as the other layout.
@@ -147,6 +158,19 @@ Changes:
   or another distribution of similar age. Older systems must build from source.
 - No more pre-built armv6 binary for the Raspberry Pi 1 and the original Pi Zero.
   Those must build from source.
+- Threaded ALSA and PipeWire capture now wait when the queue to the processing thread is full,
+  instead of dropping the chunk. Every other backend already waited, and `queuelimit` is meant to
+  bound the latency. Under overload the loss now happens at the device, which logs it.
+- All backends handle a playback ring buffer that stays full the same way. They wait for the
+  device to make room for up to eight chunk durations, then drop the whole chunk. CoreAudio, ASIO
+  and PipeWire previously pushed as much of the chunk as fitted, and every backend except threaded
+  ALSA gave up after half the time.
+- Overruns and underruns are logged the same way in every backend. A warning is printed once when
+  one starts, recovery from a playback underrun is logged at info, and the details of each event
+  are logged at trace. Some backends previously warned on every chunk or callback, flooding the
+  log, while others only logged at debug level.
+- The capture command handling, the pushing of playback chunks to the device, and the playback
+  side of rate adjust are now shared code, instead of one copy per backend.
 
 Config changes (breaking):
 - The `FivePointPeq` biquad combo is extended to a free number of bands, and is renamed
