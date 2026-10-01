@@ -294,13 +294,13 @@ fn apply_playback_write_result(
     }
 }
 
-/// Open the control interface of the card that `pcmdevice` belongs to.
-fn open_card_hctl(pcmdevice: &alsa::PCM) -> Option<HCtl> {
-    let card = pcmdevice.info().ok()?.get_card();
+/// Open and load the control interface of a card. Returns `None` if the device has no card,
+/// or if the control interface could not be opened.
+fn open_card_hctl(card: i32, nonblock: bool) -> Option<HCtl> {
     if card < 0 {
         return None;
     }
-    let h = HCtl::new(&format!("hw:{card}"), false).ok()?;
+    let h = HCtl::new(&format!("hw:{card}"), nonblock).ok()?;
     h.load().unwrap_or_default();
     Some(h)
 }
@@ -1091,7 +1091,10 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 let binary_format = sample_format.to_binary_format();
                                 // Looked up before reporting ready, so the outer thread knows
                                 // whether rate adjust goes to the device or to capture.
-                                let pitch_hctl = open_card_hctl(&pcmdevice);
+                                let pitch_hctl = pcmdevice
+                                    .info()
+                                    .ok()
+                                    .and_then(|info| open_card_hctl(info.get_card(), false));
                                 let pitch_elem = pitch_hctl
                                     .as_ref()
                                     .and_then(|h| find_playback_pitch(h, &pcmdevice));
@@ -1407,8 +1410,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let device = pcminfo.get_device();
                                 let subdevice = pcminfo.get_subdevice();
 
-                                let hctl =
-                                    (card >= 0).then(|| HCtl::new(&format!("hw:{card}"), true).unwrap());
+                                let hctl = open_card_hctl(card, true);
                                 let ctl =
                                     (card >= 0).then(|| Ctl::new(&format!("hw:{card}"), true).unwrap());
 
@@ -1421,7 +1423,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let mut element_loopback: Option<ElemData> = None;
                                 let mut element_uac2_gadget: Option<ElemData> = None;
                                 if let Some(h) = &hctl {
-                                    h.load().unwrap();
                                     element_loopback = find_elem(
                                         h,
                                         ElemIface::PCM,
