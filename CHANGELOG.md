@@ -78,6 +78,9 @@ Bugfixes:
   was filled with leftover audio from the previous chunk. It is now filled with silence.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
+- WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
+  which cannot tell packed 24-bit samples from padded ones. A driver could accept the format there
+  and then treat the samples as the other layout.
 
 Changes:
 - `Volume` filters in the pipeline that use the same fader must now have the same `ramp_time_ms`
