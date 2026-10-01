@@ -547,18 +547,20 @@ fn playback_loop(
                         prefilled as f64
                     }
                 };
-                // Published every chunk rather than once per adjust period, so a test
-                // polling the getter does not have to wait one out. The controller below
-                // uses the average over the period, the way the real backends do.
-                if let Some(mut playback_status) = params.playback_status.try_write() {
-                    playback_status.buffer_level = buffer_level as usize;
-                } else {
-                    xtrace!("playback status blocked, skip buffer level update");
-                }
+                // The controller uses the average over the adjust period, the way the
+                // real backends do.
                 if let Some(speed) = rate_reporter.update(buffer_level, &params.playback_status) {
                     status_channel
                         .send(StatusMessage::SetSpeed(speed))
                         .unwrap_or(());
+                }
+                // Published every chunk rather than once per adjust period, so a test
+                // polling the getter does not have to wait one out. Written after the
+                // reporter, which publishes the period average, so this value wins.
+                if let Some(mut playback_status) = params.playback_status.try_write() {
+                    playback_status.buffer_level = buffer_level as usize;
+                } else {
+                    xtrace!("playback status blocked, skip buffer level update");
                 }
                 let requested_drift = params.control.drift_ppm();
                 if requested_drift != drift_ppm {
