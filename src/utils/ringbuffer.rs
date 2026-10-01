@@ -37,7 +37,7 @@ pub struct RingBufferFeeder {
 impl RingBufferFeeder {
     pub fn new(chunksize: usize, samplerate: usize) -> Self {
         RingBufferFeeder {
-            retry_sleep: Duration::from_micros((1_000_000 * chunksize / samplerate / 2) as u64),
+            retry_sleep: Duration::from_secs_f64(chunksize as f64 / samplerate as f64 / 2.0),
             ring_full: false,
         }
     }
