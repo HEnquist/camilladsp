@@ -25,8 +25,8 @@ use crate::{CommandMessage, StatusMessage};
 pub enum CommandOutcome {
     /// Keep capturing.
     Continue,
-    /// Keep capturing, after setting the device pitch to this speed. Only returned when the
-    /// device has a pitch control.
+    /// The loop should set the device pitch to this speed, then keep capturing. Nothing has been
+    /// applied to the device yet. Only returned when the device has a pitch control.
     SetPitch(f64),
     /// The engine asked capture to stop. The loop ends the stream, normally with
     /// [`send_capture_done`].
