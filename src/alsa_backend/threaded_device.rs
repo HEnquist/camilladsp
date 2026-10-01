@@ -318,6 +318,16 @@ fn find_playback_pitch<'a>(h: &'a HCtl, pcmdevice: &alsa::PCM) -> Option<Elem<'a
     .map(ElemData::into_element)
 }
 
+/// Set the playback pitch of a UAC2 gadget from a capture speed. The pitch is the reciprocal,
+/// since it sets the playback clock. A failed write, for example when the gadget went away,
+/// is logged and playback goes on.
+fn write_playback_pitch(elem: &Elem, elval: &mut ElemValue, speed: f64) {
+    elval.set_integer(0, (1_000_000.0 / speed) as i32);
+    if let Err(err) = elem.write(elval) {
+        warn!("Failed to set the gadget playback pitch: {err}");
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_playback_inner_loop<C>(
     rx_play: &crossbeam_channel::Receiver<PlaybackDeviceMessage>,
@@ -388,8 +398,7 @@ fn run_playback_inner_loop<C>(
                         if let Some(elem_uac2_gadget) = &pitch_elem
                             && let Some(ref mut elval) = pitch_elval
                         {
-                            elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
-                            elem_uac2_gadget.write(elval).unwrap();
+                            write_playback_pitch(elem_uac2_gadget, elval, speed);
                         }
                     }
                     Ok(PlaybackDeviceMessage::EndOfStream) => {
@@ -497,8 +506,7 @@ fn run_playback_inner_loop<C>(
                     if let Some(elem_uac2_gadget) = &pitch_elem
                         && let Some(ref mut elval) = pitch_elval
                     {
-                        elval.set_integer(0, (1_000_000.0 / speed) as i32).unwrap();
-                        elem_uac2_gadget.write(elval).unwrap();
+                        write_playback_pitch(elem_uac2_gadget, elval, speed);
                     }
                 }
                 Ok(PlaybackDeviceMessage::EndOfStream) => {

@@ -672,13 +672,20 @@ fn playback_loop_bytes(
                         if adjust {
                             let capture_speed = rate_controller.next(avg_delay);
                             if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                let mut elval = ElemValue::new(ElemType::Integer).unwrap();
                                 // speed is reciprocal on playback side
-                                elval
-                                    .set_integer(0, (1_000_000.0 / capture_speed) as i32)
-                                    .unwrap();
-                                elem_uac2_gadget.write(&elval).unwrap();
-                                debug!("Set gadget playback speed to {capture_speed}");
+                                let res =
+                                    ElemValue::new(ElemType::Integer).and_then(|mut elval| {
+                                        elval.set_integer(0, (1_000_000.0 / capture_speed) as i32);
+                                        elem_uac2_gadget.write(&elval)
+                                    });
+                                match res {
+                                    Ok(_) => {
+                                        debug!("Set gadget playback speed to {capture_speed}")
+                                    }
+                                    Err(err) => {
+                                        warn!("Failed to set the gadget playback pitch: {err}")
+                                    }
+                                }
                             } else {
                                 debug!("Send SetSpeed message for speed {capture_speed}");
                                 channels
