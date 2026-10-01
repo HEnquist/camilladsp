@@ -1738,21 +1738,19 @@ impl CaptureDevice for AlsaCaptureDevice {
                             // the stream, and this loop follows when it reports the end.
                             // Once it has been forwarded, the channel is not polled again.
                             if !exit_forwarded {
-                                let mut forward_pitch = |speed: f64| {
-                                    tx_inner_command
-                                        .try_send(CommandMessage::SetSpeed { speed })
-                                        .unwrap_or_default();
-                                };
-                                let pitch = pitch_supported
-                                    .then_some(&mut forward_pitch as &mut dyn FnMut(f64));
                                 match handle_capture_command(
                                     command_channel.try_recv(),
                                     &mut rate_adjust,
                                     &mut resampler,
                                     async_src,
-                                    pitch,
+                                    pitch_supported,
                                 ) {
                                     CommandOutcome::Continue => {}
+                                    CommandOutcome::SetPitch(speed) => {
+                                        tx_inner_command
+                                            .try_send(CommandMessage::SetSpeed { speed })
+                                            .unwrap_or_default();
+                                    }
                                     CommandOutcome::Exit | CommandOutcome::Disconnected => {
                                         tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
                                         exit_forwarded = true;

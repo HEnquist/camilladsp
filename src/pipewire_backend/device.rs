@@ -1009,8 +1009,8 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                     loop {
                         // Check for commands
-                        match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, None) {
-                            CommandOutcome::Continue => {}
+                        match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, false) {
+                            CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
                             CommandOutcome::Exit => {
                                 exit_flag.store(true, Ordering::Relaxed);
                                 send_capture_done(&channel, &status_channel_clone);

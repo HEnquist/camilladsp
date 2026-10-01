@@ -205,20 +205,18 @@ fn capture_loop(
     loop {
         // With no resampler the device does what a clock-slave device does and runs its own
         // clock faster or slower, like the ALSA Loopback and UAC2 gadget pitch controls.
-        let mut set_clock = |speed: f64| {
-            pacer.set_rate(capture_clock_rate(device_rate, drift_ppm, speed, false));
-        };
-        let set_pitch = resampler
-            .is_none()
-            .then_some(&mut set_clock as &mut dyn FnMut(f64));
+        let device_pitch = resampler.is_none();
         match handle_capture_command(
             msg_channels.command.try_recv(),
             &mut rate_adjust,
             &mut resampler,
             params.async_src,
-            set_pitch,
+            device_pitch,
         ) {
             CommandOutcome::Continue => {}
+            CommandOutcome::SetPitch(speed) => {
+                pacer.set_rate(capture_clock_rate(device_rate, drift_ppm, speed, false));
+            }
             CommandOutcome::Exit => {
                 send_capture_done(&msg_channels.audio, &msg_channels.status);
                 break;

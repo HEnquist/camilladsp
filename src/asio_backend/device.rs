@@ -2132,9 +2132,9 @@ impl CaptureDevice for AsioCaptureDevice {
                         &mut rate_adjust,
                         &mut resampler,
                         async_src,
-                        None,
+                        false,
                     ) {
-                        CommandOutcome::Continue => {}
+                        CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
                         CommandOutcome::Exit => {
                             send_capture_done(&channel, &status_channel);
                             break 'deviceloop;

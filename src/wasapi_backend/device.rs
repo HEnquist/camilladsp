@@ -1277,8 +1277,8 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let _send_res = tx_start_inner.send(());
                 debug!("Capture device starts now!");
                 loop {
-                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, None) {
-                        CommandOutcome::Continue => {}
+                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, false) {
+                        CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
                         CommandOutcome::Exit => {
                             send_capture_done(&channel, &status_channel);
                             break;

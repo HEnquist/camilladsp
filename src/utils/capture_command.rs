@@ -25,6 +25,9 @@ use crate::{CommandMessage, StatusMessage};
 pub enum CommandOutcome {
     /// Keep capturing.
     Continue,
+    /// Keep capturing, after setting the device pitch to this speed. Only returned when the
+    /// device has a pitch control.
+    SetPitch(f64),
     /// The engine asked capture to stop. The loop ends the stream, normally with
     /// [`send_capture_done`].
     Exit,
@@ -34,14 +37,15 @@ pub enum CommandOutcome {
 
 /// Handle one result of `try_recv` on a capture thread's command channel.
 ///
-/// `SetSpeed` is applied here. It updates `rate_adjust`, then goes to `set_pitch` when the device
-/// can adjust its own clock, and otherwise to the resampler if that is asynchronous.
+/// `SetSpeed` updates `rate_adjust`. When the device can adjust its own clock (`device_pitch`)
+/// the speed is returned as [`CommandOutcome::SetPitch`] for the loop to apply, otherwise it goes
+/// to the resampler here if that is asynchronous.
 pub fn handle_capture_command(
     command: Result<CommandMessage, TryRecvError>,
     rate_adjust: &mut f64,
     resampler: &mut Option<ChunkResampler>,
     async_src: bool,
-    set_pitch: Option<&mut dyn FnMut(f64)>,
+    device_pitch: bool,
 ) -> CommandOutcome {
     match command {
         Ok(CommandMessage::Exit) => {
@@ -51,8 +55,8 @@ pub fn handle_capture_command(
         Ok(CommandMessage::SetSpeed { speed }) => {
             debug!("Requested to adjust capture speed to {speed}.");
             *rate_adjust = speed;
-            if let Some(set_pitch) = set_pitch {
-                set_pitch(speed);
+            if device_pitch {
+                return CommandOutcome::SetPitch(speed);
             } else if let Some(resampler) = resampler {
                 if async_src {
                     if resampler.set_resample_ratio_relative(speed, true).is_err() {
@@ -93,7 +97,7 @@ mod tests {
             &mut rate_adjust,
             &mut resampler,
             true,
-            None,
+            false,
         );
         assert_eq!(outcome, CommandOutcome::Exit);
         let outcome = handle_capture_command(
@@ -101,7 +105,7 @@ mod tests {
             &mut rate_adjust,
             &mut resampler,
             true,
-            None,
+            false,
         );
         assert_eq!(outcome, CommandOutcome::Disconnected);
         let outcome = handle_capture_command(
@@ -109,7 +113,7 @@ mod tests {
             &mut rate_adjust,
             &mut resampler,
             true,
-            None,
+            false,
         );
         assert_eq!(outcome, CommandOutcome::Continue);
         assert_eq!(rate_adjust, 1.0);
@@ -119,18 +123,15 @@ mod tests {
     fn set_speed_goes_to_the_pitch_control() {
         let mut rate_adjust = 1.0;
         let mut resampler = None;
-        let mut pitch = 0.0;
-        let mut set_pitch = |speed: f64| pitch = speed;
         let outcome = handle_capture_command(
             Ok(CommandMessage::SetSpeed { speed: 1.001 }),
             &mut rate_adjust,
             &mut resampler,
             true,
-            Some(&mut set_pitch),
+            true,
         );
-        assert_eq!(outcome, CommandOutcome::Continue);
+        assert_eq!(outcome, CommandOutcome::SetPitch(1.001));
         assert_eq!(rate_adjust, 1.001);
-        assert_eq!(pitch, 1.001);
     }
 
     #[test]
@@ -142,7 +143,7 @@ mod tests {
             &mut rate_adjust,
             &mut resampler,
             true,
-            None,
+            false,
         );
         assert_eq!(outcome, CommandOutcome::Continue);
         assert_eq!(rate_adjust, 0.999);

@@ -437,9 +437,9 @@ fn capture_loop(
             &mut rate_adjust,
             &mut resampler,
             params.async_src,
-            None,
+            false,
         ) {
-            CommandOutcome::Continue => {}
+            CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
             CommandOutcome::Exit => {
                 send_capture_done(&msg_channels.audio, &msg_channels.status);
                 break;

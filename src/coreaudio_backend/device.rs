@@ -1005,10 +1005,9 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                     }
                 };
                 'deviceloop: loop {
-                    let mut device_pitch = |speed: f64| set_pitch(device_id, speed as f32);
-                    let pitch = pitch_supported.then_some(&mut device_pitch as &mut dyn FnMut(f64));
-                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, pitch) {
+                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, pitch_supported) {
                         CommandOutcome::Continue => {}
+                        CommandOutcome::SetPitch(speed) => set_pitch(device_id, speed as f32),
                         CommandOutcome::Exit => {
                             send_capture_done(&channel, &status_channel);
                             break;
