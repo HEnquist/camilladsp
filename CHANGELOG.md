@@ -163,7 +163,8 @@ Changes:
   bound the latency. Under overload the loss now happens at the device, which logs it.
 - All backends handle a playback ring buffer that stays full the same way. They wait for the
   device to make room for up to eight chunk durations, then drop the whole chunk. CoreAudio, ASIO
-  and PipeWire previously pushed as much of the chunk as fitted, and gave up after half the time.
+  and PipeWire previously pushed as much of the chunk as fitted, and every backend except threaded
+  ALSA gave up after half the time.
 - Overruns and underruns are logged the same way in every backend. A warning is printed once when
   one starts, recovery from a playback underrun is logged at info, and the details of each event
   are logged at trace. Some backends previously warned on every chunk or callback, flooding the
