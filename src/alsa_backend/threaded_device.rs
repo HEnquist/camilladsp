@@ -969,13 +969,6 @@ fn open_pcm(
     Ok((pcmdev, chosen_format))
 }
 
-fn send_capture_audio(
-    channel: &crossbeam_channel::Sender<AudioMessage>,
-    msg: AudioMessage,
-) -> bool {
-    channel.send(msg).is_ok()
-}
-
 fn send_playback_device_message(
     channel: &crossbeam_channel::Sender<PlaybackDeviceMessage>,
     msg: PlaybackDeviceMessage,
@@ -1815,7 +1808,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             if device_stalled {
                                 if state != ProcessingState::Stalled {
                                     state = ProcessingState::Stalled;
-                                    if !send_capture_audio(&channel, AudioMessage::Pause) {
+                                    if channel.send(AudioMessage::Pause).is_err() {
                                         break;
                                     }
                                 }
@@ -1849,7 +1842,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 measured_rate = measured_rate_f;
                                 let changed = valuewatcher.check_value(measured_rate_f as f32);
                                 if changed && stop_on_rate_change {
-                                    let _ = send_capture_audio(&channel, AudioMessage::EndOfStream);
+                                    channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                     status_channel
                                         .send(StatusMessage::CaptureFormatChange(
                                             measured_rate_f as usize,
@@ -1885,10 +1878,10 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 if let Some(resampl) = &mut resampler {
                                     resampl.resample_chunk(&mut chunk, chunksize, channels);
                                 }
-                                if !send_capture_audio(&channel, AudioMessage::Audio(chunk)) {
+                                if channel.send(AudioMessage::Audio(chunk)).is_err() {
                                     break;
                                 }
-                            } else if !send_capture_audio(&channel, AudioMessage::Pause) {
+                            } else if channel.send(AudioMessage::Pause).is_err() {
                                 break;
                             }
                         }
