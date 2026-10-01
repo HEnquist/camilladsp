@@ -608,7 +608,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             Ok(AudioMessage::EndOfStream) => {
                                 status_channel_clone
                                     .send(StatusMessage::PlaybackDone)
-                                    .unwrap();
+                                    .unwrap_or(());
                                 break;
                             }
                             Err(err) => {
