@@ -87,6 +87,10 @@ pub fn send_capture_done(audio: &Sender<AudioMessage>, status: &Sender<StatusMes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProcessingParameters;
+    use crate::config;
+    use crate::utils::resampling::new_resampler;
+    use std::sync::Arc;
 
     #[test]
     fn exit_and_disconnect_end_the_loop() {
@@ -132,6 +136,39 @@ mod tests {
         );
         assert_eq!(outcome, CommandOutcome::SetPitch(1.001));
         assert_eq!(rate_adjust, 1.001);
+    }
+
+    #[test]
+    fn set_speed_for_the_pitch_control_leaves_an_async_resampler_alone() {
+        let mut rate_adjust = 1.0;
+        let mut resampler = new_resampler(
+            &Some(config::Resampler::Slip),
+            2,
+            48000,
+            48000,
+            1024,
+            Arc::new(ProcessingParameters::default()),
+        );
+        let ratio = |r: &Option<ChunkResampler>| r.as_ref().unwrap().resampler.resample_ratio();
+        let outcome = handle_capture_command(
+            Ok(CommandMessage::SetSpeed { speed: 1.0001 }),
+            &mut rate_adjust,
+            &mut resampler,
+            true,
+            true,
+        );
+        assert_eq!(outcome, CommandOutcome::SetPitch(1.0001));
+        assert_eq!(ratio(&resampler), 1.0);
+        // Without a pitch control the same speed goes to the resampler.
+        let outcome = handle_capture_command(
+            Ok(CommandMessage::SetSpeed { speed: 1.0001 }),
+            &mut rate_adjust,
+            &mut resampler,
+            true,
+            false,
+        );
+        assert_eq!(outcome, CommandOutcome::Continue);
+        assert_ne!(ratio(&resampler), 1.0);
     }
 
     #[test]
