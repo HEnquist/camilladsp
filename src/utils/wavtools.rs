@@ -21,8 +21,8 @@
 use std::fs::File;
 use std::io::{Read, Seek, Write};
 
-use waveadapter::SampleFormat;
 use waveadapter::header::read_wav_header;
+use waveadapter::{SampleFormat, WavSpec, WavWriter};
 
 use crate::Res;
 use crate::config::{BinarySampleFormat, ConfigError};
@@ -47,8 +47,8 @@ fn to_binary_format(format: SampleFormat) -> Option<BinarySampleFormat> {
         SampleFormat::I32 => Some(BinarySampleFormat::S32_LE),
         SampleFormat::F32 => Some(BinarySampleFormat::F32_LE),
         SampleFormat::F64 => Some(BinarySampleFormat::F64_LE),
-        // CamillaDSP has no unsigned 8-bit sample format.
-        SampleFormat::U8 => None,
+        // CamillaDSP has no unsigned 8-bit or companded sample formats.
+        SampleFormat::U8 | SampleFormat::ALAW | SampleFormat::MULAW => None,
     }
 }
 
@@ -80,16 +80,21 @@ pub fn find_data_in_wav(filename: &str) -> Res<WavParams> {
 pub fn find_data_in_wav_stream(f: impl Read + Seek) -> Res<WavParams> {
     let params = read_wav_header(f)
         .map_err(|err| ConfigError::new(&format!("Unable to parse as wav: {err}")))?;
-    let sample_format = match params.sample_format.and_then(to_binary_format) {
+    let sample_format = match params.sample_format().and_then(to_binary_format) {
         Some(format) => format,
         None => return Err(ConfigError::new("Unsupported wav format").into()),
     };
+    let data_offset = usize::try_from(params.data_offset)
+        .map_err(|_| ConfigError::new("Wav data offset is too large"))?;
+    // A length that does not fit is only possible on a 32-bit system,
+    // and then reading until the end of the file is the best that can be done.
+    let data_length = usize::try_from(params.data_length).unwrap_or(usize::MAX);
     Ok(WavParams {
         sample_format,
-        sample_rate: params.sample_rate,
-        data_offset: params.data_offset,
-        data_length: params.data_length,
-        channels: params.channels,
+        sample_rate: params.sample_rate(),
+        data_offset,
+        data_length,
+        channels: params.channels(),
     })
 }
 
@@ -102,8 +107,10 @@ pub fn write_wav_header(
     sample_format: BinarySampleFormat,
     samplerate: usize,
 ) -> Res<()> {
-    let format = to_wave_format(sample_format)?;
-    waveadapter::header::write_wav_header(dest, channels, format, samplerate, u32::MAX, u32::MAX)
+    let spec = WavSpec::new(channels, samplerate, to_wave_format(sample_format)?);
+    WavWriter::new_streaming(dest, spec)
+        .and_then(|writer| writer.into_inner())
+        .map(|_| ())
         .map_err(|err| ConfigError::new(&format!("Failed to write wav header: {err}")).into())
 }
 

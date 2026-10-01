@@ -67,6 +67,9 @@ Bugfixes:
 - The clipped samples counter no longer loses counts. The clipped samples of a chunk were dropped
   whenever the playback status was busy, for example while a websocket client read it, so the
   counter read low on a loaded machine, which is when clipping is most likely.
+- WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
+  which cannot tell packed 24-bit samples from padded ones. A driver could accept the format there
+  and then treat the samples as the other layout.
 
 Changes:
 - `Volume` filters in the pipeline that use the same fader must now have the same `ramp_time_ms`

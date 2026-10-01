@@ -803,7 +803,9 @@ Each entry in `capability_sets` has a `mode` field:
 - `Shared` — WASAPI shared mode. Always exactly one channel count and one sample rate; format is always `F32`.
 - `Exclusive` — WASAPI exclusive mode. Probed independently; supports multiple channel counts, sample rates, and formats.
   WASAPI does not provide a structured capability API, so the exclusive-mode scan must probe configurations one at a time.
-  Heuristics keep probe time reasonable, so not every valid configuration is guaranteed to appear for unusual devices.
+  The search is limited to the rates, channel counts and formats the driver declares support for.
+  For a driver that declares nothing, heuristics keep probe time reasonable instead,
+  and then not every valid configuration is guaranteed to appear for unusual devices.
 
 For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
 ```json
