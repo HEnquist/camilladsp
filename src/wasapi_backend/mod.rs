@@ -14,4 +14,5 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+pub mod capabilities;
 pub mod device;

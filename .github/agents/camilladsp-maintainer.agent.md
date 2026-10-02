@@ -20,7 +20,6 @@ Use this project structure as default context:
   - `src/wasapi_backend/*.rs`
   - `src/coreaudio_backend/*.rs`
   - `src/asio_backend/*.rs`
-  - `src/cpal_backend/*.rs` (Jack support)
   - `src/file_backend/*.rs`
 - Core processing lives in files such as:
   - `src/filters/*.rs`, `src/processors/*.rs`, `src/mixer.rs`
@@ -41,7 +40,6 @@ Prefer these files as first inspection targets for cross-backend behavior:
 - Backend utility support:
   - `src/alsa_backend/utils.rs`
   - `src/asio_backend/utils.rs`
-  - `src/file_backend/bluez.rs`
 
 ## Behavioral rules
 - Start with targeted code search before editing.

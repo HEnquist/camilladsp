@@ -1,0 +1,47 @@
+---
+# A dummy to dummy config that resamples on the capture side. Needs a build with the
+# dummy-backend feature.
+#
+# The capture device runs at 96 kHz and the pipeline at 48 kHz, so `capture_samplerate`
+# differs from `samplerate` and the resampler is really in the path. That is what reaches
+# `GetResamplerLoad`, the async and sync selection, and the capture side of rate adjust,
+# none of which any other config in the suite gets near.
+#
+# The rate adjust loop is on with a 0.2 s interval, for the same reason as in
+# dummy_rate.yml: the controller works on the error relative to the frames in one
+# interval, so a short one converges faster rather than slower.
+#
+# AsyncPoly is the resampler here because it is the cheap one. Resampling 96 kHz to 48 kHz
+# costs a tenth of a percent of a chunk period with AsyncPoly and a few percent with
+# AsyncSinc, so this leaves the rate control tests all the headroom there is to have on a
+# runner shared with whatever else is on it. The tests that want another resampler swap it
+# in, and none of them assert on timing.
+#
+# The tone sits on an FFT bin centre at 48 kHz, see test_spectrum.py for why that matters.
+#
+# The two port numbers are placeholders, replaced by the tests with free ports.
+devices:
+  samplerate: 48000
+  capture_samplerate: 96000
+  chunksize: 512
+  queuelimit: 8
+  target_level: 2048
+  enable_rate_adjust: true
+  adjust_interval_s: 0.2
+  resampler:
+    type: AsyncPoly
+    interpolation: Cubic
+  capture:
+    type: Dummy
+    channels: 2
+    control_port: 11111
+    signal:
+      type: Sine
+      freq: 984.375
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 2
+    control_port: 22222
+
+pipeline: []

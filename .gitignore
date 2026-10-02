@@ -11,3 +11,6 @@ coeffs/
 .venv
 *.csv
 *.exe
+# Python bytecode and pytest caches from the test scripts
+__pycache__/
+.pytest_cache/

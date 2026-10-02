@@ -20,7 +20,6 @@ Use this structure as your default map:
   - `src/wasapi_backend/*.rs`
   - `src/coreaudio_backend/*.rs`
   - `src/asio_backend/*.rs`
-  - `src/cpal_backend/*.rs`
   - `src/file_backend/*.rs`
 - Shared utility hotspots (often root cause for cross-backend timing/format issues):
   - `src/utils/resampling.rs`
@@ -30,7 +29,7 @@ Use this structure as your default map:
   - `src/utils/rate_controller.rs`
   - `src/utils/stash.rs`
   - `src/audiochunk.rs`
-  - `src/alsa_backend/utils.rs`, `src/asio_backend/utils.rs`, `src/file_backend/bluez.rs`
+  - `src/alsa_backend/utils.rs`, `src/asio_backend/utils.rs`
 - User-facing behavior references:
   - `README.md` section "How it works"
   - `backend_*.md`
