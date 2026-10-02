@@ -1205,25 +1205,29 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    let estimated_buffer_fill = buffer_fill
-                                        .try_lock()
-                                        .map(|b| b.estimate() as f64)
-                                        .unwrap_or_default();
-                                    let buffer_level =
-                                        estimated_buffer_fill + (channel.len() * chunksize) as f64;
-                                    if let Some(speed) =
-                                        rate_reporter.update(buffer_level, &playback_status)
+                                    // Skip the sample when the callback holds the lock,
+                                    // a 0 would drag the average down.
+                                    if let Some(estimated_buffer_fill) =
+                                        buffer_fill.try_lock().map(|b| b.estimate() as f64)
                                     {
-                                        if pitch_supported {
-                                            let _ = send_playback_device_message(
-                                                &tx_dev,
-                                                PlaybackDeviceMessage::SetPitch(speed),
-                                            );
-                                        } else {
-                                            status_channel
-                                                .send(StatusMessage::SetSpeed(speed))
-                                                .unwrap_or(());
+                                        let buffer_level = estimated_buffer_fill
+                                            + (channel.len() * chunksize) as f64;
+                                        if let Some(speed) =
+                                            rate_reporter.update(buffer_level, &playback_status)
+                                        {
+                                            if pitch_supported {
+                                                let _ = send_playback_device_message(
+                                                    &tx_dev,
+                                                    PlaybackDeviceMessage::SetPitch(speed),
+                                                );
+                                            } else {
+                                                status_channel
+                                                    .send(StatusMessage::SetSpeed(speed))
+                                                    .unwrap_or(());
+                                            }
                                         }
+                                    } else {
+                                        xtrace!("Buffer estimator busy, skip buffer level sample.");
                                     }
 
                                     chunk.update_stats(&mut chunk_stats);

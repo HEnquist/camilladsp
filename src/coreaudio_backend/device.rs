@@ -27,14 +27,14 @@ use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async
 use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
 use crossbeam_channel::{TryRecvError, TrySendError, bounded};
 use dispatch::Semaphore;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 use std::collections::VecDeque;
 use std::mem;
 use std::os::raw::c_void;
 use std::ptr::{NonNull, null, null_mut};
 use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
@@ -628,7 +628,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     sample_queue.drain(..nbr_bytes);
                     let curr_buffer_fill =
                         sample_queue.len() / blockalign + rx_dev.len() * chunksize;
-                    if let Ok(mut estimator) = buffer_fill_clone.try_lock() {
+                    if let Some(mut estimator) = buffer_fill_clone.try_lock() {
                         estimator.add(curr_buffer_fill)
                     }
                     Ok(())
@@ -722,10 +722,14 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            let estimated_buffer_fill = buffer_fill.try_lock().map(|b| b.estimate() as f64).unwrap_or_default();
-                            let buffer_level = estimated_buffer_fill + (channel.len() * chunksize) as f64;
-                            if let Some(speed) = rate_reporter.update(buffer_level, &playback_status) {
-                                status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
+                            // Skip the sample when the callback holds the lock, a 0 would drag the average down.
+                            if let Some(estimated_buffer_fill) = buffer_fill.try_lock().map(|b| b.estimate() as f64) {
+                                let buffer_level = estimated_buffer_fill + (channel.len() * chunksize) as f64;
+                                if let Some(speed) = rate_reporter.update(buffer_level, &playback_status) {
+                                    status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
+                                }
+                            } else {
+                                xtrace!("Buffer estimator busy, skip buffer level sample.");
                             }
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_playback_audio_buffer(&playback_status, &chunk);
