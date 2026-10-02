@@ -132,6 +132,30 @@ just after switching to the adjustable clock is accepted and then lost, so it is
 reads back. And a sample rate change has the HAL restore the clock source and pan it last saw,
 which can land just after the new rate reads back and undo a write made in between.
 
+## PipeWire on null sinks
+
+The tests in `pipewire/` carry the `pipewire` marker and run the PipeWire backend against two null
+sinks the suite creates itself. CamillaDSP captures the monitor of one, which a `pw-cat` feeder
+plays into, and plays into the other, whose monitor the test records with `pw-cat`. Both ends use
+`autoconnect_to`, and the capture uses `loopback`. They are the only tests that reach the PipeWire
+code at all. `pipewire/graph.py` explains which node is which and the PipeWire properties the
+tests are built on.
+
+PipeWire is userspace, so no VM is needed. The `pipewire` job in
+`.github/workflows/e2e_pipewire.yml` runs in a Debian trixie container and starts D-Bus, PipeWire
+and WirePlumber by hand. Trixie rather than the runner's own Ubuntu because the backend relies on
+`node.dont-fallback`, which needs WirePlumber 0.5. On a desktop already running PipeWire it is
+only the build:
+
+```sh
+cargo build --profile e2e --features pipewire-backend
+pytest -v testscripts/e2e -m pipewire
+```
+
+The tests skip when no daemon answers, and when the binary was built without the feature. Their
+nodes have names and a group of their own, so a CamillaDSP running on the default names is left
+alone, and the two null sinks stay in the graph until the daemon restarts.
+
 ## Layout
 
 - `conftest.py` — the fixtures that spawn the binary, wait for its websocket, and tear it down
@@ -167,7 +191,8 @@ which can land just after the new rate reads back and undo a write made in betwe
 - `*.yml` — the configs the tests load
 - `alsa/` — the ALSA suite, see "ALSA on real devices" above
 - `coreaudio/` — the CoreAudio suite, see "CoreAudio on BlackHole" above
-- `pytest.ini` — the global timeout, which makes every test a hang check, and the four markers
+- `pipewire/` — the PipeWire suite, see "PipeWire on null sinks" above
+- `pytest.ini` — the global timeout, which makes every test a hang check, and the markers
 
 ## Writing more
 
