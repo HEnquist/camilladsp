@@ -116,7 +116,7 @@ struct AsioPlaybackContext {
     read_tmp: Vec<u8>,
     target_level: usize,
     /// Estimator for the current buffer fill level.
-    buffer_fill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
+    buffer_fill: Arc<parking_lot::Mutex<countertimer::DeviceBufferEstimator>>,
     /// Whether the stream is currently running (receiving data).
     running: bool,
     /// Whether the stream stopped because of an underrun, as opposed to not having started.
@@ -375,7 +375,7 @@ pub unsafe extern "system" fn buffer_switch_playback(buffer_index: c_long, _dire
     // to represent total pending playback frames.
     let curr_buffer_fill =
         (ctx.sample_queue.len() + ctx.device_consumer.occupied_len()) / bytes_per_frame;
-    if let Ok(mut estimator) = ctx.buffer_fill.try_lock() {
+    if let Some(mut estimator) = ctx.buffer_fill.try_lock() {
         estimator.add(curr_buffer_fill);
     }
 }
@@ -1393,7 +1393,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (_tx_dev, _rx_dev) = bounded::<usize>(channel_capacity);
 
-                let buffer_fill = Arc::new(Mutex::new(
+                let buffer_fill = Arc::new(parking_lot::Mutex::new(
                     countertimer::DeviceBufferEstimator::new(samplerate),
                 ));
                 let buffer_fill_clone = buffer_fill.clone();
@@ -1679,7 +1679,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             // Skip the sample when the callback holds the lock,
                             // a 0 would drag the average down.
-                            if let Ok(estimated_buffer_fill) =
+                            if let Some(estimated_buffer_fill) =
                                 buffer_fill.try_lock().map(|b| b.estimate() as f64)
                             {
                                 let buffer_level =

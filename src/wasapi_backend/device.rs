@@ -25,12 +25,12 @@ use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
 use ringbuf::{HeapRb, traits::*};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 use wasapi;
@@ -563,7 +563,7 @@ fn playback_loop(
         )?;
         sample_queue.drain(..nbr_bytes);
         let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
-        if let Ok(mut estimator) = sync.bufferfill.try_lock() {
+        if let Some(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
         if !started {
@@ -979,7 +979,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         Ok(AudioMessage::Audio(chunk)) => {
                             // Skip the sample when the callback holds the lock,
                             // a 0 would drag the average down.
-                            if let Ok(estimated_buffer_fill) =
+                            if let Some(estimated_buffer_fill) =
                                 buffer_fill.try_lock().map(|b| b.estimate() as f64)
                             {
                                 let buffer_level =
