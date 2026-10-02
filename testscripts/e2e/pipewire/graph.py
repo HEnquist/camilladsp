@@ -90,9 +90,14 @@ def node_props(name):
     return None
 
 
-def linked_nodes(name):
-    """The names of the nodes linked to the node called `name`, in either direction."""
-    objects = dump()
+def linked_nodes(name, objects=None):
+    """The names of the nodes linked to the node called `name`, in either direction.
+
+    The links of every node with that name are merged, so this cannot tell one node
+    from two. `wait_for_links` checks the count as well.
+    """
+    if objects is None:
+        objects = dump()
     ids = set(_node_ids(objects, name))
     names = {
         obj["id"]: obj["info"]["props"].get("node.name")
@@ -122,11 +127,23 @@ def wait_for_node(name, present=True, timeout=5.0):
 
 
 def wait_for_links(name, expected, timeout=5.0):
-    """Wait for the node called `name` to be linked to exactly the nodes in `expected`."""
+    """Wait for one node called `name`, linked to exactly the nodes in `expected`.
+
+    One node, since a node left behind by an earlier session would link to the same
+    targets and look like the new one otherwise. Waited for rather than checked once,
+    so the old node going away just after the new one appears is not a failure.
+    """
     deadline = time.monotonic() + timeout
-    while (linked := linked_nodes(name)) != set(expected):
+    while True:
+        objects = dump()
+        count = len(_node_ids(objects, name))
+        linked = linked_nodes(name, objects)
+        if count == 1 and linked == set(expected):
+            return
         if time.monotonic() > deadline:
-            raise TimeoutError(f"node {name} is linked to {linked}, not {set(expected)}")
+            raise TimeoutError(
+                f"{count} nodes called {name} are linked to {linked}, not one to {set(expected)}"
+            )
         time.sleep(0.05)
 
 

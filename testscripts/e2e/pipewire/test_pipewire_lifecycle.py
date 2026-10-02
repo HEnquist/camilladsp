@@ -59,6 +59,10 @@ def test_the_nodes_carry_the_configured_properties(start_cdsp, pw_config, feeder
         playback={"node_description": "E2E playback"},
     )
     start_cdsp(config=config)
+    # Each side reports ready before its main loop runs, so Running does not mean the
+    # nodes are in the registry yet.
+    wait_for_node(CAPTURE_NODE)
+    wait_for_node(PLAYBACK_NODE)
     capture = node_props(CAPTURE_NODE)
     playback = node_props(PLAYBACK_NODE)
     assert capture["node.description"] == "E2E capture"
