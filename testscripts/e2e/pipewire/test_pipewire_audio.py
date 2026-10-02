@@ -99,14 +99,22 @@ def test_rate_adjust_stays_near_nominal(start_cdsp, pw_config, feeder):
     The playback reports its buffer level and the capture's async resampler takes the
     speed, which is the whole of rate adjust in this backend. Both ends run on one
     driver, so there is no drift to correct, and a loop that wanders off anyway has a
-    wrong sign or a wrong buffer level in it. Judged on a median, as in the ALSA rate
-    tests, since a single reading can catch the loop answering a scheduling hiccup.
+    wrong sign or a wrong buffer level in it, and ends up at the 0.5 % clamp. Judged on a
+    median, as in the ALSA rate tests, since a single reading can catch the loop
+    answering a scheduling hiccup.
+
+    The 1 s interval is on purpose, unlike the 0.2 s in the convergence tests. The
+    output is relative to the frames in one interval, so at 0.2 s a dip of 200 frames in
+    one period's average, a fifth of a chunk, already moves the speed by 0.4 %. This
+    test is about where the loop sits, not how fast it gets there. The speed is only
+    published once per status update, so the readings span a few seconds to get a
+    handful of distinct values.
     """
     config = pw_config(
         devices={
             "enable_rate_adjust": True,
             "target_level": 2048,
-            "adjust_interval_s": 0.2,
+            "adjust_interval_s": 1.0,
             "resampler": "{type: AsyncPoly, interpolation: Cubic}",
         }
     )
@@ -118,6 +126,6 @@ def test_rate_adjust_stays_near_nominal(start_cdsp, pw_config, feeder):
     readings = []
     for _ in range(10):
         readings.append(cdsp.send("GetRateAdjust"))
-        time.sleep(0.2)
+        time.sleep(0.5)
     assert abs(statistics.median(readings) - 1.0) < 0.002
     assert cdsp.send("GetState") == "Running"
