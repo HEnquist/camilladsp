@@ -176,8 +176,9 @@ The first application that opens either side of a Loopback decides the sample ra
 If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
 To change format or rate, both sides of the loopback must first be closed.
 
-When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config). 
-This contains example configuration files for setting up the entire system, and to have it start automatically after boot.
+To load the loopback module automatically at boot, create the file `/etc/modules-load.d/aloop.conf`
+containing the single line `snd-aloop`.
+To also start CamillaDSP automatically, run it as a systemd service, see [Using systemd](#using-systemd).
 
 ### ALSA CamillaDSP "I/O" plugin
 
@@ -302,15 +303,32 @@ If the permission is missing, CamillaDSP still runs, but logs a warning that it 
 priority.
 
 ### Using systemd
-If CamillaDSP runs as a systemd service, set the limit directly in the unit file and run as a normal user:
+If CamillaDSP runs as a systemd service, set the limit directly in the unit file and run as a normal user.
+A complete unit file can look like this:
 
 ```ini
+# /etc/systemd/system/camilladsp.service
+[Unit]
+Description=CamillaDSP
+After=sound.target
+
 [Service]
+Type=simple
 User=camilladsp
+ExecStart=/usr/local/bin/camilladsp /path/to/config.yml
+Restart=always
+RestartSec=1
 LimitRTPRIO=10
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 This is the most self-contained option, as the limit is part of the unit file.
+The user also needs access to the audio devices, which on most distributions means being a member of
+the `audio` group.
+Enable and start the service with `sudo systemctl daemon-reload` followed by
+`sudo systemctl enable --now camilladsp`.
 
 ### Using PAM limits
 For a login session, or when not using systemd, grant the limit through PAM.
@@ -373,8 +391,6 @@ https://www.alsa-project.org/wiki/Documentation
 https://www.volkerschatz.com/noise/alsa.html
 ### ALSA Plugin Documentation
 https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html
-### camilladsp-config
-https://github.com/HEnquist/camilladsp-config
 ### ALSA CamillaDSP plugin
 https://github.com/scripple/alsa_cdsp/
 

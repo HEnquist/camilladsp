@@ -12,18 +12,12 @@ The CamillaDSP project encompasses:
 *   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
     *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
         A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
-    *   **[camilladsp-setupscripts](https://github.com/HEnquist/camilladsp-setupscripts):**
-        Automated setup scripts.
     *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
         A Python library for interacting with the CamillaDSP engine via its websocket interface.
-    *   **[pyCamillaDSP-plot](https://github.com/HEnquist/pycamilladsp-plot):**
-        A Python library for visualizing CamillaDSP configurations and filter responses.
-    *   **[camilladsp-config](https://github.com/HEnquist/camilladsp-config):**
-        A repository of example configurations and scripts for common use cases.
     *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
         A controller for automatic sample rate switching.
 
-# CamillaDSP engine v4.2
+# CamillaDSP engine
 
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
@@ -285,8 +279,6 @@ These are the key dependencies for CamillaDSP.
 ## Companion libraries and tools
 These projects are part of the CamillaDSP family:
 * https://github.com/HEnquist/pycamilladsp - Library for communicating with CamillaDSP over websocket.
-* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations.
-* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service.
 
 ## GUI
 [CamillaGUI](https://github.com/HEnquist/camillagui-backend) is a user interface for CamillaDSP that is accessed via a web browser.
@@ -813,7 +805,25 @@ pulse.cmd = [
 PipeWire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the PipeWire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
-See the "camilladsp-config" repository under [Related projects](#related-projects) for an example PipeWire configuration.
+To create it, add a file such as `~/.config/pipewire/pipewire.conf.d/alsa-loopback.conf` containing:
+```
+context.objects = [
+    {   factory = adapter
+        args = {
+            factory.name     = api.alsa.pcm.sink
+            node.name        = "alsa-loopback"
+            node.description = "ALSA Loopback"
+            media.class      = "Audio/Sink"
+            api.alsa.path    = "hw:Loopback,0,0"
+            audio.format     = "S32LE"
+            audio.rate       = 44100
+            audio.channels   = 2
+        }
+    }
+]
+```
+CamillaDSP then captures from the other side of the loopback, `hw:Loopback,1,0`, with the same
+format and rate.
 
 # Configuration
 
