@@ -330,7 +330,10 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                 // Node properties for WirePlumber matching
                 // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
+                // NODE_RATE requests our sample rate as the graph rate. PipeWire only
+                // switches to it if it is in clock.allowed-rates.
                 let latency_str = format!("{}/{}", chunksize, samplerate);
+                let rate_str = format!("1/{}", samplerate);
                 let mut props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Playback",
@@ -339,6 +342,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     *pw::keys::NODE_NAME => node_name,
                     *pw::keys::NODE_DESCRIPTION => node_description,
                     *pw::keys::NODE_LATENCY => latency_str,
+                    *pw::keys::NODE_RATE => rate_str,
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if let Some(ref target) = autoconnect_to {
@@ -758,7 +762,10 @@ impl CaptureDevice for PipeWireCaptureDevice {
 
                 // Node properties for WirePlumber matching
                 // NODE_LATENCY requests PipeWire to use a quantum matching our chunksize
+                // NODE_RATE requests our sample rate as the graph rate. PipeWire only
+                // switches to it if it is in clock.allowed-rates.
                 let latency_str = format!("{}/{}", chunksize, capture_samplerate);
+                let rate_str = format!("1/{}", capture_samplerate);
                 let mut props = properties! {
                     *pw::keys::MEDIA_TYPE => "Audio",
                     *pw::keys::MEDIA_CATEGORY => "Capture",
@@ -767,6 +774,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                     *pw::keys::NODE_NAME => node_name,
                     *pw::keys::NODE_DESCRIPTION => node_description,
                     *pw::keys::NODE_LATENCY => latency_str,
+                    *pw::keys::NODE_RATE => rate_str,
                     *pw::keys::NODE_GROUP => node_group_name,
                 };
                 if loopback {
