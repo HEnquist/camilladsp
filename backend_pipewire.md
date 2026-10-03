@@ -143,6 +143,38 @@ Sinks are the nodes with a `media.class` of `Audio/Sink`.
 `wpctl status` lists them under "Sinks".
 
 
+## Sample rate
+
+PipeWire runs every node connected to the same driver at one shared graph rate,
+and converts the sample rate of any stream that uses a different one.
+CamillaDSP asks for its own rate as the graph rate by setting the `node.rate` property,
+using `samplerate` for the playback node and `capture_samplerate` for the capture node.
+This is the same request that `pw-cat` and the PulseAudio and ALSA compatibility layers make.
+
+It is only a request.
+PipeWire only switches the graph to it if the rate is listed in `default.clock.allowed-rates`,
+and that list contains just 48000 by default.
+To let a DAC run at the rate of the active config, add the rates it supports, for example with a
+drop-in file `~/.config/pipewire/pipewire.conf.d/10-rates.conf`:
+```
+context.properties = {
+    default.clock.allowed-rates = [ 44100 48000 88200 96000 ]
+}
+```
+PipeWire does not switch the rate of a driver that is already running other streams.
+Loading a config with a new rate recreates the CamillaDSP nodes,
+so the request follows the active config.
+
+With PipeWire capture there is no need to resample in CamillaDSP,
+since PipeWire delivers audio at whatever rate is requested.
+Keep `capture_samplerate` equal to `samplerate` (or leave it out).
+If they differ, both nodes request a rate and the highest one wins,
+so PipeWire may end up converting the rate on the capture side as well.
+
+To keep PipeWire from changing the rate, leave `default.clock.allowed-rates` at the default,
+or set `node.lock-rate` on the device node with a WirePlumber rule.
+
+
 ## WirePlumber routing
 
 CamillaDSP by default creates nodes that do not auto-connect to any devices.

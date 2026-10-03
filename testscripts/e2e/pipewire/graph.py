@@ -18,8 +18,9 @@ Four properties of PipeWire decide how the tests are written:
   With the stream at the graph rate there is nothing to convert, so an empty pipeline
   should hand back exactly what the feeder played.
 - The graph runs at one rate, 48 kHz unless told otherwise, and a stream at another rate
-  is resampled in its own adapter. A config at another rate still runs, and the graph
-  is never switched.
+  is resampled in its own adapter. A config at another rate still runs. CamillaDSP asks
+  for its rate with `node.rate`, but `clock.allowed-rates` holds only 48 kHz by default,
+  so the graph is never switched unless a test allows it, as test_pipewire_rate.py does.
 - A null sink is a driver on the system clock, and nodes in one `node.group` are
   scheduled by one driver, so both ends of CamillaDSP run on the same clock and nothing
   drifts.
@@ -145,6 +146,54 @@ def wait_for_links(name, expected, timeout=5.0):
                 f"{count} nodes called {name} are linked to {linked}, not one to {set(expected)}"
             )
         time.sleep(0.05)
+
+
+def driver_rate(name):
+    """The rate of the driver that schedules the node called `name`, or None.
+
+    Read from `pw-top`, since the rate a driver runs at is not a property and `pw-dump`
+    does not show it. pw-top lists each driver followed by its followers, which carry a
+    `+` before the name, and only the last of its two iterations is used, since the
+    first has no timing yet. RATE is the fourth column, and the name is always last.
+    """
+    lines = _run("pw-top", "-b", "-n", "2").stdout.splitlines()
+    headers = [index for index, line in enumerate(lines) if line.split()[:2] == ["S", "ID"]]
+    rate = None
+    for line in lines[headers[-1] + 1 :]:
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        if fields[-2] != "+":
+            rate = int(fields[3])
+        if fields[-1] == name:
+            return rate
+    return None
+
+
+def wait_for_driver_rate(name, expected, timeout=5.0):
+    """Wait for the node called `name` to be scheduled by a driver at `expected` Hz."""
+    deadline = time.monotonic() + timeout
+    while (rate := driver_rate(name)) != expected:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"the driver of {name} runs at {rate}, not {expected}")
+        time.sleep(0.1)
+
+
+def get_setting(key):
+    """The value of `key` in PipeWire's settings metadata, as `pw-metadata` prints it."""
+    for line in _run("pw-metadata", "-n", "settings", "0", key).stdout.splitlines():
+        if f"key:'{key}'" in line:
+            return line.split("value:'", 1)[1].split("'", 1)[0]
+    return None
+
+
+def set_setting(key, value):
+    """Set `key` in PipeWire's settings metadata.
+
+    There is deliberately no way to delete one: deleting `clock.allowed-rates` takes the
+    daemon down in PipeWire 1.4.2, so a test puts the old value back instead.
+    """
+    _run("pw-metadata", "-n", "settings", "0", key, value)
 
 
 def create_null_sink(name):

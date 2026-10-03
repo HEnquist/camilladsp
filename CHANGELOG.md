@@ -20,6 +20,9 @@ New features:
   of from a source, matching the `loopback` parameter of the WASAPI backend. This is also what
   makes `autoconnect_to` accept the name of a sink, since WirePlumber only considers sources when
   it resolves a capture target by name.
+- PipeWire capture and playback now request their sample rate as the graph rate via `node.rate`.
+  A multi-rate DAC can then run at the rate of the active config, if PipeWire is configured to
+  allow it with `default.clock.allowed-rates`. With the default settings nothing changes.
 
 Bugfixes:
 - Stricter validation of numeric config values. `devices.samplerate` and `devices.capture_samplerate`
