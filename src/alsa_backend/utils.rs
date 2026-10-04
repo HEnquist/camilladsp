@@ -601,7 +601,7 @@ pub fn process_events(
             EventAction::FormatChange(value) => {
                 debug!("Stopping, capture device sample format changed");
                 status_channel
-                    .send(StatusMessage::CaptureFormatChange(value))
+                    .send(StatusMessage::capture_rate_change(value))
                     .unwrap_or_default();
                 return CaptureResult::Done;
             }

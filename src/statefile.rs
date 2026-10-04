@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ProcessingParameters;
 use crate::config::{FiniteF32, NotFinite};
+use crate::controller::ControllerSettings;
 
 /// Persistent state that is saved to and loaded from the state file across restarts.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -38,6 +39,12 @@ pub struct State {
     /// A hand-edited file can hold `.nan` or `.inf`, which would reach the volume filter,
     /// so such a file fails to load like any other malformed one.
     pub volume: [FiniteF32; 5],
+    /// Settings for the built-in controller, see [`crate::controller`].
+    ///
+    /// Left out of the file when no controller feature has ever been set, so that a
+    /// statefile that doesn't use them still loads in an older version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller: Option<ControllerSettings>,
 }
 
 impl State {
@@ -46,6 +53,7 @@ impl State {
         config_path: Option<String>,
         mute: [bool; 5],
         volume: [f32; 5],
+        controller: Option<ControllerSettings>,
     ) -> Result<Self, NotFinite> {
         let finite = volume.map(FiniteF32::new);
         if finite.iter().any(Option::is_none) {
@@ -55,6 +63,7 @@ impl State {
             config_path,
             mute,
             volume: finite.map(Option::unwrap),
+            controller,
         })
     }
 
@@ -89,7 +98,10 @@ pub fn load_state(filename: &str) -> Option<State> {
             return None;
         }
     };
-    Some(state)
+    Some(State {
+        controller: state.controller.map(ControllerSettings::sanitized),
+        ..state
+    })
 }
 
 /// Build a [`State`] from the current parameters and save it to `filename`,
@@ -98,12 +110,14 @@ pub fn save_state(
     filename: &str,
     config_path: &Arc<Mutex<Option<String>>>,
     params: &ProcessingParameters,
+    controller: &Arc<Mutex<Option<ControllerSettings>>>,
     unsaved_changes: &Arc<AtomicBool>,
 ) {
     let state = match State::new(
         config_path.lock().as_ref().map(|s| s.to_string()),
         params.mutes(),
         params.volumes(),
+        controller.lock().clone(),
     ) {
         Ok(state) => state,
         Err(err) => {
@@ -153,12 +167,61 @@ mod tests {
             Some("config.yml".to_string()),
             [false, true, false, false, false],
             [-10.0, 0.0, 5.5, -150.0, 50.0],
+            None,
         )
         .unwrap();
         let yaml = yaml_serde::to_string(&state).unwrap();
+        // No controller section unless one is set.
+        assert!(!yaml.contains("controller"));
         let loaded: State = yaml_serde::from_str(&yaml).unwrap();
         assert_eq!(loaded, state);
         assert_eq!(loaded.volumes(), [-10.0, 0.0, 5.5, -150.0, 50.0]);
+    }
+
+    #[test]
+    fn roundtrip_controller_settings() {
+        let yaml = "config_path: conf.yml
+controller:
+  follow_capture:
+    specific: /configs/conf_$samplerate$.yml
+    adapt: true
+  error_recovery: true
+mute: [false, false, false, false, false]
+volume: [0.0, 0.0, 0.0, 0.0, 0.0]
+";
+        let state: State = yaml_serde::from_str(yaml).unwrap();
+        let controller = state.controller.clone().unwrap();
+        assert_eq!(
+            controller.specific_template(),
+            Some("/configs/conf_$samplerate$.yml")
+        );
+        assert!(controller.adapt_enabled());
+        assert!(controller.recovery_enabled());
+        let saved = yaml_serde::to_string(&state).unwrap();
+        let loaded: State = yaml_serde::from_str(&saved).unwrap();
+        assert_eq!(loaded, state);
+    }
+
+    #[test]
+    fn invalid_follow_settings_are_dropped_on_load() {
+        let dir = std::env::temp_dir().join("cdsp_statefile_invalid_follow.yml");
+        std::fs::write(
+            &dir,
+            "config_path: null
+controller:
+  follow_capture:
+    specific: conf.yml
+  error_recovery: true
+mute: [true, false, false, false, false]
+volume: [0.0, 0.0, 0.0, 0.0, 0.0]
+",
+        )
+        .unwrap();
+        let state = super::load_state(&dir.to_string_lossy()).unwrap();
+        let controller = state.controller.unwrap();
+        assert_eq!(controller.follow_capture, None);
+        assert!(controller.recovery_enabled());
+        assert!(state.mute[0]);
     }
 
     #[test]
@@ -170,7 +233,7 @@ mod tests {
             );
             assert!(yaml_serde::from_str::<State>(&yaml).is_err(), "{bad}");
         }
-        assert!(State::new(None, [false; 5], [0.0, f32::NAN, 0.0, 0.0, 0.0]).is_err());
-        assert!(State::new(None, [false; 5], [0.0, 0.0, 0.0, 0.0, f32::INFINITY]).is_err());
+        assert!(State::new(None, [false; 5], [0.0, f32::NAN, 0.0, 0.0, 0.0], None).is_err());
+        assert!(State::new(None, [false; 5], [0.0, 0.0, 0.0, 0.0, f32::INFINITY], None).is_err());
     }
 }

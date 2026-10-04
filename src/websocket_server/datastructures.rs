@@ -1,8 +1,33 @@
 use serde::{Deserialize, Serialize};
 use serde_json;
 
+use crate::controller::{ControllerSettings, FileCheck, SourceFormat};
 use crate::spectrum::SpectrumData;
 use crate::{AudioDeviceDescriptor, ProcessingState, StopReason};
+
+/// Value of the [`WsReply::GetControllerStatus`] reply.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct ControllerStatusReport {
+    /// The Specific config file that runs, `null` when the entry config runs as is or
+    /// adapted.
+    pub active_config_file: Option<String>,
+    /// The entry config file, the one `GetConfigFilePath` gives.
+    pub entry_config_file: Option<String>,
+    /// Waiting to retry after a device error.
+    pub recovering: bool,
+    /// Retries since the last session that ran long enough.
+    pub attempts: usize,
+    /// Seconds until the next retry, while waiting for one.
+    pub next_retry_s: Option<f32>,
+    /// The source format no config was found for, while waiting for the source to change.
+    pub waiting_for_source: Option<SourceFormat>,
+    /// Whether following is on, enabled and in wait mode.
+    pub following: bool,
+    /// Whether error recovery is on, enabled and in wait mode.
+    pub error_recovery: bool,
+    /// Why processing last stopped.
+    pub stop_reason: StopReason,
+}
 
 /// Side selector for [`WsCommand::SubscribeSignalLevels`] subscriptions.
 ///
@@ -182,6 +207,25 @@ pub(crate) enum WsCommand {
 
     /// Get the path of the currently loaded config file.
     GetConfigFilePath,
+
+    // ── Controller ────────────────────────────────────────────────────────
+    /// Get the settings of the built-in controller, the `controller` section of the
+    /// statefile. `null` when there is none.
+    GetControllerSettings,
+
+    /// Replace the settings of the built-in controller. They take effect at the next
+    /// session start, so send a [`Reload`](Self::Reload) to apply them at once.
+    ///
+    /// Argument: the whole `controller` section as an object, or `null` to remove it.
+    SetControllerSettings { value: Option<ControllerSettings> },
+
+    /// Get the state of the built-in controller: the running Specific config file,
+    /// error recovery, and whether it is waiting for the source to change format.
+    GetControllerStatus,
+
+    /// Check every file the Specific template can match, and report what is wrong with
+    /// each one. Loads every file, so it is meant to be run on demand rather than polled.
+    CheckControllerFiles,
 
     // ── State file ────────────────────────────────────────────────────────
     /// Get the path of the state file, if one is configured.
@@ -709,6 +753,29 @@ pub(crate) enum WsReply {
         result: WsResult,
         /// File path of the active config, or `null` if no file is loaded.
         value: Option<String>,
+    },
+    GetControllerSettings {
+        #[serde(flatten)]
+        result: WsResult,
+        /// The `controller` section, or `null` if there is none.
+        value: Option<ControllerSettings>,
+    },
+    SetControllerSettings {
+        #[serde(flatten)]
+        result: WsResult,
+    },
+    GetControllerStatus {
+        #[serde(flatten)]
+        result: WsResult,
+        /// The controller state.
+        value: ControllerStatusReport,
+    },
+    CheckControllerFiles {
+        #[serde(flatten)]
+        result: WsResult,
+        /// Each file the Specific template matches, with the format read from its name
+        /// and the problem found, if any. Empty when Specific is off.
+        value: Vec<FileCheck>,
     },
     GetStateFilePath {
         #[serde(flatten)]

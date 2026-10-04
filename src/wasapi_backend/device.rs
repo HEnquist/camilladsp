@@ -1108,7 +1108,7 @@ fn send_error_or_captureformatchange(
 ) {
     if check_for_format_change(rx) {
         debug!("Send CaptureFormatChange.");
-        tx.send(StatusMessage::CaptureFormatChange(0)).unwrap_or(());
+        tx.send(StatusMessage::capture_rate_change(0)).unwrap_or(());
     } else {
         debug!("Send CaptureError.");
         tx.send(StatusMessage::CaptureError(err)).unwrap_or(());
@@ -1381,7 +1381,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                                 if stop_on_rate_change {
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap_or(());
-                                    status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
+                                    status_channel.send(StatusMessage::capture_rate_change(measured_rate_f as usize)).unwrap_or(());
                                     break;
                                 }
                             }

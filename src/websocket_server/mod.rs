@@ -87,8 +87,8 @@ use tungstenite::Message;
 use tungstenite::WebSocket;
 
 use self::datastructures::{
-    AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
-    SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
+    AllLevels, ChannelLabels, ControllerStatusReport, Fader, PbCapLevels, SpectrumRequest,
+    SpectrumSide, SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
     WsSignalLevelSide,
 };
 use self::utils::{
@@ -106,6 +106,7 @@ use self::utils::{
 use self::utils::{accept_secure_stream, make_acceptor};
 use crate::ProcessingState;
 use crate::Res;
+use crate::controller::{self, ConfigSource, ControllerShared, LoadKind, LoadedConfig};
 use crate::signal_monitor::{self, SignalLevelSide as MonitorSignalLevelSide};
 use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
@@ -129,6 +130,7 @@ pub struct SharedData {
     pub state_change_notify: crossbeam_channel::Sender<()>,
     pub state_file_path: Option<String>,
     pub unsaved_state_change: Arc<AtomicBool>,
+    pub controller: ControllerShared,
 }
 
 #[derive(Debug, Clone)]
@@ -784,6 +786,30 @@ make_handler!(TcpStream, handle_tcp);
 #[cfg(feature = "secure-websocket")]
 make_handler!(TlsStream<TcpStream>, handle_tls);
 
+/// The config `PatchConfig` and `SetConfigValue` start from, as JSON, with its file name
+/// and what it is for. Null while nothing runs.
+///
+/// That is the raw config behind the running one, so that a patch doesn't freeze the
+/// expanded tokens or the adaptation following made. See [`crate::controller::RunningSource`].
+fn patch_base(shared_data: &SharedData) -> (serde_json::Value, Option<String>, LoadKind) {
+    let active = shared_data.active_config.lock();
+    if active.is_none() {
+        return (serde_json::Value::Null, None, LoadKind::Entry);
+    }
+    match &*shared_data.controller.running.lock() {
+        Some(running) => (
+            serde_json::to_value(&running.source.raw).unwrap(),
+            running.source.filename.clone(),
+            running.kind,
+        ),
+        None => (
+            serde_json::to_value(&*active).unwrap(),
+            None,
+            LoadKind::Entry,
+        ),
+    }
+}
+
 fn handle_command(
     command: WsCommand,
     shared_data_inst: &SharedData,
@@ -794,12 +820,19 @@ fn handle_command(
             let cfg_path = shared_data_inst.active_config_path.lock().clone();
             match cfg_path {
                 Some(path) => match config::load_config(path.as_str()) {
-                    Ok(mut conf) => match config::validate_config(&mut conf, Some(path.as_str())) {
-                        Ok(impulses) => {
+                    Ok(raw) => match LoadedConfig::validate(
+                        ConfigSource {
+                            raw,
+                            filename: Some(path.clone()),
+                        },
+                        LoadKind::Entry,
+                    ) {
+                        Ok(loaded) => {
                             debug!("WS: Config file loaded successfully, send to controller");
-                            match shared_data_inst.command_sender.try_send(
-                                ControllerMessage::ConfigChanged(Box::new(conf), impulses),
-                            ) {
+                            match shared_data_inst
+                                .command_sender
+                                .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
+                            {
                                 Ok(()) => Some(WsReply::Reload {
                                     result: WsResult::Ok,
                                 }),
@@ -1424,6 +1457,74 @@ fn handle_command(
                 .as_ref()
                 .map(|s| s.to_string()),
         }),
+        WsCommand::GetControllerSettings => Some(WsReply::GetControllerSettings {
+            result: WsResult::Ok,
+            value: shared_data_inst.controller.settings.lock().clone(),
+        }),
+        WsCommand::SetControllerSettings { value } => {
+            if let Some(settings) = &value
+                && let Err(message) = settings.validate()
+            {
+                return Some(WsReply::SetControllerSettings {
+                    result: WsResult::InvalidValueError { message },
+                });
+            }
+            if let Some(template) = value.as_ref().and_then(|s| s.specific_template()) {
+                let entry = shared_data_inst.controller.entry.lock().clone();
+                controller::log_preflight(template, entry.as_ref());
+            }
+            *shared_data_inst.controller.settings.lock() = value;
+            shared_data_inst
+                .unsaved_state_change
+                .store(true, Ordering::Relaxed);
+            shared_data_inst
+                .state_change_notify
+                .try_send(())
+                .unwrap_or(());
+            Some(WsReply::SetControllerSettings {
+                result: WsResult::Ok,
+            })
+        }
+        WsCommand::GetControllerStatus => {
+            let shared = &shared_data_inst.controller;
+            let settings = shared.settings();
+            let status = shared.status.lock().clone();
+            let stop_reason = shared_data_inst
+                .processing_status
+                .read()
+                .stop_reason
+                .clone();
+            Some(WsReply::GetControllerStatus {
+                result: WsResult::Ok,
+                value: ControllerStatusReport {
+                    active_config_file: status.active_config_file,
+                    entry_config_file: shared_data_inst.active_config_path.lock().clone(),
+                    recovering: status.recovering,
+                    attempts: status.attempts,
+                    next_retry_s: status
+                        .next_retry
+                        .map(|t| t.saturating_duration_since(Instant::now()).as_secs_f32()),
+                    waiting_for_source: status.waiting_for_source,
+                    following: shared.wait && settings.following_enabled(),
+                    error_recovery: shared.wait && settings.recovery_enabled(),
+                    stop_reason,
+                },
+            })
+        }
+        WsCommand::CheckControllerFiles => {
+            let shared = &shared_data_inst.controller;
+            let value = match shared.settings().specific_template() {
+                Some(template) => {
+                    let entry = shared.entry.lock().clone();
+                    controller::preflight(template, entry.as_ref())
+                }
+                None => Vec::new(),
+            };
+            Some(WsReply::CheckControllerFiles {
+                result: WsResult::Ok,
+                value,
+            })
+        }
         WsCommand::GetStateFilePath => Some(WsReply::GetStateFilePath {
             result: WsResult::Ok,
             value: shared_data_inst.state_file_path.clone(),
@@ -1459,11 +1560,17 @@ fn handle_command(
         },
         WsCommand::SetConfig { value: config_yml } => {
             match yaml_serde::from_str::<config::Configuration>(&config_yml) {
-                Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                    Ok(impulses) => {
+                Ok(raw) => match LoadedConfig::validate(
+                    ConfigSource {
+                        raw,
+                        filename: None,
+                    },
+                    LoadKind::Entry,
+                ) {
+                    Ok(loaded) => {
                         match shared_data_inst
                             .command_sender
-                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf), impulses))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
                         {
                             Ok(()) => Some(WsReply::SetConfig {
                                 result: WsResult::Ok,
@@ -1503,11 +1610,17 @@ fn handle_command(
         }
         WsCommand::SetConfigJson { value: config_json } => {
             match serde_json::from_str::<config::Configuration>(&config_json) {
-                Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                    Ok(impulses) => {
+                Ok(raw) => match LoadedConfig::validate(
+                    ConfigSource {
+                        raw,
+                        filename: None,
+                    },
+                    LoadKind::Entry,
+                ) {
+                    Ok(loaded) => {
                         match shared_data_inst
                             .command_sender
-                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf), impulses))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
                         {
                             Ok(()) => Some(WsReply::SetConfigJson {
                                 result: WsResult::Ok,
@@ -1546,8 +1659,7 @@ fn handle_command(
             }
         }
         WsCommand::PatchConfig { value } => {
-            let mut conf_as_value =
-                serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
+            let (mut conf_as_value, filename, kind) = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::PatchConfig {
@@ -1559,11 +1671,11 @@ fn handle_command(
             merge(&mut conf_as_value, &value);
             let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
             match updated_conf {
-                Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                    Ok(impulses) => {
+                Ok(raw) => match LoadedConfig::validate(ConfigSource { raw, filename }, kind) {
+                    Ok(loaded) => {
                         match shared_data_inst
                             .command_sender
-                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf), impulses))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
                         {
                             Ok(()) => Some(WsReply::PatchConfig {
                                 result: WsResult::Ok,
@@ -1602,8 +1714,7 @@ fn handle_command(
             }
         }
         WsCommand::SetConfigValue { pointer, value } => {
-            let mut conf_as_value =
-                serde_json::to_value(&*shared_data_inst.active_config.lock()).unwrap();
+            let (mut conf_as_value, filename, kind) = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::SetConfigValue {
@@ -1624,11 +1735,11 @@ fn handle_command(
             }
             let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
             match updated_conf {
-                Ok(mut conf) => match config::validate_config(&mut conf, None) {
-                    Ok(impulses) => {
+                Ok(raw) => match LoadedConfig::validate(ConfigSource { raw, filename }, kind) {
+                    Ok(loaded) => {
                         match shared_data_inst
                             .command_sender
-                            .try_send(ControllerMessage::ConfigChanged(Box::new(conf), impulses))
+                            .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
                         {
                             Ok(()) => Some(WsReply::SetConfigValue {
                                 result: WsResult::Ok,

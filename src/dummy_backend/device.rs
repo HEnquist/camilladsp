@@ -366,7 +366,7 @@ fn capture_loop(
                 if params.stop_on_rate_change {
                     msg_channels
                         .status
-                        .send(StatusMessage::CaptureFormatChange(measured_rate as usize))
+                        .send(StatusMessage::capture_rate_change(measured_rate as usize))
                         .unwrap_or(());
                     msg_channels
                         .audio

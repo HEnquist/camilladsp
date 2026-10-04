@@ -56,7 +56,8 @@ use objc2_core_audio::{
     AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
     AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyClockSource,
     kAudioDevicePropertyClockSourceNameForIDCFString, kAudioDevicePropertyClockSources,
-    kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
+    kAudioDevicePropertyNominalSampleRate, kAudioDevicePropertyStereoPan,
+    kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
@@ -141,6 +142,89 @@ pub fn get_device_id_from_name_and_scope(name: &str, input: bool) -> Option<Audi
             .copied();
     }
     None
+}
+
+/// Read the nominal sample rate and the number of input channels of a capture device,
+/// without opening it. `None` if the device can't be found or the rate can't be read.
+pub fn query_capture_format(devname: &Option<String>) -> Option<(usize, Option<usize>)> {
+    let device_id = match devname {
+        Some(name) => get_device_id_from_name_and_scope(name, true)?,
+        None => get_default_device_id(true)?,
+    };
+    let rate_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut rate: f64 = 0.0;
+    let rate_size = mem::size_of::<f64>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::from(&rate_address),
+            0,
+            null(),
+            NonNull::from(&rate_size),
+            NonNull::from(&mut rate).cast(),
+        )
+    };
+    if status != kAudioHardwareNoError || rate <= 0.0 {
+        debug!(
+            "Unable to read the nominal rate of capture device {devname:?}, error code: {status}."
+        );
+        return None;
+    }
+    Some((rate.round() as usize, input_channel_count(device_id)))
+}
+
+/// The total number of channels in the input streams of a device.
+fn input_channel_count(device_id: AudioDeviceID) -> Option<usize> {
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStreamConfiguration,
+        mScope: kAudioObjectPropertyScopeInput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let data_size = 0u32;
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            NonNull::from(&address),
+            0,
+            null(),
+            NonNull::from(&data_size),
+        )
+    };
+    if status != kAudioHardwareNoError || (data_size as usize) < mem::size_of::<u32>() {
+        return None;
+    }
+    // An AudioBufferList: a u32 buffer count, then the buffers. Read into u32 words
+    // so the buffers are aligned.
+    let mut words = vec![0u32; (data_size as usize).div_ceil(mem::size_of::<u32>())];
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::from(&address),
+            0,
+            null(),
+            NonNull::from(&data_size),
+            NonNull::new(words.as_mut_ptr()).unwrap().cast(),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return None;
+    }
+    let nbr_buffers = words[0] as usize;
+    let word = mem::size_of::<u32>();
+    let buffer_words = mem::size_of::<AudioBuffer>() / word;
+    // The buffers start after the count, padded to their own alignment.
+    let offset = mem::align_of::<AudioBuffer>().max(word) / word;
+    let mut channels = 0;
+    for n in 0..nbr_buffers {
+        // mNumberChannels is the first field of each AudioBuffer.
+        let index = offset + n * buffer_words;
+        channels += *words.get(index)? as usize;
+    }
+    Some(channels)
 }
 
 #[derive(Clone, Debug)]
@@ -1023,7 +1107,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             debug!("Capture rate change event, new rate: {rate}.");
                             if rate as usize != capture_samplerate {
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                                status_channel.send(StatusMessage::CaptureFormatChange(rate as usize)).unwrap_or(());
+                                status_channel.send(StatusMessage::capture_rate_change(rate as usize)).unwrap_or(());
                                 break;
                             }
                         },
@@ -1136,7 +1220,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                             if stop_on_rate_change {
                                 let msg = AudioMessage::EndOfStream;
                                 channel.send(msg).unwrap_or(());
-                                status_channel.send(StatusMessage::CaptureFormatChange(measured_rate_f as usize)).unwrap_or(());
+                                status_channel.send(StatusMessage::capture_rate_change(measured_rate_f as usize)).unwrap_or(());
                                 break;
                             }
                         }

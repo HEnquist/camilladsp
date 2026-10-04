@@ -574,7 +574,7 @@ fn capture_loop(
                             msg_channels.audio.send(msg).unwrap_or(());
                             msg_channels
                                 .status
-                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                .send(StatusMessage::capture_rate_change(measured_rate_f as usize))
                                 .unwrap_or(());
                             break;
                         }

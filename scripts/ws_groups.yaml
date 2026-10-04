@@ -110,6 +110,10 @@ groups:
       Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
       effect immediately. Changes via `SetConfigFilePath` require a subsequent
       `Reload` to be applied.
+      While the built-in controller follows the capture source, `GetConfig` returns
+      the config that runs, which is the loaded config adapted to the source rate or
+      a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
+      it was made from, so the patch carries over to the next format change.
     commands:
       - GetConfig
       - GetConfigJson
@@ -124,6 +128,17 @@ groups:
       - GetConfigValue
       - SetConfigValue
       - Reload
+
+  - name: Controller
+    description: >
+      The built-in controller follows the format of the capture source and recovers
+      from device errors. Its settings are the `controller` section of the statefile,
+      and both features only work in wait mode.
+    commands:
+      - GetControllerSettings
+      - SetControllerSettings
+      - GetControllerStatus
+      - CheckControllerFiles
 
   - name: Config reading and checking
     description: >

@@ -379,6 +379,9 @@ pub enum CaptureDevice {
         /// Port of the test control socket, see `src/dummy_backend/control.rs`.
         #[serde(default)]
         control_port: Option<u16>,
+        /// Port of the simulated source, see `src/dummy_backend/source.rs`.
+        #[serde(default)]
+        source_port: Option<u16>,
     },
 }
 
@@ -424,6 +427,93 @@ impl CaptureDevice {
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
             #[cfg(feature = "dummy-backend")]
             CaptureDevice::Dummy { labels, .. } => labels.clone(),
+        }
+    }
+
+    /// The backend type and the device it captures from, for telling whether two
+    /// configs capture from the same device. Channels, format and labels are left out.
+    pub fn device_key(&self) -> (&'static str, Option<String>) {
+        match self {
+            #[cfg(target_os = "linux")]
+            CaptureDevice::Alsa { device, .. } => ("Alsa", Some(device.clone())),
+            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+            CaptureDevice::PipeWire { node_name, .. } => ("PipeWire", node_name.clone()),
+            CaptureDevice::RawFile(dev) => ("RawFile", Some(dev.filename.clone())),
+            CaptureDevice::WavFile(dev) => ("WavFile", Some(dev.filename.clone())),
+            CaptureDevice::Stdin(_) => ("Stdin", None),
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio(dev) => ("CoreAudio", dev.device.clone()),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Wasapi(dev) => ("Wasapi", dev.device.clone()),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Asio(dev) => ("Asio", Some(dev.device.clone())),
+            CaptureDevice::SignalGenerator { .. } => ("SignalGenerator", None),
+            #[cfg(feature = "dummy-backend")]
+            CaptureDevice::Dummy { source_port, .. } => {
+                ("Dummy", source_port.map(|p| p.to_string()))
+            }
+        }
+    }
+
+    /// Whether the sample format is set explicitly, and if so, whether it is the one
+    /// the backend uses for `format`. `None` means the format is automatic, or that the
+    /// device has no format setting.
+    pub fn format_matches(&self, format: &BinarySampleFormat) -> Option<bool> {
+        match self {
+            #[cfg(target_os = "linux")]
+            CaptureDevice::Alsa { format: fmt, .. } => {
+                fmt.map(|f| f == AlsaSampleFormat::from_binary_format(format))
+            }
+            CaptureDevice::RawFile(dev) => Some(dev.format == *format),
+            CaptureDevice::Stdin(dev) => Some(dev.format == *format),
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio(dev) => dev
+                .format
+                .map(|f| Some(f) == CoreAudioSampleFormat::from_binary_format(format)),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Wasapi(dev) => dev
+                .format
+                .map(|f| Some(f) == WasapiSampleFormat::from_binary_format(format)),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Asio(dev) => dev
+                .format
+                .map(|f| Some(f) == AsioSampleFormat::from_binary_format(format)),
+            _ => None,
+        }
+    }
+
+    /// The name a sample format goes by in this backend's configs, used for the
+    /// `$format$` token.
+    pub fn format_name(&self, format: &BinarySampleFormat) -> String {
+        match self {
+            #[cfg(target_os = "linux")]
+            CaptureDevice::Alsa { .. } => {
+                format!("{:?}", AlsaSampleFormat::from_binary_format(format))
+            }
+            #[cfg(target_os = "macos")]
+            CaptureDevice::CoreAudio(_) => CoreAudioSampleFormat::from_binary_format(format)
+                .map(|f| format!("{f:?}"))
+                .unwrap_or_else(|| format.to_string()),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Wasapi(_) => WasapiSampleFormat::from_binary_format(format)
+                .map(|f| format!("{f:?}"))
+                .unwrap_or_else(|| format.to_string()),
+            #[cfg(target_os = "windows")]
+            CaptureDevice::Asio(_) => AsioSampleFormat::from_binary_format(format)
+                .map(|f| format!("{f:?}"))
+                .unwrap_or_else(|| format.to_string()),
+            _ => format.to_string(),
+        }
+    }
+
+    /// Whether the config asks the capture to stop when its source goes inactive.
+    pub fn stop_on_inactive(&self) -> bool {
+        match self {
+            #[cfg(target_os = "linux")]
+            CaptureDevice::Alsa {
+                stop_on_inactive, ..
+            } => stop_on_inactive.unwrap_or_default(),
+            _ => false,
         }
     }
 }
@@ -1795,6 +1885,7 @@ pub enum ConfigChange {
     None,
 }
 
+pub use self::utils::adapt_to_capture_rate;
 pub use self::utils::capture_channel_labels;
 pub use self::utils::check_all_finite;
 pub use self::utils::config_diff;
@@ -1802,5 +1893,7 @@ pub use self::utils::load_config;
 pub use self::utils::load_validate_config;
 pub use self::utils::max_channels;
 pub use self::utils::playback_channel_labels;
+pub use self::utils::set_capture_sample_format;
 pub use self::utils::used_capture_channels;
 pub use self::utils::validate_config;
+pub use self::utils::validate_config_at_rate;

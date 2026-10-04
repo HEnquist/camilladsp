@@ -203,60 +203,8 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 ConfigError::new("The samplerate override must be larger than zero").into(),
             );
         };
-        let cfg_rate = configuration.devices.samplerate();
-        let cfg_chunksize = configuration.devices.chunksize();
-
-        if configuration.devices.resampler.is_none() {
-            debug!("Apply override for samplerate: {rate}");
-            configuration.devices.samplerate = rate_nonzero;
-            let scaled_chunksize = if rate > cfg_rate {
-                cfg_chunksize * (rate as f32 / cfg_rate as f32).round() as usize
-            } else {
-                cfg_chunksize / (cfg_rate as f32 / rate as f32).round() as usize
-            };
-            // Scaling down is an integer division, so a small enough chunksize
-            // divides away entirely. Zero would hang the capture loop, and a
-            // configuration this odd should still run, so keep one frame.
-            let scaled_chunksize = NonZeroUsize::new(scaled_chunksize).unwrap_or_else(|| {
-                warn!(
-                    "Overriding the samplerate to {rate} scales chunksize {cfg_chunksize} below one frame, using 1"
-                );
-                NonZeroUsize::MIN
-            });
-            debug!(
-                "Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}"
-            );
-            configuration.devices.chunksize = scaled_chunksize;
-            #[allow(unreachable_patterns)]
-            match &mut configuration.devices.capture {
-                CaptureDevice::RawFile(dev) => {
-                    let new_extra = dev.extra_samples() * rate / cfg_rate;
-                    debug!(
-                        "Scale extra samples: {} -> {}",
-                        dev.extra_samples(),
-                        new_extra
-                    );
-                    dev.extra_samples = Some(new_extra);
-                }
-                CaptureDevice::Stdin(dev) => {
-                    let new_extra = dev.extra_samples() * rate / cfg_rate;
-                    debug!(
-                        "Scale extra samples: {} -> {}",
-                        dev.extra_samples(),
-                        new_extra
-                    );
-                    dev.extra_samples = Some(new_extra);
-                }
-                _ => {}
-            }
-        } else {
-            debug!("Apply override for capture_samplerate: {rate}");
-            configuration.devices.capture_samplerate = Some(rate_nonzero);
-            if rate == cfg_rate && !configuration.devices.rate_adjust() {
-                debug!("Disabling unneccesary 1:1 resampling");
-                configuration.devices.resampler = None;
-            }
-        }
+        debug!("Apply override for samplerate: {rate}");
+        adapt_to_capture_rate(configuration, rate_nonzero);
     }
     if let Some(extra) = overrides.extra_samples {
         debug!("Apply override for extra_samples: {extra}");
@@ -315,61 +263,129 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
     }
     if let Some(fmt) = overrides.sample_format {
         debug!("Apply override for capture sample format: {fmt}");
-        match &mut configuration.devices.capture {
-            CaptureDevice::RawFile(dev) => {
-                dev.format = fmt;
-            }
-            CaptureDevice::WavFile(_dev) => {}
-            CaptureDevice::Stdin(dev) => {
-                dev.format = fmt;
-            }
-            #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format, .. } => {
-                let mapped_format = AlsaSampleFormat::from_binary_format(&fmt);
-                *format = Some(mapped_format);
-            }
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-            CaptureDevice::PipeWire { .. } => {
-                error!("Not possible to override capture format for PipeWire, ignoring");
-            }
-            #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio(dev) => {
-                let mapped_format = CoreAudioSampleFormat::from_binary_format(&fmt);
-                if let Some(mapped) = mapped_format {
-                    dev.format = Some(mapped);
-                } else {
-                    let msg =
-                        format!("CoreAudio does not have a sample format corresponding to {fmt}");
-                    return Err(ConfigError::new(&msg).into());
-                }
-            }
-            #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi(dev) => {
-                let mapped_format = WasapiSampleFormat::from_binary_format(&fmt);
-                if let Some(mapped) = mapped_format {
-                    dev.format = Some(mapped);
-                } else {
-                    let msg =
-                        format!("Wasapi does not have a sample format corresponding to {fmt}");
-                    return Err(ConfigError::new(&msg).into());
-                }
-            }
-            #[cfg(target_os = "windows")]
-            CaptureDevice::Asio(dev) => {
-                let mapped_format = AsioSampleFormat::from_binary_format(&fmt);
-                if let Some(mapped) = mapped_format {
-                    dev.format = Some(mapped);
-                } else {
-                    let msg = format!("ASIO does not have a sample format corresponding to {fmt}");
-                    return Err(ConfigError::new(&msg).into());
-                }
-            }
-            CaptureDevice::SignalGenerator { .. } => {}
-            #[cfg(feature = "dummy-backend")]
-            CaptureDevice::Dummy { .. } => {}
-        }
+        set_capture_sample_format(&mut configuration.devices.capture, fmt)?;
     }
     Ok(())
+}
+
+/// Set the sample format of the capture device, mapped to the backend's own format type.
+///
+/// Devices that have no format setting are left alone. A backend without a format
+/// corresponding to `fmt` gives an error.
+pub fn set_capture_sample_format(capture: &mut CaptureDevice, fmt: BinarySampleFormat) -> Res<()> {
+    match capture {
+        CaptureDevice::RawFile(dev) => {
+            dev.format = fmt;
+        }
+        CaptureDevice::WavFile(_dev) => {}
+        CaptureDevice::Stdin(dev) => {
+            dev.format = fmt;
+        }
+        #[cfg(target_os = "linux")]
+        CaptureDevice::Alsa { format, .. } => {
+            let mapped_format = AlsaSampleFormat::from_binary_format(&fmt);
+            *format = Some(mapped_format);
+        }
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        CaptureDevice::PipeWire { .. } => {
+            error!("Not possible to override capture format for PipeWire, ignoring");
+        }
+        #[cfg(target_os = "macos")]
+        CaptureDevice::CoreAudio(dev) => {
+            let mapped_format = CoreAudioSampleFormat::from_binary_format(&fmt);
+            if let Some(mapped) = mapped_format {
+                dev.format = Some(mapped);
+            } else {
+                let msg = format!("CoreAudio does not have a sample format corresponding to {fmt}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+        #[cfg(target_os = "windows")]
+        CaptureDevice::Wasapi(dev) => {
+            let mapped_format = WasapiSampleFormat::from_binary_format(&fmt);
+            if let Some(mapped) = mapped_format {
+                dev.format = Some(mapped);
+            } else {
+                let msg = format!("Wasapi does not have a sample format corresponding to {fmt}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+        #[cfg(target_os = "windows")]
+        CaptureDevice::Asio(dev) => {
+            let mapped_format = AsioSampleFormat::from_binary_format(&fmt);
+            if let Some(mapped) = mapped_format {
+                dev.format = Some(mapped);
+            } else {
+                let msg = format!("ASIO does not have a sample format corresponding to {fmt}");
+                return Err(ConfigError::new(&msg).into());
+            }
+        }
+        CaptureDevice::SignalGenerator { .. } => {}
+        #[cfg(feature = "dummy-backend")]
+        CaptureDevice::Dummy { .. } => {}
+    }
+    Ok(())
+}
+
+/// Adapt a configuration to a new capture sample rate, the way the `-r` override does.
+///
+/// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk
+/// duration about the same. With a resampler, `capture_samplerate` is changed, and the
+/// resampler is dropped if that leaves a 1:1 conversion and rate adjust is off.
+pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsize) {
+    let cfg_rate = configuration.devices.samplerate();
+    let cfg_chunksize = configuration.devices.chunksize();
+    let rate_value = rate.get();
+
+    if configuration.devices.resampler.is_none() {
+        debug!("Adapt samplerate to {rate_value}");
+        configuration.devices.samplerate = rate;
+        let scaled_chunksize = if rate_value > cfg_rate {
+            cfg_chunksize * (rate_value as f32 / cfg_rate as f32).round() as usize
+        } else {
+            cfg_chunksize / (cfg_rate as f32 / rate_value as f32).round() as usize
+        };
+        // Scaling down is an integer division, so a small enough chunksize
+        // divides away entirely. Zero would hang the capture loop, and a
+        // configuration this odd should still run, so keep one frame.
+        let scaled_chunksize = NonZeroUsize::new(scaled_chunksize).unwrap_or_else(|| {
+            warn!(
+                "Changing the samplerate to {rate_value} scales chunksize {cfg_chunksize} below one frame, using 1"
+            );
+            NonZeroUsize::MIN
+        });
+        debug!("Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}");
+        configuration.devices.chunksize = scaled_chunksize;
+        #[allow(unreachable_patterns)]
+        match &mut configuration.devices.capture {
+            CaptureDevice::RawFile(dev) => {
+                let new_extra = dev.extra_samples() * rate_value / cfg_rate;
+                debug!(
+                    "Scale extra samples: {} -> {}",
+                    dev.extra_samples(),
+                    new_extra
+                );
+                dev.extra_samples = Some(new_extra);
+            }
+            CaptureDevice::Stdin(dev) => {
+                let new_extra = dev.extra_samples() * rate_value / cfg_rate;
+                debug!(
+                    "Scale extra samples: {} -> {}",
+                    dev.extra_samples(),
+                    new_extra
+                );
+                dev.extra_samples = Some(new_extra);
+            }
+            _ => {}
+        }
+    } else {
+        debug!("Adapt capture_samplerate to {rate_value}");
+        configuration.devices.capture_samplerate = Some(rate);
+        if rate_value == cfg_rate && !configuration.devices.rate_adjust() {
+            debug!("Disabling unneccesary 1:1 resampling");
+            configuration.devices.resampler = None;
+        }
+    }
 }
 
 fn replace_tokens(string: &str, samplerate: usize, channels: usize) -> String {
@@ -554,9 +570,25 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
 /// it if the configuration is only being checked. See
 /// [`ImpulseCache`](crate::filters::fftconv::ImpulseCache).
 pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<ImpulseCache> {
+    validate_config_at_rate(conf, filename, None)
+}
+
+/// Validate a configuration like [`validate_config`], adapted to a capture sample rate.
+///
+/// The adaptation, see [`adapt_to_capture_rate`], is applied after the CLI overrides, so
+/// that a `-r` override does not undo it, and before the tokens are expanded, so that
+/// `$samplerate$` gives the new rate.
+pub fn validate_config_at_rate(
+    conf: &mut Configuration,
+    filename: Option<&str>,
+    capture_rate: Option<NonZeroUsize>,
+) -> Res<ImpulseCache> {
     let mut impulses = ImpulseCache::new();
     // pre-process by applying overrides and replacing tokens
     apply_overrides(conf)?;
+    if let Some(rate) = capture_rate {
+        adapt_to_capture_rate(conf, rate);
+    }
     replace_tokens_in_config(conf);
     if let Some(fname) = filename {
         replace_relative_paths_in_config(conf, fname);

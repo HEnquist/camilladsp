@@ -129,10 +129,12 @@ impl EnginePipeline {
 
 /// Open the devices and spawn the capture, processing, and playback threads for
 /// `active_config`. Returns the supervisor handles plus the channel on which the
-/// device threads report their status.
+/// device threads report their status. `follow` tells the capture that the controller
+/// follows its source format, see [`audiodevice::new_capture_device`].
 pub fn start_pipeline(
     active_config: &config::Configuration,
     status_structs: &StatusStructs,
+    follow: bool,
 ) -> (EnginePipeline, crossbeam_channel::Receiver<StatusMessage>) {
     // Before any audio thread exists, so that none of them has to allocate.
     stash::prefill_for_config(active_config);
@@ -173,7 +175,7 @@ pub fn start_pipeline(
     }
 
     // Capture thread
-    let mut capture_dev = audiodevice::new_capture_device(active_config.devices.clone());
+    let mut capture_dev = audiodevice::new_capture_device(active_config.devices.clone(), follow);
     let cap_handle = capture_dev
         .start(
             tx_cap,

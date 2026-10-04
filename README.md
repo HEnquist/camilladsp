@@ -97,6 +97,7 @@ and the Mozilla Public License Version 2.0:
 **[How to run](#how-to-run)**
 - **[Command line options](#command-line-options)**
 - **[Reloading the configuration](#reloading-the-configuration)**
+- **[Following the capture source and error recovery](#following-the-capture-source-and-error-recovery)**
 - **[Controlling via websocket](#controlling-via-websocket)**
 
 **[Processing audio](#processing-audio)**
@@ -577,6 +578,9 @@ Options:
   -n, --channels <CHANNELS>            Override number of channels of capture device in config
   -r, --samplerate <SAMPLERATE>        Override samplerate in config
   -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16_LE, S24_3_LE, S24_4_LJ_LE, S24_4_RJ_LE, S32_LE, F32_LE, F64_LE]
+      --follow_specific <TEMPLATE>     Follow the capture format with per-format config files, from a template with $samplerate$, $channels$ or $format$ tokens
+      --follow_adapt                   Follow the capture rate by adapting the config to it
+      --error_recovery                 Retry with increasing intervals after a device error
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -656,6 +660,9 @@ volume:
   - 0.0
 ```
 
+The statefile can also hold a `controller` section, see
+[Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
+
 ### Websocket
 
 To enable the websocket server, provide a port number with the `--port` option. Leave it out, or give 0 to disable.
@@ -726,6 +733,97 @@ These are the exit codes CamillaDSP will give:
 The configuration can be reloaded without restarting by sending a SIGHUP to the camilladsp process.
 This will reload the config and if possible apply the new settings without interrupting the processing.
 Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
+
+## Following the capture source and error recovery
+CamillaDSP has a built-in controller that can do two things on its own:
+- follow the format of the capture source, by switching to a config that matches the new
+  sample rate (and channel count or sample format, where the backend reports them),
+- recover from device errors, by retrying the config that was running.
+
+Both only work in wait mode, `--wait`. Without it, CamillaDSP exits when processing stops,
+whatever the reason, as before.
+
+### Settings
+The settings are kept in a `controller` section of the statefile:
+```yaml
+config_path: /home/user/configs/conf_48000.yml
+controller:
+  follow_capture:
+    specific: /home/user/configs/conf_$samplerate$.yml
+    adapt: true
+  error_recovery: true
+mute: [false, false, false, false, false]
+volume: [0.0, 0.0, 0.0, 0.0, 0.0]
+```
+
+Leave out `follow_capture` to disable following, and `error_recovery` (or set it to false) to
+disable error recovery.
+The same settings can be switched on from the command line with `--follow_specific <TEMPLATE>`,
+`--follow_adapt` and `--error_recovery`.
+These only switch things on. Each one overrides its own field of the statefile, and the result
+is written back to the statefile at startup.
+Over the websocket, the settings are read and changed with `GetControllerSettings` and
+`SetControllerSettings`.
+A change takes effect at the next session start, so send a `Reload` to apply it at once.
+
+### Following the capture format
+The config that is loaded explicitly, from the command line, the statefile, `SetConfig`,
+`SetConfigFilePath` plus `Reload` and so on, is the _entry config_.
+When the capture device reports that the source changed format, the controller asks two
+config providers for a config to run for the new format:
+
+- __Specific__ (`specific`): a file name template with one or more of the tokens
+  `$samplerate$`, `$channels$` and `$format$`.
+  The tokens are replaced by the values the backend reported, and that file is loaded.
+  A relative template is resolved from the directory of the entry config file,
+  but absolute paths are recommended.
+  This is the provider to use when the channel count changes with the rate,
+  as with ADAT S/MUX, since then the mixers have to change as well.
+- __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
+  `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
+
+The Specific provider is asked first, then Adapt. Either one can be used alone.
+Adapt always starts from the entry config, so switching back and forth doesn't drift.
+A rate measured by the backend, like 44097, is snapped to the nearest standard rate.
+
+A Specific file is only used if it captures from the same device as the entry config,
+and if its capture rate, channels and format match what the source reported.
+A file that doesn't match is logged as an error and skipped.
+The websocket command `CheckControllerFiles` checks every file the template can match,
+and reports the problems found.
+
+If no provider has a config for the new format, the controller waits for the source to change.
+It asks the backend what the source is doing once per second, and starts the matching config
+as soon as there is one.
+Any command, for example a new config or `Stop`, ends the wait.
+
+While following is on, the controller decides what happens when the source changes,
+so `stop_on_rate_change` is always on, and `stop_on_inactive` is always off.
+
+`GetConfig` returns the config that runs, which may be an adapted config or a Specific file.
+`GetConfigFilePath` and the statefile keep the path of the entry config,
+so a restart or `Reload` starts from the entry config and selects again.
+`PatchConfig` and `SetConfigValue` patch the config the running one was made from,
+so a patch carries over to the next format change.
+
+The backends report format changes differently:
+- CoreAudio reports the new rate as soon as the device changes rate,
+  and the controller reads the nominal rate and channel count of the device while it waits.
+- ALSA, the file backends and WASAPI detect a rate change by measuring the incoming rate.
+- ASIO reports a rate change from the driver.
+
+### Error recovery
+When processing stops because of a capture or playback error, the controller tries again with
+the config that was running.
+The first retry comes after 1 second, and the wait doubles for each failed attempt, up to
+30 seconds. It keeps trying until the device comes back.
+A session that has run for 10 seconds resets the wait.
+A stop because the stream ended, a format change, or a config that doesn't validate is not
+retried.
+A `Stop` or a new config cancels the retries.
+
+`GetControllerStatus` shows the state of the controller: the Specific file that runs,
+whether it is retrying and how many attempts it has made, and the format it is waiting for.
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./websocket.md)

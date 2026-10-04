@@ -590,7 +590,7 @@ Returns: `[integer (≥ 0), boolean]` — `[fader_index, new_mute_state]` after 
 
 ### Config management
 
-Read and modify the active configuration. Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take effect immediately. Changes via `SetConfigFilePath` require a subsequent `Reload` to be applied.
+Read and modify the active configuration. Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take effect immediately. Changes via `SetConfigFilePath` require a subsequent `Reload` to be applied. While the built-in controller follows the capture source, `GetConfig` returns the config that runs, which is the loaded config adapted to the source rate or a per-format config file. `PatchConfig` and `SetConfigValue` patch the config it was made from, so the patch carries over to the next format change.
 
 #### `GetConfig`
 
@@ -673,6 +673,57 @@ is the JSON value to store there.
 #### `Reload`
 
 Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+
+### Controller
+
+The built-in controller follows the format of the capture source and recovers from device errors. Its settings are the `controller` section of the statefile, and both features only work in wait mode.
+
+#### `GetControllerSettings`
+
+Get the settings of the built-in controller, the `controller` section of the
+statefile. `null` when there is none.
+
+Returns: `ControllerSettings | null` — The `controller` section, or `null` if there is none.
+
+**`ControllerSettings` fields:**
+
+- `follow_capture`: `FollowCapture | null` — Follow the capture source format, absent to disable following.
+- `error_recovery`: `boolean | null` — Retry after a device error.
+
+#### `SetControllerSettings`
+
+Replace the settings of the built-in controller. They take effect at the next
+session start, so send a `Reload` to apply them at once.
+
+Argument: `ControllerSettings | null` — the whole `controller` section as an object, or `null` to remove it.
+
+#### `GetControllerStatus`
+
+Get the state of the built-in controller: the running Specific config file,
+error recovery, and whether it is waiting for the source to change format.
+
+Returns: `ControllerStatusReport` — The controller state.
+
+**`ControllerStatusReport` fields:**
+
+- `active_config_file`: `string | null` — The Specific config file that runs, `null` when the entry config runs as is or
+adapted.
+- `entry_config_file`: `string | null` — The entry config file, the one `GetConfigFilePath` gives.
+- `recovering`: `boolean` — Waiting to retry after a device error.
+- `attempts`: `integer (≥ 0)` — Retries since the last session that ran long enough.
+- `next_retry_s`: `number | null` — Seconds until the next retry, while waiting for one.
+- `waiting_for_source`: `SourceFormat | null` — The source format no config was found for, while waiting for the source to change.
+- `following`: `boolean` — Whether following is on, enabled and in wait mode.
+- `error_recovery`: `boolean` — Whether error recovery is on, enabled and in wait mode.
+- `stop_reason`: `StopReason` — Why processing last stopped.
+
+#### `CheckControllerFiles`
+
+Check every file the Specific template can match, and report what is wrong with
+each one. Loads every file, so it is meant to be run on demand rather than polled.
+
+Returns: `FileCheck[]` — Each file the Specific template matches, with the format read from its name
+and the problem found, if any. Empty when Specific is off.
 
 ### Config reading and checking
 

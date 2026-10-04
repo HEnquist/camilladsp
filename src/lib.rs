@@ -198,6 +198,8 @@ pub mod config;
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
 
+/// Built-in controller: source format following and error recovery.
+pub mod controller;
 #[cfg(feature = "dummy-backend")]
 pub mod dummy_backend;
 /// Top-level engine: device startup, supervisor loop, and restart logic.
@@ -251,8 +253,8 @@ pub enum StatusMessage {
     CaptureError(String),
     /// Playback device detected a sample-rate change to the given value.
     PlaybackFormatChange(usize),
-    /// Capture device detected a sample-rate change to the given value.
-    CaptureFormatChange(usize),
+    /// Capture device detected a format change, with the new format as far as it knows it.
+    CaptureFormatChange(controller::SourceFormat),
     /// Playback device thread has finished normally.
     PlaybackDone,
     /// Capture device thread has finished normally.
@@ -263,6 +265,13 @@ pub enum StatusMessage {
     SetVolume(f32),
     /// Request to set the master mute state.
     SetMute(bool),
+}
+
+impl StatusMessage {
+    /// A capture format change where only the new rate is known, 0 if not even that.
+    pub fn capture_rate_change(rate: usize) -> Self {
+        StatusMessage::CaptureFormatChange(controller::SourceFormat::rate(rate))
+    }
 }
 
 /// Commands sent from the supervisor to an audio device thread.
@@ -284,13 +293,13 @@ pub enum ExitState {
 
 /// Messages sent to the engine controller (WebSocket server or external caller).
 pub enum ControllerMessage {
-    /// A new configuration has been loaded and should replace the active one.
+    /// A config has been loaded. The controller selects what to run from it, see
+    /// [`controller::select_config`].
     ///
-    /// The [`ImpulseCache`](filters::fftconv::ImpulseCache) is what validating
-    /// the configuration read, carried along so that applying it does not have
-    /// to read the same coefficient files a second time.
+    /// It carries the result of validating the config as is, so that a config that
+    /// runs as is does not have its coefficient files read a second time.
     // Config must be boxed, to prevent "large size difference between variants" warning
-    ConfigChanged(Box<config::Configuration>, filters::fftconv::ImpulseCache),
+    ConfigChanged(Box<controller::LoadedConfig>),
     /// Stop processing but remain ready for a new configuration.
     Stop,
     /// Shut down the engine entirely.

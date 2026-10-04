@@ -2113,7 +2113,7 @@ impl CaptureDevice for AsioCaptureDevice {
                             .send(AudioMessage::EndOfStream)
                             .unwrap_or(());
                         status_channel
-                            .send(StatusMessage::CaptureFormatChange(new_rate))
+                            .send(StatusMessage::capture_rate_change(new_rate))
                             .unwrap_or(());
                         break 'deviceloop;
                     }
@@ -2242,7 +2242,7 @@ impl CaptureDevice for AsioCaptureDevice {
                                     .send(AudioMessage::EndOfStream)
                                     .unwrap_or(());
                                 status_channel
-                                    .send(StatusMessage::CaptureFormatChange(
+                                    .send(StatusMessage::capture_rate_change(
                                         measured_rate_f as usize,
                                     ))
                                     .unwrap_or(());

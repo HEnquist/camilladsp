@@ -43,6 +43,7 @@ use crate::CommandMessage;
 use crate::Res;
 use crate::StatusMessage;
 use crate::audiochunk::AudioChunk;
+use crate::controller::{SourceFormat, SourceState};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
@@ -239,8 +240,60 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
     }
 }
 
+/// Ask a capture backend what its source is doing right now, without opening the
+/// device for capture. Used by the controller at startup and while waiting for the
+/// source to change format.
+pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
+    match conf {
+        // Follows in the ALSA work, with the loopback and gadget controls.
+        #[cfg(target_os = "linux")]
+        config::CaptureDevice::Alsa { .. } => SourceState::Unknown,
+        #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
+        config::CaptureDevice::PipeWire { .. } => SourceState::Unknown,
+        // Files are out of scope for following.
+        config::CaptureDevice::RawFile(_)
+        | config::CaptureDevice::WavFile(_)
+        | config::CaptureDevice::Stdin(_) => SourceState::Unknown,
+        #[cfg(target_os = "macos")]
+        config::CaptureDevice::CoreAudio(dev) => {
+            match coreaudiodevice::query_capture_format(&dev.device) {
+                Some((rate, channels)) => SourceState::Format(SourceFormat {
+                    samplerate: rate,
+                    channels,
+                    format: None,
+                }),
+                None => SourceState::Unknown,
+            }
+        }
+        // WASAPI is out of scope. ASIO could read the rate, but only by loading the
+        // driver, which is too heavy to do every second.
+        #[cfg(target_os = "windows")]
+        config::CaptureDevice::Wasapi(_) | config::CaptureDevice::Asio(_) => SourceState::Unknown,
+        config::CaptureDevice::SignalGenerator { .. } => SourceState::Unknown,
+        #[cfg(feature = "dummy-backend")]
+        config::CaptureDevice::Dummy { .. } => SourceState::Unknown,
+    }
+}
+
 /// Create a capture device.
-pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
+///
+/// With `follow`, the controller follows the source format, and owns the settings that
+/// decide what happens when the source changes: `stop_on_inactive` is forced off and
+/// `stop_on_rate_change` on, whatever the config says.
+pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn CaptureDevice> {
+    if follow {
+        if conf.capture.stop_on_inactive() {
+            warn!("Following the capture source, ignoring stop_on_inactive: true in the config");
+        }
+        #[cfg(target_os = "linux")]
+        if let config::CaptureDevice::Alsa {
+            stop_on_inactive, ..
+        } = &mut conf.capture
+        {
+            *stop_on_inactive = Some(false);
+        }
+        conf.stop_on_rate_change = Some(true);
+    }
     // Use `capture_samplerate` from config if given, and resampling is enabled.
     // Else, use `samplerate`.
     let capture_samplerate = if let Some(capture_rate) = conf.capture_samplerate

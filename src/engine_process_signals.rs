@@ -60,12 +60,12 @@ fn monitor_signals(
             SIGHUP => {
                 let path = (*active_path_thread.lock()).clone();
                 if let Some(path) = path {
-                    match crate::config::load_validate_config(path.as_str()) {
-                        Ok((conf, impulses)) => {
+                    match crate::controller::LoadedConfig::from_file(path.as_str()) {
+                        Ok(loaded) => {
                             debug!("Config is valid");
-                            if let Err(e) = tx_command_thread.try_send(
-                                ControllerMessage::ConfigChanged(Box::new(conf), impulses),
-                            ) {
+                            if let Err(e) = tx_command_thread
+                                .try_send(ControllerMessage::ConfigChanged(Box::new(loaded)))
+                            {
                                 error!("Error sending reload message: {e}");
                             }
                         }

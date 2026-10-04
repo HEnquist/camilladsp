@@ -1019,7 +1019,7 @@ fn capture_loop_bytes(
                             channels.audio.send(msg).unwrap_or(());
                             channels
                                 .status
-                                .send(StatusMessage::CaptureFormatChange(measured_rate_f as usize))
+                                .send(StatusMessage::capture_rate_change(measured_rate_f as usize))
                                 .unwrap_or(());
                             break;
                         }

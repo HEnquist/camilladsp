@@ -1855,7 +1855,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 if changed && stop_on_rate_change {
                                     channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                     status_channel
-                                        .send(StatusMessage::CaptureFormatChange(
+                                        .send(StatusMessage::capture_rate_change(
                                             measured_rate_f as usize,
                                         ))
                                         .unwrap_or(());

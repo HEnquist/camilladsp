@@ -383,6 +383,32 @@ fn main_process() -> i32 {
                 .requires("statefile")
                 .conflicts_with("configfile")
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("follow_specific")
+                .long("follow_specific")
+                .value_name("TEMPLATE")
+                .display_order(500)
+                .help("Follow the capture format with per-format config files, from a template with $samplerate$, $channels$ or $format$ tokens")
+                .requires("wait")
+                .action(ArgAction::Set)
+                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
+        )
+        .arg(
+            Arg::new("follow_adapt")
+                .long("follow_adapt")
+                .display_order(501)
+                .help("Follow the capture rate by adapting the config to it")
+                .requires("wait")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("error_recovery")
+                .long("error_recovery")
+                .display_order(502)
+                .help("Retry with increasing intervals after a device error")
+                .requires("wait")
+                .action(ArgAction::SetTrue),
         );
     #[cfg(feature = "secure-websocket")]
     let clapapp = clapapp
@@ -554,6 +580,36 @@ fn main_process() -> i32 {
     debug!("Initial mute: {initial_mutes:?}");
     debug!("Initial volume: {initial_volumes:?}");
 
+    // The CLI args only switch things on, each one overriding its own field.
+    let mut controller_settings = state.as_ref().and_then(|s| s.controller.clone());
+    let follow_specific = matches.get_one::<String>("follow_specific");
+    let follow_adapt = matches.get_flag("follow_adapt");
+    if follow_specific.is_some() || follow_adapt {
+        let settings = controller_settings.get_or_insert_with(Default::default);
+        let follow = settings.follow_capture.get_or_insert_with(Default::default);
+        if let Some(template) = follow_specific {
+            debug!("Using command line argument for the Specific template");
+            follow.specific = Some(template.clone());
+        }
+        if follow_adapt {
+            debug!("Using command line argument to enable Adapt");
+            follow.adapt = Some(true);
+        }
+    }
+    if matches.get_flag("error_recovery") {
+        debug!("Using command line argument to enable error recovery");
+        controller_settings
+            .get_or_insert_with(Default::default)
+            .error_recovery = Some(true);
+    }
+    if let Some(settings) = &controller_settings
+        && let Err(err) = settings.validate()
+    {
+        error!("Invalid controller settings: {err}");
+        return EXIT_BAD_CONFIG;
+    }
+    debug!("Controller settings: {controller_settings:?}");
+
     let mut configname = matches.get_one::<String>("configfile").cloned();
     debug!("Read config file {configname:?}");
 
@@ -584,7 +640,12 @@ fn main_process() -> i32 {
 
     // All state variables are prepared, save to the statefile if needed
     if let Some(fname) = &statefilename {
-        match statefile::State::new(configname.clone(), initial_mutes, initial_volumes) {
+        match statefile::State::new(
+            configname.clone(),
+            initial_mutes,
+            initial_volumes,
+            controller_settings.clone(),
+        ) {
             Ok(state_to_save) => {
                 if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
                     statefile::save_state_to_file(fname, &state_to_save);
@@ -601,6 +662,7 @@ fn main_process() -> i32 {
         statefilename,
         initial_volumes,
         initial_mutes,
+        controller_settings,
         wait: matches.get_flag("wait"),
         ws_port: matches.get_one::<usize>("port").copied(),
         ws_address: matches
