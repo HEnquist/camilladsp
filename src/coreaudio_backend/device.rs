@@ -254,6 +254,8 @@ pub struct CoreaudioCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub enable_rate_adjust: bool,
+    /// The controller follows the source format, see `audiodevice::new_capture_device`.
+    pub follow: bool,
 }
 
 pub fn list_device_names(input: bool) -> Vec<String> {
@@ -916,6 +918,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = (1000.0 * self.rate_measure_interval) as u64;
         let enable_rate_adjust = self.enable_rate_adjust;
+        let follow = self.follow;
         let blockalign = 4 * channels;
 
         let handle = thread::Builder::new()
@@ -955,6 +958,21 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 };
                 let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * buffer_capacity_frames + 2 * callback_frames ));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
+
+                // When following, the rate the device is at wins over the config. Opening
+                // would set the config rate, and undo a change the source made while the
+                // session was restarting.
+                if follow
+                    && let Some((rate, _)) = query_capture_format(&devname)
+                    && rate != capture_samplerate
+                {
+                    info!("The capture device is at {rate} Hz rather than {capture_samplerate} Hz, reporting a format change.");
+                    status_channel
+                        .send(StatusMessage::capture_rate_change(rate))
+                        .unwrap_or(());
+                    barrier.wait();
+                    return;
+                }
 
                 trace!("Build input stream.");
                 let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {

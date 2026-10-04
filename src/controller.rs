@@ -595,6 +595,30 @@ pub fn select_config(
     {
         return Selection::Run(selected);
     }
+    // The entry config is written for some format, and needs no provider for that one.
+    // Without this, Specific alone would want a file for the rate the entry is already at.
+    if format.samplerate != 0 && check_variant(None, &entry.raw, &format).is_ok() {
+        let mut conf = entry.raw.clone();
+        match config::validate_config_at_rate(
+            &mut conf,
+            entry.filename.as_deref(),
+            NonZeroUsize::new(format.samplerate),
+        ) {
+            Ok(impulses) => {
+                return Selection::Run(Box::new(Selected {
+                    config: conf,
+                    impulses,
+                    provider: Provider::Entry,
+                    format: Some(format),
+                    running: RunningSource {
+                        source: entry.clone(),
+                        kind: LoadKind::Entry,
+                    },
+                }));
+            }
+            Err(err) => return Selection::Invalid(err.to_string()),
+        }
+    }
     if settings.adapt_enabled()
         && let Some(selected) = adapt_config(entry, &format)
     {
@@ -1144,6 +1168,40 @@ pipeline:
         ));
         assert_eq!(selected.provider, Provider::Adapt);
         assert_eq!(selected.config.devices.samplerate(), 44100);
+    }
+
+    #[test]
+    fn the_entry_runs_as_is_at_its_own_format() {
+        let dir = temp_dir("entry_format");
+        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
+        let e = entry(base_config(48000, 2, ""));
+        // Specific only, and no file for the rate the entry is written for.
+        let selected = run(select_config(
+            &e,
+            Some(&format(48000, Some(2))),
+            &settings(Some(&template), None),
+            None,
+        ));
+        assert_eq!(selected.provider, Provider::Entry);
+        // A file for that rate wins over the entry.
+        write_config(&dir, "conf_48000.yml", &base_config(48000, 2, ""));
+        let selected = run(select_config(
+            &e,
+            Some(&format(48000, Some(2))),
+            &settings(Some(&template), None),
+            None,
+        ));
+        assert!(matches!(selected.provider, Provider::Specific(_)));
+        // The entry at another channel count doesn't match.
+        assert!(matches!(
+            select_config(
+                &e,
+                Some(&format(48000, Some(4))),
+                &settings(Some(&template), None),
+                None
+            ),
+            Selection::NoConfig(_)
+        ));
     }
 
     #[test]

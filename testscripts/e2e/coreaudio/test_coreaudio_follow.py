@@ -239,6 +239,10 @@ def test_a_patch_adapts_from_the_raw_config(start_cdsp, ca_config, feeder):
     # Adapted from the patched entry: 512 at 48 kHz is 1024 at 96 kHz.
     poll_config_value(cdsp, "/devices/chunksize", 1024)
     assert config_value(cdsp, "/devices/samplerate") == 96000
+    # The chunk size change restarts the devices. A switch while the capture is opening
+    # can be undone by the open setting the device rate, so let it come up first.
+    cdsp.poll_until("GetState", "Running")
+    wait_for_signal(cdsp)
     switch_source(48000)
     wait_for_rate(cdsp, 48000)
     assert config_value(cdsp, "/devices/chunksize") == 512
