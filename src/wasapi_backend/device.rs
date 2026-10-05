@@ -19,6 +19,7 @@ use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::{BinarySampleFormat, ConfigError, WasapiSampleFormat};
+use crate::controller::SourceFormat;
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
@@ -1093,7 +1094,7 @@ fn send_error_or_playbackformatchange(
 ) {
     if check_for_format_change(rx) {
         debug!("Send PlaybackFormatChange.");
-        tx.send(StatusMessage::playback_rate_change(0))
+        tx.send(StatusMessage::PlaybackFormatChange(SourceFormat::unknown()))
             .unwrap_or(());
     } else {
         debug!("Send PlaybackError.");
@@ -1108,7 +1109,8 @@ fn send_error_or_captureformatchange(
 ) {
     if check_for_format_change(rx) {
         debug!("Send CaptureFormatChange.");
-        tx.send(StatusMessage::capture_rate_change(0)).unwrap_or(());
+        tx.send(StatusMessage::CaptureFormatChange(SourceFormat::unknown()))
+            .unwrap_or(());
     } else {
         debug!("Send CaptureError.");
         tx.send(StatusMessage::CaptureError(err)).unwrap_or(());

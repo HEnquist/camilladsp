@@ -137,15 +137,16 @@ impl ControllerSettings {
     }
 }
 
-/// The format a capture source reported. The rate is always given, 0 meaning unknown.
-/// Channels and sample format are given where the backend knows them.
+/// The format a source reported. Each field is given where the backend knows it, and is
+/// `None` otherwise. Most backends know at least the rate, WASAPI only knows that something
+/// changed.
 ///
 /// The sample format is the backend's own name for it, as its configs and its capability
 /// probing write it ("S24_3_LE" for ALSA, "S24" for CoreAudio). Backends differ in which
 /// formats they have, so a name is what stays general across them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SourceFormat {
-    pub samplerate: usize,
+    pub samplerate: Option<usize>,
     pub channels: Option<usize>,
     pub format: Option<String>,
 }
@@ -154,7 +155,16 @@ impl SourceFormat {
     /// A format where only the rate is known.
     pub fn rate(samplerate: usize) -> Self {
         SourceFormat {
-            samplerate,
+            samplerate: Some(samplerate),
+            channels: None,
+            format: None,
+        }
+    }
+
+    /// A format change where nothing is known about the new format.
+    pub fn unknown() -> Self {
+        SourceFormat {
+            samplerate: None,
             channels: None,
             format: None,
         }
@@ -169,7 +179,7 @@ impl SourceFormat {
                 _ => true,
             }
         }
-        self.samplerate == other.samplerate
+        agree(&self.samplerate, &other.samplerate)
             && agree(&self.channels, &other.channels)
             && agree(&self.format, &other.format)
     }
@@ -177,19 +187,23 @@ impl SourceFormat {
     /// The same format, with the rate snapped to a standard rate. See [`snap_rate`].
     pub fn snapped(&self) -> Self {
         SourceFormat {
-            samplerate: snap_rate(self.samplerate),
+            samplerate: self.samplerate.map(snap_rate),
             channels: self.channels,
             format: self.format.clone(),
         }
+    }
+
+    /// The rate, if it is known.
+    pub fn known_rate(&self) -> Option<NonZeroUsize> {
+        self.samplerate.and_then(NonZeroUsize::new)
     }
 }
 
 impl std::fmt::Display for SourceFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.samplerate == 0 {
-            write!(f, "unknown rate")?;
-        } else {
-            write!(f, "{} Hz", self.samplerate)?;
+        match self.samplerate {
+            Some(rate) => write!(f, "{rate} Hz")?,
+            None => write!(f, "unknown rate")?,
         }
         if let Some(channels) = self.channels {
             write!(f, ", {channels} channels")?;
@@ -343,13 +357,10 @@ impl ControllerShared {
     }
 }
 
-/// Snap a measured rate to a standard rate within about 1% of it.
+/// Snap a measured rate to a standard rate within [`SNAP_TOLERANCE`] of it.
 ///
 /// Measured rates come out like 44097, and a config for that doesn't exist.
 pub fn snap_rate(rate: usize) -> usize {
-    if rate == 0 {
-        return 0;
-    }
     crate::STANDARD_RATES
         .iter()
         .map(|r| *r as usize)
@@ -389,10 +400,7 @@ fn resolve_template(template: &str, entry_filename: Option<&str>) -> PathBuf {
 pub fn expand_template(template: &str, format: &SourceFormat) -> Option<String> {
     let mut expanded = template.to_string();
     if expanded.contains(TOKEN_SAMPLERATE) {
-        if format.samplerate == 0 {
-            return None;
-        }
-        expanded = expanded.replace(TOKEN_SAMPLERATE, &format.samplerate.to_string());
+        expanded = expanded.replace(TOKEN_SAMPLERATE, &format.samplerate?.to_string());
     }
     if expanded.contains(TOKEN_CHANNELS) {
         expanded = expanded.replace(TOKEN_CHANNELS, &format.channels?.to_string());
@@ -424,13 +432,10 @@ pub fn check_variant(
             ));
         }
     }
-    if format.samplerate != 0 {
+    if let Some(expected) = format.samplerate {
         let rate = capture_rate_of(variant);
-        if rate != format.samplerate {
-            return Err(format!(
-                "its capture rate is {rate}, expected {}",
-                format.samplerate
-            ));
+        if rate != expected {
+            return Err(format!("its capture rate is {rate}, expected {expected}"));
         }
     }
     if let Some(channels) = format.channels {
@@ -477,17 +482,14 @@ fn specific_config(
         return None;
     }
     let mut conf = raw.clone();
-    let impulses = match config::validate_config_at_rate(
-        &mut conf,
-        Some(&path_str),
-        NonZeroUsize::new(format.samplerate),
-    ) {
-        Ok(impulses) => impulses,
-        Err(err) => {
-            error!("Specific: '{path_str}' is not valid: {err}");
-            return None;
-        }
-    };
+    let impulses =
+        match config::validate_config_at_rate(&mut conf, Some(&path_str), format.known_rate()) {
+            Ok(impulses) => impulses,
+            Err(err) => {
+                error!("Specific: '{path_str}' is not valid: {err}");
+                return None;
+            }
+        };
     Some(Box::new(Selected {
         config: conf,
         impulses,
@@ -505,7 +507,7 @@ fn specific_config(
 
 /// The Adapt provider: change the rate of the entry config to the reported one.
 fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selected>> {
-    let Some(rate) = NonZeroUsize::new(format.samplerate) else {
+    let Some(rate) = format.known_rate() else {
         info!("Adapt: the source rate is unknown");
         return None;
     };
@@ -598,7 +600,7 @@ pub fn select_variant(
     loaded: LoadedConfig,
     format: Option<&SourceFormat>,
 ) -> Result<Box<Selected>, String> {
-    let rate = format.and_then(|f| NonZeroUsize::new(f.samplerate));
+    let rate = format.and_then(SourceFormat::known_rate);
     let mut conf = loaded.source.raw.clone();
     let impulses =
         config::validate_config_at_rate(&mut conf, loaded.source.filename.as_deref(), rate)
@@ -808,7 +810,7 @@ fn check_file(
         return Some(format!("'{name}' is not a known sample format"));
     }
     let source_format = SourceFormat {
-        samplerate: samplerate.unwrap_or(0),
+        samplerate,
         channels,
         format: format.map(str::to_string),
     };
@@ -904,9 +906,16 @@ mod tests {
 
     fn format(samplerate: usize, channels: Option<usize>) -> SourceFormat {
         SourceFormat {
-            samplerate,
+            samplerate: Some(samplerate),
             channels,
             format: None,
+        }
+    }
+
+    fn unknown_rate(channels: Option<usize>) -> SourceFormat {
+        SourceFormat {
+            samplerate: None,
+            ..format(0, channels)
         }
     }
 
@@ -943,7 +952,6 @@ mod tests {
         assert_eq!(snap_rate(47900), 48000);
         assert_eq!(snap_rate(44581), 44100);
         assert_eq!(snap_rate(96000), 96000);
-        assert_eq!(snap_rate(0), 0);
         // Far from any standard rate, kept as is.
         assert_eq!(snap_rate(60000), 60000);
     }
@@ -951,7 +959,7 @@ mod tests {
     #[test]
     fn template_expansion() {
         let full = SourceFormat {
-            samplerate: 96000,
+            samplerate: Some(96000),
             channels: Some(4),
             format: Some("S24_3_LE".to_string()),
         };
@@ -965,7 +973,7 @@ mod tests {
             None
         );
         assert_eq!(
-            expand_template("c_$samplerate$.yml", &format(0, Some(2))),
+            expand_template("c_$samplerate$.yml", &unknown_rate(Some(2))),
             None
         );
         assert_eq!(
@@ -1052,7 +1060,7 @@ mod tests {
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 44100);
-        assert_eq!(selected.format.unwrap().samplerate, 44100);
+        assert_eq!(selected.format.unwrap().samplerate, Some(44100));
     }
 
     #[test]
@@ -1098,7 +1106,7 @@ pipeline:
         let e = entry(base_config(48000, 2, ""));
         let s = settings(None, Some(true));
         assert!(matches!(
-            select_config(&e, Some(&format(0, None)), &s, None),
+            select_config(&e, Some(&unknown_rate(None)), &s, None),
             Selection::NoConfig(_)
         ));
         assert!(matches!(
@@ -1112,7 +1120,7 @@ pipeline:
         let selected = run(select_config(
             &entry(base_config(48000, 2, "")),
             Some(&SourceFormat {
-                samplerate: 48000,
+                samplerate: Some(48000),
                 channels: None,
                 format: Some("S16_LE".to_string()),
             }),
@@ -1130,7 +1138,7 @@ pipeline:
         let selected = select_config(
             &entry(base_config(48000, 2, "")),
             Some(&SourceFormat {
-                samplerate: 48000,
+                samplerate: Some(48000),
                 channels: None,
                 format: Some("S24".to_string()),
             }),

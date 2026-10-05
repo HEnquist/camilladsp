@@ -82,7 +82,7 @@ fn parse_state(line: &str) -> SourceState {
             let channels = words.next().and_then(|w| w.parse().ok());
             match (rate, channels) {
                 (Some(samplerate), Some(channels)) => SourceState::Format(SourceFormat {
-                    samplerate,
+                    samplerate: Some(samplerate),
                     channels: Some(channels),
                     format: words.next().map(str::to_string),
                 }),
@@ -151,7 +151,7 @@ impl Drop for SourceWatcher {
 pub fn differs(state: &SourceState, samplerate: usize, channels: usize) -> Option<SourceFormat> {
     match state {
         SourceState::Format(format)
-            if format.samplerate != samplerate || format.channels != Some(channels) =>
+            if format.samplerate != Some(samplerate) || format.channels != Some(channels) =>
         {
             Some(format.clone())
         }
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(
             parse_state("format 44100 2 S16_LE\n"),
             SourceState::Format(SourceFormat {
-                samplerate: 44100,
+                samplerate: Some(44100),
                 channels: Some(2),
                 format: Some("S16_LE".to_string()),
             })
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(
             parse_state("format 96000 4"),
             SourceState::Format(SourceFormat {
-                samplerate: 96000,
+                samplerate: Some(96000),
                 channels: Some(4),
                 format: None,
             })
@@ -202,13 +202,16 @@ mod tests {
     fn only_another_rate_or_channel_count_differs() {
         let at = |samplerate, channels| {
             SourceState::Format(SourceFormat {
-                samplerate,
+                samplerate: Some(samplerate),
                 channels: Some(channels),
                 format: Some("S32_LE".to_string()),
             })
         };
         assert!(differs(&at(48000, 2), 48000, 2).is_none());
-        assert_eq!(differs(&at(44100, 2), 48000, 2).unwrap().samplerate, 44100);
+        assert_eq!(
+            differs(&at(44100, 2), 48000, 2).unwrap().samplerate,
+            Some(44100)
+        );
         assert_eq!(differs(&at(48000, 4), 48000, 2).unwrap().channels, Some(4));
         assert!(differs(&SourceState::Inactive, 48000, 2).is_none());
         assert!(differs(&SourceState::Unknown, 48000, 2).is_none());

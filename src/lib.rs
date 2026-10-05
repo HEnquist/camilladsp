@@ -268,12 +268,12 @@ pub enum StatusMessage {
 }
 
 impl StatusMessage {
-    /// A capture format change where only the new rate is known, 0 if not even that.
+    /// A capture format change where only the new rate is known.
     pub fn capture_rate_change(rate: usize) -> Self {
         StatusMessage::CaptureFormatChange(controller::SourceFormat::rate(rate))
     }
 
-    /// A playback format change where only the new rate is known, 0 if not even that.
+    /// A playback format change where only the new rate is known.
     pub fn playback_rate_change(rate: usize) -> Self {
         StatusMessage::PlaybackFormatChange(controller::SourceFormat::rate(rate))
     }
@@ -704,7 +704,7 @@ pub enum StopReason {
     PlaybackError(String),
     /// An unexpected internal error occurred.
     UnknownError(String),
-    /// Capture device format changed: `samplerate`, plus `channels` and `format` where known.
+    /// Capture device format changed: `samplerate`, `channels` and `format`, null if unknown.
     CaptureFormatChange(controller::SourceFormat),
     /// Playback device format changed, reported the same way as `CaptureFormatChange`.
     PlaybackFormatChange(controller::SourceFormat),

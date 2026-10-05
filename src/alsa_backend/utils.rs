@@ -146,7 +146,7 @@ impl PinnedFormat {
             _ => false,
         };
         (rate_differs || channels_differ || format_differs).then(|| SourceFormat {
-            samplerate: self.rate.unwrap_or(rate) as usize,
+            samplerate: Some(self.rate.unwrap_or(rate) as usize),
             channels: self.channels.map(|c| c as usize),
             format: self.format.map(alsa_format_name),
         })
@@ -155,7 +155,7 @@ impl PinnedFormat {
     /// The pinned values as a source format, if at least the rate is pinned.
     pub fn source_format(&self) -> Option<SourceFormat> {
         Some(SourceFormat {
-            samplerate: self.rate? as usize,
+            samplerate: Some(self.rate? as usize),
             channels: self.channels.map(|c| c as usize),
             format: self.format.map(alsa_format_name),
         })
@@ -766,7 +766,7 @@ impl CaptureElements<'_> {
     pub fn loopback_format_change(&self) -> SourceFormat {
         let read = |elem: &Option<ElemData>| elem.as_ref().and_then(|e| e.read_as_int());
         let format = SourceFormat {
-            samplerate: read(&self.loopback_rate).unwrap_or(0) as usize,
+            samplerate: read(&self.loopback_rate).map(|r| r as usize),
             channels: read(&self.loopback_channels).map(|c| c as usize),
             format: read(&self.loopback_format)
                 .and_then(format_from_number)
@@ -1041,13 +1041,13 @@ mod tests {
     fn a_pinned_value_that_differs_is_followed() {
         let device = pinned(Some(44100), Some(2), Some(Format::S243LE));
         let change = device.differs_from(48000, 2, &None).unwrap();
-        assert_eq!(change.samplerate, 44100);
+        assert_eq!(change.samplerate, Some(44100));
         assert_eq!(change.channels, Some(2));
         assert_eq!(change.format.as_deref(), Some("S24_3_LE"));
         let change = pinned(None, Some(4), None)
             .differs_from(48000, 2, &None)
             .unwrap();
-        assert_eq!(change.samplerate, 48000);
+        assert_eq!(change.samplerate, Some(48000));
         assert_eq!(change.channels, Some(4));
     }
 

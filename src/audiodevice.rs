@@ -259,7 +259,7 @@ pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
         config::CaptureDevice::CoreAudio(dev) => {
             match coreaudiodevice::query_capture_format(&dev.device) {
                 Some((rate, channels)) => SourceState::Format(crate::controller::SourceFormat {
-                    samplerate: rate,
+                    samplerate: Some(rate),
                     channels,
                     format: None,
                 }),
