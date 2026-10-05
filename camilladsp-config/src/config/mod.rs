@@ -172,7 +172,6 @@ impl fmt::Display for BinarySampleFormat {
 
 // API specific sample format enums
 
-#[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -183,7 +182,6 @@ pub enum WasapiSampleFormat {
     F32,
 }
 
-#[cfg(target_os = "windows")]
 impl WasapiSampleFormat {
     // Map binary format to the a corresponding wasapi format, if possible.
     // Used for overriding config values.
@@ -200,7 +198,6 @@ impl WasapiSampleFormat {
     }
 }
 
-#[cfg(target_os = "windows")]
 #[allow(clippy::upper_case_acronyms, non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -213,7 +210,6 @@ pub enum AsioSampleFormat {
     F64_LE,
 }
 
-#[cfg(target_os = "windows")]
 impl AsioSampleFormat {
     // Map binary format to the corresponding ASIO format, if possible.
     // Used for overriding config values.
@@ -230,7 +226,6 @@ impl AsioSampleFormat {
     }
 }
 
-#[cfg(target_os = "macos")]
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -241,7 +236,6 @@ pub enum CoreAudioSampleFormat {
     F32,
 }
 
-#[cfg(target_os = "macos")]
 impl CoreAudioSampleFormat {
     // Map binary format to the a corresponding Core Audio format, if possible.
     // Used for overriding config values.
@@ -258,7 +252,6 @@ impl CoreAudioSampleFormat {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -277,7 +270,6 @@ pub enum AlsaSampleFormat {
     F64_LE,
 }
 
-#[cfg(target_os = "linux")]
 impl AlsaSampleFormat {
     // Map binary format to the a corresponding Alsa format, if possible.
     // Used for overriding config values.
@@ -323,7 +315,6 @@ pub enum Signal {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum CaptureDevice {
-    #[cfg(target_os = "linux")]
     Alsa {
         channels: NonZeroUsize,
         device: String,
@@ -338,7 +329,6 @@ pub enum CaptureDevice {
         #[serde(default)]
         labels: Option<Vec<Option<String>>>,
     },
-    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
     PipeWire {
         channels: NonZeroUsize,
         #[serde(default)]
@@ -357,11 +347,8 @@ pub enum CaptureDevice {
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
     Stdin(CaptureDeviceStdin),
-    #[cfg(target_os = "macos")]
     CoreAudio(CaptureDeviceCA),
-    #[cfg(target_os = "windows")]
     Wasapi(CaptureDeviceWasapi),
-    #[cfg(target_os = "windows")]
     Asio(CaptureDeviceAsio),
     SignalGenerator {
         channels: NonZeroUsize,
@@ -370,7 +357,6 @@ pub enum CaptureDevice {
         labels: Option<Vec<Option<String>>>,
     },
     /// Test-only paced capture device, see `src/dummy_backend`.
-    #[cfg(feature = "dummy-backend")]
     Dummy {
         channels: NonZeroUsize,
         signal: Signal,
@@ -383,46 +369,71 @@ pub enum CaptureDevice {
 }
 
 impl CaptureDevice {
+    /// The device type, as written in the `type` field of the config.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            CaptureDevice::Alsa { .. } => "Alsa",
+            CaptureDevice::PipeWire { .. } => "PipeWire",
+            CaptureDevice::RawFile(_) => "RawFile",
+            CaptureDevice::WavFile(_) => "WavFile",
+            CaptureDevice::Stdin(_) => "Stdin",
+            CaptureDevice::CoreAudio(_) => "CoreAudio",
+            CaptureDevice::Wasapi(_) => "Wasapi",
+            CaptureDevice::Asio(_) => "Asio",
+            CaptureDevice::SignalGenerator { .. } => "SignalGenerator",
+            CaptureDevice::Dummy { .. } => "Dummy",
+        }
+    }
+
+    /// Whether this build of CamillaDSP has the backend for this device type.
+    ///
+    /// Every device type parses on every platform, so that a config written for
+    /// another one can still be checked. Only the backends of the platform, and
+    /// those whose feature is enabled, can actually be opened.
+    pub fn is_supported(&self) -> bool {
+        match self {
+            CaptureDevice::Alsa { .. } => cfg!(target_os = "linux"),
+            CaptureDevice::PipeWire { .. } => {
+                cfg!(all(target_os = "linux", feature = "pipewire-backend"))
+            }
+            CaptureDevice::CoreAudio(_) => cfg!(target_os = "macos"),
+            CaptureDevice::Wasapi(_) | CaptureDevice::Asio(_) => cfg!(target_os = "windows"),
+            CaptureDevice::Dummy { .. } => cfg!(feature = "dummy-backend"),
+            CaptureDevice::RawFile(_)
+            | CaptureDevice::WavFile(_)
+            | CaptureDevice::Stdin(_)
+            | CaptureDevice::SignalGenerator { .. } => true,
+        }
+    }
+
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => channels.get(),
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => channels.get(),
             CaptureDevice::RawFile(dev) => dev.channels.get(),
             CaptureDevice::WavFile(dev) => {
                 dev.wav_info().map(|info| info.channels).unwrap_or_default()
             }
             CaptureDevice::Stdin(dev) => dev.channels.get(),
-            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.channels.get(),
-            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.channels.get(),
-            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.channels.get(),
             CaptureDevice::SignalGenerator { channels, .. } => channels.get(),
-            #[cfg(feature = "dummy-backend")]
             CaptureDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 
     pub fn labels(&self) -> Option<Vec<Option<String>>> {
         match self {
-            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { labels, .. } => labels.clone(),
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { labels, .. } => labels.clone(),
             CaptureDevice::RawFile(dev) => dev.labels.clone(),
             CaptureDevice::WavFile(dev) => dev.labels.clone(),
             CaptureDevice::Stdin(dev) => dev.labels.clone(),
-            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => dev.labels.clone(),
-            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => dev.labels.clone(),
-            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => dev.labels.clone(),
             CaptureDevice::SignalGenerator { labels, .. } => labels.clone(),
-            #[cfg(feature = "dummy-backend")]
             CaptureDevice::Dummy { labels, .. } => labels.clone(),
         }
     }
@@ -512,7 +523,6 @@ impl CaptureDeviceStdin {
     }
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureDeviceWasapi {
@@ -531,7 +541,6 @@ pub struct CaptureDeviceWasapi {
     pub labels: Option<Vec<Option<String>>>,
 }
 
-#[cfg(target_os = "windows")]
 impl CaptureDeviceWasapi {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
@@ -546,7 +555,6 @@ impl CaptureDeviceWasapi {
     }
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureDeviceAsio {
@@ -558,7 +566,6 @@ pub struct CaptureDeviceAsio {
     pub labels: Option<Vec<Option<String>>>,
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureDeviceCA {
@@ -575,14 +582,12 @@ pub struct CaptureDeviceCA {
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
 pub enum PlaybackDevice {
-    #[cfg(target_os = "linux")]
     Alsa {
         channels: NonZeroUsize,
         device: String,
         #[serde(default)]
         format: Option<AlsaSampleFormat>,
     },
-    #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
     PipeWire {
         channels: NonZeroUsize,
         #[serde(default)]
@@ -611,14 +616,10 @@ pub enum PlaybackDevice {
         #[serde(default)]
         wav_header: Option<bool>,
     },
-    #[cfg(target_os = "macos")]
     CoreAudio(PlaybackDeviceCA),
-    #[cfg(target_os = "windows")]
     Wasapi(PlaybackDeviceWasapi),
-    #[cfg(target_os = "windows")]
     Asio(PlaybackDeviceAsio),
     /// Test-only paced playback device, see `src/dummy_backend`.
-    #[cfg(feature = "dummy-backend")]
     Dummy {
         channels: NonZeroUsize,
         /// Sample format to convert each chunk to before discarding it.
@@ -635,27 +636,49 @@ pub enum PlaybackDevice {
 }
 
 impl PlaybackDevice {
+    /// The device type, as written in the `type` field of the config.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            PlaybackDevice::Alsa { .. } => "Alsa",
+            PlaybackDevice::PipeWire { .. } => "PipeWire",
+            PlaybackDevice::File { .. } => "File",
+            PlaybackDevice::Stdout { .. } => "Stdout",
+            PlaybackDevice::CoreAudio(_) => "CoreAudio",
+            PlaybackDevice::Wasapi(_) => "Wasapi",
+            PlaybackDevice::Asio(_) => "Asio",
+            PlaybackDevice::Dummy { .. } => "Dummy",
+        }
+    }
+
+    /// Whether this build of CamillaDSP has the backend for this device type.
+    /// See [`CaptureDevice::is_supported`].
+    pub fn is_supported(&self) -> bool {
+        match self {
+            PlaybackDevice::Alsa { .. } => cfg!(target_os = "linux"),
+            PlaybackDevice::PipeWire { .. } => {
+                cfg!(all(target_os = "linux", feature = "pipewire-backend"))
+            }
+            PlaybackDevice::CoreAudio(_) => cfg!(target_os = "macos"),
+            PlaybackDevice::Wasapi(_) | PlaybackDevice::Asio(_) => cfg!(target_os = "windows"),
+            PlaybackDevice::Dummy { .. } => cfg!(feature = "dummy-backend"),
+            PlaybackDevice::File { .. } | PlaybackDevice::Stdout { .. } => true,
+        }
+    }
+
     pub fn channels(&self) -> usize {
         match self {
-            #[cfg(target_os = "linux")]
             PlaybackDevice::Alsa { channels, .. } => channels.get(),
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             PlaybackDevice::PipeWire { channels, .. } => channels.get(),
             PlaybackDevice::File { channels, .. } => channels.get(),
             PlaybackDevice::Stdout { channels, .. } => channels.get(),
-            #[cfg(target_os = "macos")]
             PlaybackDevice::CoreAudio(dev) => dev.channels.get(),
-            #[cfg(target_os = "windows")]
             PlaybackDevice::Wasapi(dev) => dev.channels.get(),
-            #[cfg(target_os = "windows")]
             PlaybackDevice::Asio(dev) => dev.channels.get(),
-            #[cfg(feature = "dummy-backend")]
             PlaybackDevice::Dummy { channels, .. } => channels.get(),
         }
     }
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlaybackDeviceWasapi {
@@ -670,7 +693,6 @@ pub struct PlaybackDeviceWasapi {
     polling: Option<bool>,
 }
 
-#[cfg(target_os = "windows")]
 impl PlaybackDeviceWasapi {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
@@ -681,7 +703,6 @@ impl PlaybackDeviceWasapi {
     }
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlaybackDeviceAsio {
@@ -691,7 +712,6 @@ pub struct PlaybackDeviceAsio {
     pub format: Option<AsioSampleFormat>,
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PlaybackDeviceCA {
@@ -704,7 +724,6 @@ pub struct PlaybackDeviceCA {
     exclusive: Option<bool>,
 }
 
-#[cfg(target_os = "macos")]
 impl PlaybackDeviceCA {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
@@ -1806,3 +1825,5 @@ pub use self::utils::parse_config;
 pub use self::utils::playback_channel_labels;
 pub use self::utils::used_capture_channels;
 pub use self::utils::validate_config;
+pub use self::utils::validate_processor;
+pub use self::utils::validate_unused;

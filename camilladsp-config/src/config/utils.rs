@@ -324,30 +324,24 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Stdin(dev) => {
                 dev.channels = chans;
             }
-            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {
                 dev.channels = chans;
             }
-            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => {
                 dev.channels = chans;
             }
-            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => {
                 dev.channels = chans;
             }
             CaptureDevice::SignalGenerator { channels, .. } => {
                 *channels = chans;
             }
-            #[cfg(feature = "dummy-backend")]
             CaptureDevice::Dummy { channels, .. } => {
                 *channels = chans;
             }
@@ -363,16 +357,13 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
             CaptureDevice::Stdin(dev) => {
                 dev.format = fmt;
             }
-            #[cfg(target_os = "linux")]
             CaptureDevice::Alsa { format, .. } => {
                 let mapped_format = AlsaSampleFormat::from_binary_format(&fmt);
                 *format = Some(mapped_format);
             }
-            #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
             CaptureDevice::PipeWire { .. } => {
                 error!("Not possible to override capture format for PipeWire, ignoring");
             }
-            #[cfg(target_os = "macos")]
             CaptureDevice::CoreAudio(dev) => {
                 let mapped_format = CoreAudioSampleFormat::from_binary_format(&fmt);
                 if let Some(mapped) = mapped_format {
@@ -383,7 +374,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                     return Err(ConfigError::new(&msg).into());
                 }
             }
-            #[cfg(target_os = "windows")]
             CaptureDevice::Wasapi(dev) => {
                 let mapped_format = WasapiSampleFormat::from_binary_format(&fmt);
                 if let Some(mapped) = mapped_format {
@@ -394,7 +384,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                     return Err(ConfigError::new(&msg).into());
                 }
             }
-            #[cfg(target_os = "windows")]
             CaptureDevice::Asio(dev) => {
                 let mapped_format = AsioSampleFormat::from_binary_format(&fmt);
                 if let Some(mapped) = mapped_format {
@@ -405,7 +394,6 @@ fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
                 }
             }
             CaptureDevice::SignalGenerator { .. } => {}
-            #[cfg(feature = "dummy-backend")]
             CaptureDevice::Dummy { .. } => {}
         }
     }
@@ -631,18 +619,35 @@ fn file_issue(path: Vec<PathElement>, filename: &str, message: String) -> Issue 
 }
 
 fn validate_devices(conf: &Configuration, issues: &mut Issues) {
+    if !conf.devices.capture.is_supported() {
+        let msg = format!(
+            "The {} capture device type is not supported by this build",
+            conf.devices.capture.type_name()
+        );
+        issues.push(Issue::unsupported(
+            issue_path!["devices", "capture", "type"],
+            msg,
+        ));
+    }
+    if !conf.devices.playback.is_supported() {
+        let msg = format!(
+            "The {} playback device type is not supported by this build",
+            conf.devices.playback.type_name()
+        );
+        issues.push(Issue::unsupported(
+            issue_path!["devices", "playback", "type"],
+            msg,
+        ));
+    }
     issues.nest_result(
         issue_path!["devices", "resampler"],
         validate_resampler(&conf.devices.resampler),
     );
-    #[cfg(target_os = "linux")]
     let target_level_limit = if matches!(conf.devices.playback, PlaybackDevice::Alsa { .. }) {
         (4 + conf.devices.queuelimit()) * conf.devices.chunksize()
     } else {
         (2 + conf.devices.queuelimit()) * conf.devices.chunksize()
     };
-    #[cfg(not(target_os = "linux"))]
-    let target_level_limit = (2 + conf.devices.queuelimit()) * conf.devices.chunksize();
 
     if conf.devices.target_level() > target_level_limit {
         let msg = format!("target_level cannot be larger than {target_level_limit}");
@@ -706,7 +711,6 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             "The Slip resampler requires matching samplerate and capture_samplerate",
         );
     }
-    #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
         && let Some(format) = dev.format
         && format != WasapiSampleFormat::F32
@@ -717,7 +721,6 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             "Wasapi shared mode capture must use F32 sample format",
         );
     }
-    #[cfg(target_os = "windows")]
     if let CaptureDevice::Wasapi(dev) = &conf.devices.capture
         && dev.is_loopback()
         && dev.is_exclusive()
@@ -727,7 +730,6 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             "Wasapi loopback capture is only supported in shared mode",
         );
     }
-    #[cfg(target_os = "windows")]
     if let PlaybackDevice::Wasapi(dev) = &conf.devices.playback
         && let Some(format) = dev.format
         && format != WasapiSampleFormat::F32
@@ -738,7 +740,6 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             "Wasapi shared mode playback must use F32 sample format",
         );
     }
-    #[cfg(target_os = "windows")]
     if let (CaptureDevice::Asio(cap_dev), PlaybackDevice::Asio(pb_dev)) =
         (&conf.devices.capture, &conf.devices.playback)
     {
@@ -764,7 +765,11 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             "Wav files do not support the S24_4_RJ_LE sample format",
         );
     }
-    if let CaptureDevice::RawFile(dev) = &conf.devices.capture {
+    validate_device_names(conf, issues);
+    // An empty file name is reported by `validate_device_names`.
+    if let CaptureDevice::RawFile(dev) = &conf.devices.capture
+        && !dev.filename.is_empty()
+    {
         let fname = &dev.filename;
         if let Err(err) = File::open(fname) {
             let msg = format!("Could not open input file '{fname}'. Reason: {err}");
@@ -775,7 +780,9 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
             ));
         }
     }
-    if let CaptureDevice::WavFile(dev) = &conf.devices.capture {
+    if let CaptureDevice::WavFile(dev) = &conf.devices.capture
+        && !dev.filename.is_empty()
+    {
         let fname = &dev.filename;
         match File::open(fname) {
             Ok(f) => {
@@ -794,6 +801,70 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
                 ));
             }
         }
+    }
+}
+
+/// Check that the device and file names the backends look up are not empty.
+///
+/// An empty name would otherwise only fail when the device is opened. The
+/// optional ones are only checked when given.
+fn validate_device_names(conf: &Configuration, issues: &mut Issues) {
+    let mut check = |side: &str, field: &str, value: Option<&String>| {
+        if value.is_some_and(|value| value.is_empty()) {
+            issues.invalid(issue_path!["devices", side, field], "Must not be empty");
+        }
+    };
+    match &conf.devices.capture {
+        CaptureDevice::Alsa {
+            device,
+            link_volume_control,
+            link_mute_control,
+            ..
+        } => {
+            check("capture", "device", Some(device));
+            check(
+                "capture",
+                "link_volume_control",
+                link_volume_control.as_ref(),
+            );
+            check("capture", "link_mute_control", link_mute_control.as_ref());
+        }
+        CaptureDevice::PipeWire {
+            node_name,
+            node_description,
+            node_group_name,
+            ..
+        } => {
+            check("capture", "node_name", node_name.as_ref());
+            check("capture", "node_description", node_description.as_ref());
+            check("capture", "node_group_name", node_group_name.as_ref());
+        }
+        CaptureDevice::RawFile(dev) => check("capture", "filename", Some(&dev.filename)),
+        CaptureDevice::WavFile(dev) => check("capture", "filename", Some(&dev.filename)),
+        CaptureDevice::CoreAudio(dev) => check("capture", "device", dev.device.as_ref()),
+        CaptureDevice::Wasapi(dev) => check("capture", "device", dev.device.as_ref()),
+        CaptureDevice::Asio(dev) => check("capture", "device", Some(&dev.device)),
+        CaptureDevice::Stdin(_)
+        | CaptureDevice::SignalGenerator { .. }
+        | CaptureDevice::Dummy { .. } => {}
+    }
+    match &conf.devices.playback {
+        PlaybackDevice::Alsa { device, .. } => check("playback", "device", Some(device)),
+        PlaybackDevice::PipeWire {
+            node_name,
+            node_description,
+            node_group_name,
+            ..
+        } => {
+            check("playback", "node_name", node_name.as_ref());
+            check("playback", "node_description", node_description.as_ref());
+            check("playback", "node_group_name", node_group_name.as_ref());
+        }
+        PlaybackDevice::File { filename, .. } => check("playback", "filename", Some(filename)),
+        PlaybackDevice::CoreAudio(dev) => check("playback", "device", dev.device.as_ref()),
+        PlaybackDevice::Wasapi(dev) => check("playback", "device", dev.device.as_ref()),
+        PlaybackDevice::Asio(dev) => check("playback", "device", Some(&dev.device)),
+        PlaybackDevice::Stdout { .. } | PlaybackDevice::Dummy { .. } => {}
     }
 }
 
@@ -911,21 +982,9 @@ fn validate_pipeline(conf: &Configuration, impulses: &mut ImpulseCache, issues: 
                         issues.invalid(issue_path!["pipeline", idx], msg);
                     }
                     if checked_processors.insert(&step.name) {
-                        let result = match procconf {
-                            Processor::Compressor { parameters, .. } => {
-                                compressor::validate_compressor(parameters)
-                            }
-                            Processor::NoiseGate { parameters, .. } => {
-                                noisegate::validate_noise_gate(parameters)
-                            }
-                            Processor::LookaheadLimiter { parameters, .. } => {
-                                lookahead_limiter::validate_lookahead_limiter(parameters, fs)
-                            }
-                            Processor::RACE { parameters, .. } => race::validate_race(parameters),
-                        };
                         issues.nest_result(
-                            issue_path!["processors", &step.name, "parameters"],
-                            result,
+                            issue_path!["processors", &step.name],
+                            validate_processor(fs, procconf),
                         );
                     }
                 }
@@ -941,6 +1000,100 @@ fn validate_pipeline(conf: &Configuration, impulses: &mut ImpulseCache, issues: 
         );
         issues.invalid(issue_path!["pipeline"], msg);
     }
+}
+
+/// Validate the parameters of a processor. Issue paths are relative to the processor.
+pub fn validate_processor(fs: usize, procconf: &Processor) -> Result<(), Issues> {
+    let result = match procconf {
+        Processor::Compressor { parameters, .. } => compressor::validate_compressor(parameters),
+        Processor::NoiseGate { parameters, .. } => noisegate::validate_noise_gate(parameters),
+        Processor::LookaheadLimiter { parameters, .. } => {
+            lookahead_limiter::validate_lookahead_limiter(parameters, fs)
+        }
+        Processor::RACE { parameters, .. } => race::validate_race(parameters),
+    };
+    let mut issues = Issues::new();
+    issues.nest_result(issue_path!["parameters"], result);
+    issues.into_result(())
+}
+
+/// The names of the filters, mixers and processors that the pipeline uses.
+///
+/// These are exactly the ones [`validate_config`] checks: everything named by a
+/// step that is not bypassed.
+fn used_names(conf: &Configuration) -> [HashSet<&str>; 3] {
+    let mut filters = HashSet::new();
+    let mut mixers = HashSet::new();
+    let mut processors = HashSet::new();
+    for step in conf.pipeline.iter().flatten() {
+        match step {
+            PipelineStep::Mixer(step) if !step.is_bypassed() => {
+                mixers.insert(step.name.as_str());
+            }
+            PipelineStep::Filter(step) if !step.is_bypassed() => {
+                filters.extend(step.names.iter().map(String::as_str));
+            }
+            PipelineStep::Processor(step) if !step.is_bypassed() => {
+                processors.insert(step.name.as_str());
+            }
+            _ => {}
+        }
+    }
+    [filters, mixers, processors]
+}
+
+/// Validate the filters, mixers and processors that the pipeline does not use.
+///
+/// [`validate_config`] only checks what the pipeline uses, so a broken
+/// definition that nothing refers to, or that only a bypassed step refers to,
+/// does not stop CamillaDSP. A config editor still wants to hear about it, and
+/// can call this as well. Call it after `validate_config`, on the same
+/// configuration, so that tokens, relative paths and overrides are already
+/// applied. The issue paths are the same as `validate_config` would give, and
+/// checking a convolution filter reads its coefficient file.
+pub fn validate_unused(conf: &Configuration) -> Result<(), Issues> {
+    let [used_filters, used_mixers, used_processors] = used_names(conf);
+    let fs = conf.devices.samplerate();
+    let mut issues = Issues::new();
+    // Sorted by name, since the definitions are in hash maps.
+    if let Some(filters) = &conf.filters {
+        let mut impulses = ImpulseCache::new();
+        let mut unused: Vec<_> = filters
+            .iter()
+            .filter(|(name, _)| !used_filters.contains(name.as_str()))
+            .collect();
+        unused.sort_by_key(|(name, _)| *name);
+        for (name, filter) in unused {
+            issues.nest_result(
+                issue_path!["filters", name],
+                filters::validate_filter(fs, name, filter, &mut impulses),
+            );
+        }
+    }
+    if let Some(mixers) = &conf.mixers {
+        let mut unused: Vec<_> = mixers
+            .iter()
+            .filter(|(name, _)| !used_mixers.contains(name.as_str()))
+            .collect();
+        unused.sort_by_key(|(name, _)| *name);
+        for (name, mixer) in unused {
+            issues.nest_result(issue_path!["mixers", name], mixer::validate_mixer(mixer));
+        }
+    }
+    if let Some(processors) = &conf.processors {
+        let mut unused: Vec<_> = processors
+            .iter()
+            .filter(|(name, _)| !used_processors.contains(name.as_str()))
+            .collect();
+        unused.sort_by_key(|(name, _)| *name);
+        for (name, procconf) in unused {
+            issues.nest_result(
+                issue_path!["processors", name],
+                validate_processor(fs, procconf),
+            );
+        }
+    }
+    issues.into_result(())
 }
 
 /// The largest number of channels anywhere in the pipeline: the devices and
@@ -1015,7 +1168,7 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 mod tests {
     use super::{
         check_all_finite, deserialize_config, max_channels, parse_config, validate_config,
-        validate_resampler,
+        validate_resampler, validate_unused,
     };
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
     use crate::config::{IssueKind, Issues, format_path};
@@ -1381,5 +1534,148 @@ devices:
         let mut deserializer = serde_json::Deserializer::from_str(json);
         let issue = deserialize_config(&mut deserializer).unwrap_err();
         assert_eq!(format_path(&issue.path), "devices.chunksize");
+    }
+
+    /// A device type that this build has no backend for.
+    #[cfg(not(target_os = "macos"))]
+    const FOREIGN_CAPTURE: &str = "{type: CoreAudio, channels: 2}";
+    #[cfg(target_os = "macos")]
+    const FOREIGN_CAPTURE: &str = "{type: Wasapi, channels: 2}";
+
+    #[test]
+    fn unsupported_device_type_does_not_hide_other_issues() {
+        let yaml = BASE
+            .replace(
+                "{type: Stdin, channels: 2, format: S16_LE}",
+                FOREIGN_CAPTURE,
+            )
+            .replace("chunksize: 1024", "chunksize: 1024\n  volume_limit: 60");
+        // Parses, rather than failing on an unknown variant.
+        let issues = issues_in(&yaml);
+        assert_eq!(
+            located(&issues),
+            vec![
+                ("devices.capture.type".to_string(), IssueKind::Unsupported),
+                ("devices.volume_limit".to_string(), IssueKind::Invalid),
+            ],
+            "{issues}"
+        );
+    }
+
+    #[test]
+    fn unused_definitions_are_checked_separately() {
+        let yaml = format!(
+            "{BASE}filters:
+  used:
+    type: Gain
+    parameters: {{gain: 3}}
+  loud:
+    type: Gain
+    parameters: {{gain: 200}}
+  fir:
+    type: Conv
+    parameters: {{type: Raw, filename: /no/such/dir/fir.raw, format: F32_LE}}
+  skipped:
+    type: Delay
+    parameters: {{delay: -1, delay_unit: ms}}
+mixers:
+  bad:
+    channels: {{in: 2, out: 2}}
+    mapping:
+      - dest: 5
+        sources: [{{channel: 0}}]
+processors:
+  gate:
+    type: NoiseGate
+    parameters:
+      {{channels: 2, attack: 1, attack_unit: ms, release: 1, release_unit: ms,
+       threshold: -50, attenuation: -20}}
+pipeline:
+  - type: Filter
+    names: [used]
+  - type: Filter
+    bypassed: true
+    names: [skipped]
+"
+        );
+        // CamillaDSP itself only checks what the pipeline uses.
+        let mut conf = parse(&yaml).unwrap();
+        assert!(validate_config(&mut conf, None).is_ok());
+        let issues = validate_unused(&conf).unwrap_err();
+        assert_eq!(
+            located(&issues),
+            vec![
+                (
+                    "filters.fir.parameters.filename".to_string(),
+                    IssueKind::MissingFile
+                ),
+                (
+                    "filters.loud.parameters.gain".to_string(),
+                    IssueKind::Invalid
+                ),
+                (
+                    "filters.skipped.parameters.delay".to_string(),
+                    IssueKind::Invalid
+                ),
+                ("mixers.bad.mapping[0].dest".to_string(), IssueKind::Invalid),
+                (
+                    "processors.gate.parameters.attenuation".to_string(),
+                    IssueKind::Invalid
+                ),
+            ],
+            "{issues}"
+        );
+    }
+
+    #[test]
+    fn rules_taken_over_from_the_gui_schemas() {
+        let yaml = r#"
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture: {type: RawFile, filename: "", channels: 2, format: S16_LE}
+  playback: {type: File, filename: "", channels: 2, format: S16_LE}
+mixers:
+  mix:
+    channels: {in: 2, out: 2}
+    mapping:
+      - dest: 0
+        sources: [{channel: 0, gain: 200}]
+      - dest: 1
+        sources: [{channel: 1, gain: 20, scale: linear}]
+filters:
+  vol:
+    type: Volume
+    parameters: {fader: Aux1, limit: 60}
+processors:
+  gate:
+    type: NoiseGate
+    parameters:
+      {channels: 2, attack: 1, attack_unit: ms, release: 1, release_unit: ms,
+       threshold: -50, attenuation: -20}
+pipeline:
+  - type: Mixer
+    name: mix
+  - type: Filter
+    names: [vol]
+  - type: Processor
+    name: gate
+"#;
+        let issues = issues_in(yaml);
+        let paths: Vec<String> = located(&issues).into_iter().map(|(path, _)| path).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "devices.capture.filename",
+                "devices.playback.filename",
+                "mixers.mix.mapping[0].sources[0].gain",
+                "mixers.mix.mapping[1].sources[0].gain",
+                "filters.vol.parameters.limit",
+                "processors.gate.parameters.attenuation",
+            ],
+            "{issues}"
+        );
+        // An empty file name is invalid, not a missing file.
+        assert!(issues.iter().all(|issue| issue.kind == IssueKind::Invalid));
     }
 }

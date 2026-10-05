@@ -16,6 +16,7 @@
 
 use crate::config;
 use crate::config::{Issues, issue_path};
+use crate::filters::basicfilters::check_gain;
 
 /// Validate the mixer config, to give a helpful message intead of a panic.
 ///
@@ -60,6 +61,9 @@ pub fn validate_mixer(mixer_config: &config::Mixer) -> Result<(), Issues> {
                 issues.invalid(issue_path!["mapping", idx, "sources", n, "channel"], msg);
             }
             input_channels.push(source.channel);
+            let mut gain_issues = Issues::new();
+            check_gain(&mut gain_issues, "gain", source.gain(), source.scale());
+            issues.nest(issue_path!["mapping", idx, "sources", n], gain_issues);
         }
     }
     issues.into_result(())

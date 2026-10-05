@@ -1630,6 +1630,8 @@ Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB`
 A channel that has no sources will be filled with silence.
 The `mute` option determines if an output channel of the mixer should be muted.
 The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+The gain has the same range as for the [Gain filter](#gain), -150 to +150 in dB and -10.0 to +10.0 when linear.
+A source channel may only be listed once for each output channel.
 
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
@@ -1736,6 +1738,7 @@ The value will be rounded to the nearest number of chunks.
 The range of the volume control can be limited via the optional `limit` parameter.
 This sets a limit for the maximum value of the volume.
 If left out or set to `null`, it defaults to +50 dB.
+Like `volume_limit` in the devices section, it must be in the range -150 to +50 dB.
 
 All Volume filters that use the same fader must have the same `ramp_time_ms` and `limit`.
 
@@ -2461,6 +2464,7 @@ pipeline:
   * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
   * `threshold`: the loudness threshold in dB where gate "opens".
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
+    Must not be negative.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 

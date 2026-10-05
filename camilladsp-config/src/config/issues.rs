@@ -92,6 +92,9 @@ pub enum IssueKind {
     /// exist. CamillaDSP cannot run without it, but a config editor may want to
     /// accept the config anyway, since the file can be added afterwards.
     MissingFile,
+    /// The config uses a device type that this build of CamillaDSP does not
+    /// have, such as `Wasapi` on Linux. The rest of the config is still checked.
+    Unsupported,
 }
 
 /// A single problem with a config.
@@ -117,6 +120,14 @@ impl Issue {
             path,
             message: message.into(),
             kind: IssueKind::MissingFile,
+        }
+    }
+
+    pub fn unsupported(path: Vec<PathElement>, message: impl Into<String>) -> Self {
+        Issue {
+            path,
+            message: message.into(),
+            kind: IssueKind::Unsupported,
         }
     }
 }

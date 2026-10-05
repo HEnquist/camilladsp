@@ -31,6 +31,12 @@ pub fn validate_noise_gate(config: &config::NoiseGateParameters) -> Result<(), I
         let msg = "Release value must be larger than zero.";
         issues.invalid(issue_path!["release"], msg);
     }
+    // The gate applies the attenuation as a gain of minus that many dB, so a
+    // negative value would boost the quiet parts instead of attenuating them.
+    if config.attenuation < 0.0 {
+        let msg = "Attenuation value cannot be negative.";
+        issues.invalid(issue_path!["attenuation"], msg);
+    }
     check_channel_lists(
         &mut issues,
         config.channels,
