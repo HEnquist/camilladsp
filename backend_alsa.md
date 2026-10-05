@@ -180,6 +180,46 @@ To load the loopback module automatically at boot, create the file `/etc/modules
 containing the single line `snd-aloop`.
 To also start CamillaDSP automatically, run it as a systemd service, see [Using systemd](#using-systemd).
 
+#### Following the player's sample rate and format
+CamillaDSP can follow a player that changes sample rate, sample format or channel count,
+using the built-in controller, see
+[Following the capture source](./README.md#following-the-capture-source-and-error-recovery).
+The capture side stays open the whole time, also between tracks and while nothing plays.
+
+While following, CamillaDSP sets the `PCM Notify` control of the loopback cable it captures from,
+and clears it again when the capture closes.
+With `PCM Notify` set, a player can open the playback side with any format, even while
+CamillaDSP is capturing. If the player uses a different format than the capture,
+the kernel stops the capture, and CamillaDSP switches to a config for the new format.
+A player that uses the same format as the capture changes nothing, and nothing restarts.
+When CamillaDSP starts while a player is already running, it opens directly at the player's format.
+
+This needs a kernel where `PCM Notify` works. It has been broken since 2018,
+and the fix is queued for Linux 7.4, and for backporting to the stable kernels.
+On a kernel without the fix, the player is instead held to the format of the capture,
+the same as without following. Nothing breaks, but there is nothing to follow either:
+a player using a `plughw` device gets its audio resampled, and one using a `hw` device fails
+to open or plays at the wrong rate.
+When following a loopback, CamillaDSP logs a reminder of this at startup.
+
+Recommended settings when following a loopback:
+- Capture from the `hw` device, like `hw:Loopback,0,0`, not `plughw`.
+  A `plug` device converts whatever the player sends, so CamillaDSP can't see the player's
+  format through it when it starts.
+- Leave the capture `format` out of the config. A sample format change from the player then
+  only reopens the capture with the new format, with the same config.
+  Nothing else in a config depends on the capture format.
+- Use `$samplerate$` in the Specific template, or only Adapt, unless the player also changes
+  the channel count. See `exampleconfigs/follow_loopback.yml` for a config to start from.
+
+The `stop_on_inactive` option is not needed with following, and is ignored while following is on.
+
+Following also works with the USB gadget and other ALSA devices, on any kernel.
+The gadget reports the rate the host plays at.
+Other devices are followed by measuring the incoming sample rate,
+or, for a device locked to a single rate (for example by an external clock),
+by checking the rate the device offers when it opens.
+
 ### ALSA CamillaDSP "I/O" plugin
 
 ALSA can be extended by plugins in user-space.
@@ -278,6 +318,8 @@ Both of these can indicate when playback has stopped.
 If CamillaDSP should stop when that happens, set `stop_on_inactive` to `true`.
 For the loopback, this means that CamillaDSP releases the capture side,
 making it possible for a player application to re-open at another sample rate.
+With a kernel where `PCM Notify` works, following the player is the better way to do this,
+see [Following the player's sample rate and format](#following-the-players-sample-rate-and-format).
 
 For the gadget, the control can also indicate that the sample rate changed.
 When this happens, the capture can no longer continue and CamillaDSP will stop.

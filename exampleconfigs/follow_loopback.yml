@@ -1,0 +1,36 @@
+---
+# Following a player on an ALSA Loopback, see "Following the player's sample rate and format"
+# in backend_alsa.md. Needs a kernel where the Loopback's PCM Notify works.
+#
+# Run with the Adapt provider, which changes this config to every rate the player uses:
+#   camilladsp --wait --follow_adapt -s statefile.yml follow_loopback.yml
+#
+# The capture has no `format`, so a player that changes sample format only reopens the
+# capture. The FIR filter has a file per rate, picked with the `$samplerate$` token,
+# for example filter_44100.raw and filter_96000.raw.
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    # The hw device, not plughw, so CamillaDSP can see the player's format.
+    device: "hw:Loopback,0,0"
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:Generic_1"
+
+filters:
+  roomcorrection:
+    type: Conv
+    parameters:
+      type: Raw
+      filename: filter_$samplerate$.raw
+      format: F32_LE
+
+pipeline:
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - roomcorrection

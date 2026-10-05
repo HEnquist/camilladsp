@@ -812,7 +812,12 @@ so a patch carries over to the next format change.
 The backends report format changes differently:
 - CoreAudio reports the new rate as soon as the device changes rate,
   and the controller reads the nominal rate and channel count of the device while it waits.
-- ALSA, the file backends and WASAPI detect a rate change by measuring the incoming rate.
+- ALSA reports the new rate, channel count and sample format of a player on a Loopback,
+  and the rate of the host for the USB gadget. Other ALSA devices are followed by measuring
+  the incoming rate. While waiting, it asks the device what the source is doing.
+  Following a Loopback needs a recent kernel, see
+  [the ALSA readme](./backend_alsa.md#following-the-players-sample-rate-and-format).
+- The file backends and WASAPI detect a rate change by measuring the incoming rate.
 - ASIO reports a rate change from the driver.
 
 ### Error recovery
