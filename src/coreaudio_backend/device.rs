@@ -795,7 +795,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         Ok(rate) => {
                             debug!("Playback rate change event, new rate: {rate}.");
                             if rate as usize != samplerate {
-                                status_channel.send(StatusMessage::PlaybackFormatChange(rate as usize)).unwrap_or(());
+                                status_channel.send(StatusMessage::playback_rate_change(rate as usize)).unwrap_or(());
                                 break 'deviceloop;
                             }
                         },

@@ -186,7 +186,7 @@ def test_a_capture_rate_change_stops_processing(control_cdsp):
     cdsp.capture_control.set("rate", CHANGED_RATE)
     reason = wait_for_standby(cdsp)
     assert list(reason) == ["CaptureFormatChange"]
-    reported = reason["CaptureFormatChange"]
+    reported = reason["CaptureFormatChange"]["samplerate"]
     assert CHANGED_RATE * 0.98 <= reported < DETECTION_EDGE, (
         f"reported {reported} Hz, expected between {CHANGED_RATE} and {DETECTION_EDGE:.0f}"
     )
@@ -236,7 +236,9 @@ def test_a_playback_rate_change_stops_processing(control_cdsp):
     """
     cdsp = control_cdsp(extra_args=["--wait"])
     cdsp.playback_control.set("rate", CHANGED_RATE)
-    assert wait_for_standby(cdsp) == {"PlaybackFormatChange": CHANGED_RATE}
+    assert wait_for_standby(cdsp) == {
+        "PlaybackFormatChange": {"samplerate": CHANGED_RATE, "channels": None, "format": None}
+    }
 
 
 def test_a_stream_that_ends_sets_done(control_cdsp):

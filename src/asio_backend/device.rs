@@ -1658,7 +1658,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             new_rate
                         );
                         status_channel
-                            .send(StatusMessage::PlaybackFormatChange(new_rate))
+                            .send(StatusMessage::playback_rate_change(new_rate))
                             .unwrap_or(());
                         break 'deviceloop;
                     }

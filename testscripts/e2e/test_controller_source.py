@@ -113,6 +113,10 @@ def test_an_unsupported_format_waits_and_keeps_waiting(source_cdsp, source):
     time.sleep(2.5)
     assert waiting_for(cdsp)["channels"] == 4
     assert cdsp.send("GetState") == "Inactive"
+    # The stop reason carries the whole format the capture reported.
+    assert cdsp.send("GetStopReason") == {
+        "CaptureFormatChange": {"samplerate": 48000, "channels": 4, "format": "S32_LE"}
+    }
 
 
 def test_a_supported_format_ends_the_wait(source_cdsp, source):

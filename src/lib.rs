@@ -251,8 +251,8 @@ pub enum StatusMessage {
     PlaybackError(String),
     /// Capture device encountered an unrecoverable error.
     CaptureError(String),
-    /// Playback device detected a sample-rate change to the given value.
-    PlaybackFormatChange(usize),
+    /// Playback device detected a format change, with the new format as far as it knows it.
+    PlaybackFormatChange(controller::SourceFormat),
     /// Capture device detected a format change, with the new format as far as it knows it.
     CaptureFormatChange(controller::SourceFormat),
     /// Playback device thread has finished normally.
@@ -271,6 +271,11 @@ impl StatusMessage {
     /// A capture format change where only the new rate is known, 0 if not even that.
     pub fn capture_rate_change(rate: usize) -> Self {
         StatusMessage::CaptureFormatChange(controller::SourceFormat::rate(rate))
+    }
+
+    /// A playback format change where only the new rate is known, 0 if not even that.
+    pub fn playback_rate_change(rate: usize) -> Self {
+        StatusMessage::PlaybackFormatChange(controller::SourceFormat::rate(rate))
     }
 }
 
@@ -699,10 +704,10 @@ pub enum StopReason {
     PlaybackError(String),
     /// An unexpected internal error occurred.
     UnknownError(String),
-    /// Capture device sample rate changed to the given value.
-    CaptureFormatChange(usize),
-    /// Playback device sample rate changed to the given value.
-    PlaybackFormatChange(usize),
+    /// Capture device format changed: `samplerate`, plus `channels` and `format` where known.
+    CaptureFormatChange(controller::SourceFormat),
+    /// Playback device format changed, reported the same way as `CaptureFormatChange`.
+    PlaybackFormatChange(controller::SourceFormat),
 }
 
 /// Bundle of `Arc`-wrapped status objects passed between the engine, device threads, and WebSocket server.

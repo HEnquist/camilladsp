@@ -497,7 +497,7 @@ fn playback_loop(
                 if let Some(rate) = params.control.rate_override() {
                     warn!("Dummy playback device switched to {rate} Hz");
                     recycle_chunk(chunk);
-                    break StatusMessage::PlaybackFormatChange(rate);
+                    break StatusMessage::playback_rate_change(rate);
                 }
                 if params.control.stalled() {
                     // A stalled device keeps taking chunks and throws them away, the way

@@ -721,12 +721,12 @@ impl Controller {
                                 error!("Capture error: {message}");
                                 stop_with!(StopReason::CaptureError(message), SessionEnd::Error);
                             }
-                            StatusMessage::PlaybackFormatChange(rate) => {
+                            StatusMessage::PlaybackFormatChange(format) => {
                                 error!("Playback stopped due to external format change");
                                 stop_with!(
-                                    StopReason::PlaybackFormatChange(rate),
+                                    StopReason::PlaybackFormatChange(format.clone()),
                                     SessionEnd::FormatChange {
-                                        format: SourceFormat::rate(rate),
+                                        format,
                                         capture: false,
                                         started: !is_starting,
                                     }
@@ -735,7 +735,7 @@ impl Controller {
                             StatusMessage::CaptureFormatChange(format) => {
                                 error!("Capture stopped due to external format change");
                                 stop_with!(
-                                    StopReason::CaptureFormatChange(format.samplerate),
+                                    StopReason::CaptureFormatChange(format.clone()),
                                     SessionEnd::FormatChange {
                                         format,
                                         capture: true,

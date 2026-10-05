@@ -67,7 +67,8 @@ def test_a_rate_change_on_a_device_stops_the_session(
     wait_for_peak(cdsp, "GetPlaybackSignalPeak")
     set_nominal_rate(device, 44100)
     stopped = wait_for_stop(cdsp)
-    assert stopped == {reason: 44100}
+    assert list(stopped) == [reason]
+    assert stopped[reason]["samplerate"] == 44100
     assert cdsp.exit() == EXIT_OK
 
 

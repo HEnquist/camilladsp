@@ -1093,7 +1093,7 @@ fn send_error_or_playbackformatchange(
 ) {
     if check_for_format_change(rx) {
         debug!("Send PlaybackFormatChange.");
-        tx.send(StatusMessage::PlaybackFormatChange(0))
+        tx.send(StatusMessage::playback_rate_change(0))
             .unwrap_or(());
     } else {
         debug!("Send PlaybackError.");

@@ -169,8 +169,8 @@ Returns: `StopReason` — Reason the processing last stopped.
 - `CaptureError` — Capture device reported an error.
 - `PlaybackError` — Playback device reported an error.
 - `UnknownError` — An unexpected internal error occurred.
-- `CaptureFormatChange` — Capture device sample rate changed to the given value.
-- `PlaybackFormatChange` — Playback device sample rate changed to the given value.
+- `CaptureFormatChange` — Capture device format changed: `samplerate`, plus `channels` and `format` where known.
+- `PlaybackFormatChange` — Playback device format changed, reported the same way as `CaptureFormatChange`.
 
 #### `SubscribeState`
 

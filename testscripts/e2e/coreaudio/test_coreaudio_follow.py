@@ -118,9 +118,8 @@ def test_without_following_a_rate_change_goes_idle(start_cdsp, ca_config, feeder
     cdsp = start_cdsp(config=ca_config(), extra_args=["--wait"])
     wait_for_signal(cdsp)
     switch_source(44100)
-    assert cdsp.poll_until_true("GetStopReason", lambda v: v != "None") == {
-        "CaptureFormatChange": 44100
-    }
+    reason = cdsp.poll_until_true("GetStopReason", lambda v: v != "None")
+    assert reason["CaptureFormatChange"]["samplerate"] == 44100
     cdsp.poll_until("GetState", "Inactive")
     assert status(cdsp)["following"] is False
     assert config_value(cdsp, "/devices/samplerate") is None

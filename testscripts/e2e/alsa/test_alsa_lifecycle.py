@@ -259,7 +259,7 @@ def test_a_capture_clock_that_jumps_stops_the_session(start_cdsp, alsa_config, f
     set_rate_shift(CAPTURE_CABLE, shift)
     reason = wait_for_stop(cdsp)
     assert list(reason) == ["CaptureFormatChange"]
-    reported = reason["CaptureFormatChange"]
+    reported = reason["CaptureFormatChange"]["samplerate"]
     assert 0.85 * shifted_rate(RATE, shift) < reported < RATE / 1.04
 
 
