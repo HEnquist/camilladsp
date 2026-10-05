@@ -47,10 +47,10 @@ use crate::alsa_backend::buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsa_backend::utils::{
-    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
-    find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
-    list_samplerates_as_text, pick_preferred_format, process_events, recover_suspended_pcm,
-    state_desc, sync_linked_controls,
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, FormatPinned,
+    LoopbackNotify, PinnedFormat, PlaybackParams, find_elem, list_channels_as_text,
+    list_device_names, list_formats_as_text, list_samplerates_as_text, pick_preferred_format,
+    process_events, recover_suspended_pcm, state_desc, sync_linked_controls,
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
@@ -82,6 +82,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
+    /// The controller follows the source format, see `audiodevice::new_capture_device`.
+    pub follow: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
 }
@@ -273,6 +275,11 @@ fn capture_buffer(
             "Alsa snd_pcm_state() of capture device returned an unexpected error: {capture_state}"
         );
         return Err(Box::new(nixerr));
+    } else if (capture_state == alsa_sys::SND_PCM_STATE_DRAINING as i32
+        || capture_state == alsa_sys::SND_PCM_STATE_SETUP as i32)
+        && elems.kernel_stop_is_format_change(params)
+    {
+        return Ok(CaptureResult::FormatChange(elems.loopback_format_change()));
     } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         debug!(
             "Starting capture from state: {}",
@@ -319,7 +326,9 @@ fn capture_buffer(
                             let event_result =
                                 process_events(c, elems, status_channel, params, processing_params);
                             match event_result {
-                                CaptureResult::Done => return Ok(event_result),
+                                CaptureResult::Done | CaptureResult::FormatChange(_) => {
+                                    return Ok(event_result);
+                                }
                                 CaptureResult::Stalled => debug!("Capture device is stalled"),
                                 CaptureResult::Normal => {}
                             };
@@ -389,6 +398,9 @@ fn capture_buffer(
                     trace!("Capture: encountered EAGAIN error on read, trying again");
                     continue;
                 }
+                Errno::EBADFD if elems.kernel_stop_is_format_change(params) => {
+                    return Ok(CaptureResult::FormatChange(elems.loopback_format_change()));
+                }
                 Errno::EPIPE => {
                     warn!("Capture: read overrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
@@ -413,6 +425,11 @@ fn capture_buffer(
 }
 
 /// Open an Alsa PCM device
+///
+/// With `follow`, a capture sets `PCM Notify` if it is a loopback, before any params,
+/// so a player is never held to them. It then checks that the device offers the
+/// requested format, and fails with [`FormatPinned`] if it only offers another one,
+/// for the controller to follow.
 fn open_pcm(
     devname: String,
     samplerate: u32,
@@ -420,7 +437,8 @@ fn open_pcm(
     sample_format: &Option<AlsaSampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<(alsa::PCM, AlsaSampleFormat)> {
+    follow: bool,
+) -> Res<(alsa::PCM, AlsaSampleFormat, Option<LoopbackNotify>)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -435,10 +453,24 @@ fn open_pcm(
     } else {
         alsa::PCM::new(&devname, Direction::Playback, true)?
     };
+    let follow = capture && follow;
+    let notify = if follow {
+        LoopbackNotify::enable(&pcmdev)
+    } else {
+        None
+    };
     // Set hardware parameters
     let chosen_format;
     {
         let hwp = HwParams::any(&pcmdev)?;
+
+        if follow
+            && let Some(format) =
+                PinnedFormat::of(&hwp).differs_from(samplerate, channels, sample_format)
+        {
+            info!("The capture device only offers {format}, reporting a format change.");
+            return Err(Box::new(FormatPinned(format)));
+        }
 
         // Set number of channels
         debug!("{}: {}", direction, list_channels_as_text(&hwp));
@@ -489,7 +521,7 @@ fn open_pcm(
         pcmdev.sw_params(&swp)?;
         debug!("{direction} device \"{devname}\" successfully opened");
     }
-    Ok((pcmdev, chosen_format))
+    Ok((pcmdev, chosen_format, notify))
 }
 
 fn playback_loop_bytes(
@@ -1042,6 +1074,14 @@ fn capture_loop_bytes(
                     crate::set_capture_state(&params.capture_status, ProcessingState::Stalled);
                 }
             }
+            Ok(CaptureResult::FormatChange(format)) => {
+                channels.audio.send(AudioMessage::EndOfStream).unwrap_or(());
+                channels
+                    .status
+                    .send(StatusMessage::CaptureFormatChange(format))
+                    .unwrap_or(());
+                break;
+            }
             Ok(CaptureResult::Done) => {
                 info!("Capture stopped");
                 let msg = AudioMessage::EndOfStream;
@@ -1183,8 +1223,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     &conf_sample_format,
                     &mut buf_manager,
                     false,
+                    false,
                 ) {
-                    Ok((pcmdevice, sample_format)) => {
+                    Ok((pcmdevice, sample_format, _)) => {
                         match status_channel.send(StatusMessage::PlaybackReady) {
                             Ok(()) => {}
                             Err(_err) => {}
@@ -1250,6 +1291,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
+        let follow = self.follow;
         let link_volume_control = self.link_volume_control.clone();
         let link_mute_control = self.link_mute_control.clone();
         let mut buf_manager = CaptureBufferManager::new(
@@ -1275,8 +1317,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                     &conf_sample_format,
                     &mut buf_manager,
                     true,
+                    follow,
                 ) {
-                    Ok((pcmdevice, sample_format)) => {
+                    Ok((pcmdevice, sample_format, notify)) => {
                         match status_channel.send(StatusMessage::CaptureReady) {
                             Ok(()) => {}
                             Err(_err) => {}
@@ -1300,6 +1343,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             stop_on_rate_change,
                             rate_measure_interval,
                             stop_on_inactive,
+                            follow,
                             link_volume_control,
                             link_mute_control,
                             linked_mute_value: None,
@@ -1318,12 +1362,22 @@ impl CaptureDevice for AlsaCaptureDevice {
                             &mut buf_manager,
                             &processing_params,
                         );
+                        // Close the capture before clearing `PCM Notify` again.
+                        drop(pcmdevice);
+                        drop(notify);
                     }
                     Err(err) => {
-                        let send_result =
-                            status_channel.send(StatusMessage::CaptureError(err.to_string()));
-                        if send_result.is_err() {
-                            error!("Capture error: {err}");
+                        match err.downcast::<FormatPinned>() {
+                            Ok(pinned) => status_channel
+                                .send(StatusMessage::CaptureFormatChange(pinned.0))
+                                .unwrap_or(()),
+                            Err(err) => {
+                                let send_result = status_channel
+                                    .send(StatusMessage::CaptureError(err.to_string()));
+                                if send_result.is_err() {
+                                    error!("Capture error: {err}");
+                                }
+                            }
                         }
                         barrier.wait();
                     }

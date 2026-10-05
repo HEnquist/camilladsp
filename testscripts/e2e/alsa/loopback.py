@@ -114,6 +114,51 @@ def set_rate_shift(cable, value):
     )
 
 
+def _notify_control(cable):
+    return f"iface=PCM,name='PCM Notify',device=1,subdevice={cable}"
+
+
+def notify(cable):
+    """Whether the cable has `PCM Notify` set, which lets its player change format."""
+    out = subprocess.run(
+        ["amixer", "-c", CARD, "cget", _notify_control(cable)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return re.search(r": values=(\w+)", out).group(1) == "on"
+
+
+def set_notify(cable, on):
+    subprocess.run(
+        ["amixer", "-q", "-c", CARD, "cset", _notify_control(cable), "on" if on else "off"],
+        check=True,
+    )
+
+
+def pcm_proc(device, stream, subdevice, name):
+    """The "key: value" lines of a substream's procfs file, empty while it is closed."""
+    path = f"/proc/asound/{CARD}/pcm{device}{stream}/sub{subdevice}/{name}"
+    with open(path) as proc:
+        lines = proc.read().splitlines()
+    return dict(line.split(":", 1) for line in lines if ":" in line)
+
+
+def hw_params(device, stream, subdevice):
+    """Rate, channels and format a substream runs with, as strings, or {} while closed."""
+    params = pcm_proc(device, stream, subdevice, "hw_params")
+    return {
+        "rate": params["rate"].split()[0],
+        "channels": params["channels"].strip(),
+        "format": params["format"].strip(),
+    } if "rate" in params else {}
+
+
+def trigger_time(device, stream, subdevice):
+    """When a substream was last started, which only changes when it is restarted."""
+    return pcm_proc(device, stream, subdevice, "status").get("trigger_time", "").strip()
+
+
 def shifted_rate(nominal, shift):
     """The rate a cable runs at with a given shift, see the module docstring."""
     return nominal * NOMINAL_SHIFT / shift

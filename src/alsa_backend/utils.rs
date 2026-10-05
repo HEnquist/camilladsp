@@ -15,6 +15,7 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config::{AlsaSampleFormat, BinarySampleFormat};
+use crate::controller::{SourceFormat, SourceState};
 use crate::{CaptureStatus, PlaybackStatus, Res, StatusMessage};
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
@@ -25,7 +26,9 @@ use alsa::{Card, Direction};
 use alsa_sys;
 use nix::errno::Errno;
 use parking_lot::RwLock;
+use std::error;
 use std::ffi::CString;
+use std::fmt;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -58,6 +61,8 @@ pub struct CaptureParams {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
+    /// The controller follows the source format, see `audiodevice::new_capture_device`.
+    pub follow: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
     pub linked_volume_value: Option<f32>,
@@ -80,6 +85,216 @@ pub enum CaptureResult {
     Normal,
     Stalled,
     Done,
+    /// The source changed format, and the capture has to stop for it.
+    FormatChange(SourceFormat),
+}
+
+/// A capture open that stopped early while following, since the device only offers a
+/// format other than the one asked for. Carries the format it offers.
+#[derive(Debug)]
+pub struct FormatPinned(pub SourceFormat);
+
+impl fmt::Display for FormatPinned {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the capture device only offers {}", self.0)
+    }
+}
+
+impl error::Error for FormatPinned {}
+
+/// The rate, channel count and sample format a set of hw params allows, each one only
+/// where it allows a single value.
+///
+/// A loopback capture opened while its playback end runs is held to the playback's
+/// params, and so is any device locked to an external clock, so this is how such a
+/// device tells what its source is doing.
+#[derive(Debug)]
+pub struct PinnedFormat {
+    pub rate: Option<u32>,
+    pub channels: Option<u32>,
+    pub format: Option<Format>,
+}
+
+impl PinnedFormat {
+    pub fn of(hwp: &HwParams) -> Self {
+        let single = |min: alsa::Result<u32>, max: alsa::Result<u32>| match (min, max) {
+            (Ok(min), Ok(max)) if min == max => Some(min),
+            _ => None,
+        };
+        PinnedFormat {
+            rate: single(hwp.get_rate_min(), hwp.get_rate_max()),
+            channels: single(hwp.get_channels_min(), hwp.get_channels_max()),
+            format: hwp.get_format().ok(),
+        }
+    }
+
+    /// The pinned values that differ from the requested ones, as a format to follow.
+    /// `None` if nothing is pinned to another value. A pinned sample format only counts
+    /// when one is requested, an automatic one takes whatever the device has.
+    pub fn differs_from(
+        &self,
+        rate: u32,
+        channels: u32,
+        format: &Option<AlsaSampleFormat>,
+    ) -> Option<SourceFormat> {
+        let rate_differs = self.rate.is_some_and(|r| r != rate);
+        let channels_differ = self.channels.is_some_and(|c| c != channels);
+        let format_differs = match (self.format, format) {
+            (Some(pinned), Some(requested)) => {
+                alsa_format_name(pinned) != alsa_format_to_str(*requested)
+            }
+            _ => false,
+        };
+        (rate_differs || channels_differ || format_differs).then(|| SourceFormat {
+            samplerate: self.rate.unwrap_or(rate) as usize,
+            channels: self.channels.map(|c| c as usize),
+            format: self.format.map(alsa_format_name),
+        })
+    }
+
+    /// The pinned values as a source format, if at least the rate is pinned.
+    pub fn source_format(&self) -> Option<SourceFormat> {
+        Some(SourceFormat {
+            samplerate: self.rate? as usize,
+            channels: self.channels.map(|c| c as usize),
+            format: self.format.map(alsa_format_name),
+        })
+    }
+}
+
+/// The name of an ALSA sample format as CamillaDSP configs write it, see
+/// [`alsa_format_to_str`]. A format CamillaDSP has no name for keeps the ALSA name.
+pub fn alsa_format_name(format: Format) -> String {
+    let known = match format {
+        Format::S16LE => Some(AlsaSampleFormat::S16_LE),
+        Format::S243LE => Some(AlsaSampleFormat::S24_3_LE),
+        Format::S24LE => Some(AlsaSampleFormat::S24_4_LE),
+        Format::S32LE => Some(AlsaSampleFormat::S32_LE),
+        Format::FloatLE => Some(AlsaSampleFormat::F32_LE),
+        Format::Float64LE => Some(AlsaSampleFormat::F64_LE),
+        _ => None,
+    };
+    match known {
+        Some(fmt) => alsa_format_to_str(fmt).to_string(),
+        None => format.to_string(),
+    }
+}
+
+/// An ALSA sample format from its kernel number, as a `PCM Slave Format` control gives it.
+fn format_from_number(number: i32) -> Option<Format> {
+    Format::all().iter().copied().find(|f| *f as i32 == number)
+}
+
+/// Sets `PCM Notify` on the loopback cable of a capture while following, so that a
+/// player can start at any format and the kernel stops the capture for it, rather than
+/// holding the player to the capture's format. Puts the old value back when dropped.
+///
+/// Opening anything but a loopback gives `None`, since only the loopback has the control.
+pub struct LoopbackNotify {
+    ctl: Ctl,
+    id: ElemId,
+}
+
+static KERNEL_HINT: std::sync::Once = std::sync::Once::new();
+
+impl LoopbackNotify {
+    pub fn enable(pcm: &alsa::PCM) -> Option<Self> {
+        let info = pcm.info().ok()?;
+        let card = info.get_card();
+        if card < 0 {
+            return None;
+        }
+        let ctl = Ctl::new(&format!("hw:{card}"), false).ok()?;
+        // The cable's controls are named after its capture end, which is this device.
+        let mut id = ElemId::new(ElemIface::PCM);
+        id.set_device(info.get_device());
+        id.set_subdevice(info.get_subdevice());
+        id.set_name(c"PCM Notify");
+        let mut value = ElemValue::new(ElemType::Boolean).ok()?;
+        value.set_id(&id);
+        ctl.elem_read(&mut value).ok()?;
+        KERNEL_HINT.call_once(|| {
+            info!(
+                "Following a loopback capture needs a kernel with the snd-aloop PCM Notify fix, Linux 7.4 or newer, or a stable kernel with the backport"
+            );
+        });
+        if value.get_boolean(0) == Some(true) {
+            debug!("PCM Notify is already set on the loopback cable, leaving it alone");
+            return None;
+        }
+        value.set_boolean(0, true)?;
+        if let Err(err) = ctl.elem_write(&value) {
+            warn!("Unable to set PCM Notify on the loopback cable, error: {err}");
+            return None;
+        }
+        debug!("Set PCM Notify on the loopback cable");
+        Some(LoopbackNotify { ctl, id })
+    }
+}
+
+impl Drop for LoopbackNotify {
+    fn drop(&mut self) {
+        if let Ok(mut value) = ElemValue::new(ElemType::Boolean) {
+            value.set_id(&self.id);
+            if value.set_boolean(0, false).is_some() && self.ctl.elem_write(&value).is_ok() {
+                debug!("Cleared PCM Notify on the loopback cable");
+            }
+        }
+    }
+}
+
+/// Ask an ALSA capture device what its source is doing, without capturing from it.
+///
+/// The PCM is opened and its hw params constraint read, but no params are set. That
+/// doesn't hold a loopback cable to any format, since the kernel only does that when
+/// a stream is prepared.
+pub fn query_capture_source(device: &str) -> SourceState {
+    let pcm = match alsa::PCM::new(device, Direction::Capture, true) {
+        Ok(pcm) => pcm,
+        Err(err) => {
+            debug!("Unable to open capture device {device} to query its source, error: {err}");
+            return SourceState::Unknown;
+        }
+    };
+    let pinned = match HwParams::any(&pcm) {
+        Ok(hwp) => PinnedFormat::of(&hwp),
+        Err(err) => {
+            debug!("Unable to read the hw params of capture device {device}, error: {err}");
+            return SourceState::Unknown;
+        }
+    };
+    let Ok(info) = pcm.info() else {
+        return SourceState::Unknown;
+    };
+    let card = info.get_card();
+    if card >= 0
+        && let Ok(h) = HCtl::new(&format!("hw:{card}"), false)
+        && h.load().is_ok()
+    {
+        let (device, subdevice) = (Some(info.get_device()), Some(info.get_subdevice()));
+        // A loopback: the constraint is what the playback end runs, and is reliable
+        // where the `PCM Slave` controls may be left over from an earlier stream.
+        if let Some(active) = find_elem(&h, ElemIface::PCM, device, subdevice, "PCM Slave Active") {
+            return match (active.read_as_bool(), pinned.source_format()) {
+                (Some(false), _) => SourceState::Inactive,
+                (Some(true), Some(format)) => SourceState::Format(format),
+                _ => SourceState::Unknown,
+            };
+        }
+        // A USB gadget: the rate the host plays at, 0 when it plays nothing.
+        if let Some(rate) = find_elem(&h, ElemIface::PCM, device, subdevice, "Capture Rate") {
+            return match rate.read_as_int() {
+                Some(0) => SourceState::Inactive,
+                Some(rate) => SourceState::Format(SourceFormat::rate(rate as usize)),
+                None => SourceState::Unknown,
+            };
+        }
+    }
+    // Anything else can only tell when it is locked to a single rate.
+    match pinned.source_format() {
+        Some(format) => SourceState::Format(format),
+        None => SourceState::Unknown,
+    }
 }
 
 pub fn get_card_names(card: &Card, input: bool, names: &mut Vec<(String, String)>) -> Res<()> {
@@ -525,12 +740,41 @@ impl<'a> ElemData<'a> {
 #[derive(Default)]
 pub struct CaptureElements<'a> {
     pub loopback_active: Option<ElemData<'a>>,
-    // pub loopback_rate: Option<ElemData<'a>>,
-    // pub loopback_format: Option<ElemData<'a>>,
-    // pub loopback_channels: Option<ElemData<'a>>,
+    pub loopback_rate: Option<ElemData<'a>>,
+    pub loopback_format: Option<ElemData<'a>>,
+    pub loopback_channels: Option<ElemData<'a>>,
     pub gadget_rate: Option<ElemData<'a>>,
     pub volume: Option<ElemData<'a>>,
     pub mute: Option<ElemData<'a>>,
+}
+
+impl CaptureElements<'_> {
+    /// Whether a capture the kernel stopped means that the source changed format.
+    ///
+    /// While following, a loopback cable has `PCM Notify` set, and then the kernel stops
+    /// the capture when its playback end starts with another format. The stop leaves the
+    /// capture in DRAINING, then SETUP once drained, and reads fail with EBADFD.
+    /// CamillaDSP never puts a capture in those states itself.
+    pub fn kernel_stop_is_format_change(&self, params: &CaptureParams) -> bool {
+        params.follow && self.loopback_rate.is_some()
+    }
+
+    /// The format the playback end of the loopback cable switched to.
+    ///
+    /// The `PCM Slave` controls only change when the format does, so they are only up
+    /// to date right after the kernel stopped the capture for a new format.
+    pub fn loopback_format_change(&self) -> SourceFormat {
+        let read = |elem: &Option<ElemData>| elem.as_ref().and_then(|e| e.read_as_int());
+        let format = SourceFormat {
+            samplerate: read(&self.loopback_rate).unwrap_or(0) as usize,
+            channels: read(&self.loopback_channels).map(|c| c as usize),
+            format: read(&self.loopback_format)
+                .and_then(format_from_number)
+                .map(alsa_format_name),
+        };
+        info!("The kernel stopped the loopback capture, its playback end changed to {format}");
+        format
+    }
 }
 
 pub struct FileDescriptors {
@@ -599,11 +843,8 @@ pub fn process_events(
                 }
             }
             EventAction::FormatChange(value) => {
-                debug!("Stopping, capture device sample format changed");
-                status_channel
-                    .send(StatusMessage::capture_rate_change(value))
-                    .unwrap_or_default();
-                return CaptureResult::Done;
+                debug!("Stopping, capture device sample rate changed");
+                return CaptureResult::FormatChange(SourceFormat::rate(value));
             }
             EventAction::SetVolume(vol) => {
                 debug!("Alsa volume change event, set main fader to {vol} dB");
@@ -653,37 +894,9 @@ pub fn get_event_action(
             return EventAction::SourceInactive;
         }
     }
-    // Include this if the notify functionality of the loopback gets fixed
-    /*
-    if let Some(eldata) = &elems.loopback_rate {
-        if eldata.numid == numid {
-            let value = eldata.read_as_int();
-            debug!("Gadget rate: {:?}", value);
-            if let Some(rate) = value {
-                debug!("Loopback rate: {}", rate);
-                return EventAction::FormatChange(rate);
-            }
-        }
-    }
-    if let Some(eldata) = &elems.loopback_format {
-        if eldata.numid == numid {
-            let value = eldata.read_as_int();
-            debug!("Gadget rate: {:?}", value);
-            if let Some(format) = value {
-                debug!("Loopback format: {}", format);
-                return EventAction::FormatChange(TODO add sample format!);
-            }
-        }
-    }
-    if let Some(eldata) = &elems.loopback_channels {
-        if eldata.numid == numid {
-            debug!("Gadget rate: {:?}", value);
-            if let Some(chans) = value {
-                debug!("Loopback channels: {}", chans);
-                return EventAction::FormatChange(TODO add channels!);
-            }
-        }
-    } */
+    // The `PCM Slave` rate, format and channels events are ignored. A format change
+    // on a loopback is followed when the kernel stops the capture for it, see
+    // `CaptureElements::kernel_stop_is_format_change`.
     if let Some(eldata) = &elems.volume
         && eldata.numid == numid
     {
@@ -740,9 +953,10 @@ impl<'a> CaptureElements<'a> {
             Some(subdevice),
             "PCM Slave Active",
         );
-        // self.loopback_rate = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Rate");
-        // self.loopback_format = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Format");
-        // self.loopback_channels = find_elem(h, ElemIface::PCM, device, subdevice, "PCM Slave Channels");
+        let pcm_elem = |name| find_elem(h, ElemIface::PCM, Some(device), Some(subdevice), name);
+        self.loopback_rate = pcm_elem("PCM Slave Rate");
+        self.loopback_format = pcm_elem("PCM Slave Format");
+        self.loopback_channels = pcm_elem("PCM Slave Channels");
         self.gadget_rate = find_elem(
             h,
             ElemIface::PCM,
@@ -808,5 +1022,69 @@ pub fn sync_linked_controls(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pinned(rate: Option<u32>, channels: Option<u32>, format: Option<Format>) -> PinnedFormat {
+        PinnedFormat {
+            rate,
+            channels,
+            format,
+        }
+    }
+
+    #[test]
+    fn a_pinned_value_that_differs_is_followed() {
+        let device = pinned(Some(44100), Some(2), Some(Format::S243LE));
+        let change = device.differs_from(48000, 2, &None).unwrap();
+        assert_eq!(change.samplerate, 44100);
+        assert_eq!(change.channels, Some(2));
+        assert_eq!(change.format.as_deref(), Some("S24_3_LE"));
+        let change = pinned(None, Some(4), None)
+            .differs_from(48000, 2, &None)
+            .unwrap();
+        assert_eq!(change.samplerate, 48000);
+        assert_eq!(change.channels, Some(4));
+    }
+
+    #[test]
+    fn a_pinned_format_only_counts_when_one_is_requested() {
+        let device = pinned(Some(48000), Some(2), Some(Format::S32LE));
+        assert!(device.differs_from(48000, 2, &None).is_none());
+        assert!(
+            device
+                .differs_from(48000, 2, &Some(AlsaSampleFormat::S32_LE))
+                .is_none()
+        );
+        let change = device
+            .differs_from(48000, 2, &Some(AlsaSampleFormat::S16_LE))
+            .unwrap();
+        assert_eq!(change.format.as_deref(), Some("S32_LE"));
+    }
+
+    #[test]
+    fn nothing_pinned_is_no_change() {
+        assert!(
+            pinned(None, None, None)
+                .differs_from(48000, 2, &None)
+                .is_none()
+        );
+        assert!(pinned(None, None, None).source_format().is_none());
+    }
+
+    #[test]
+    fn format_names_follow_the_config_names() {
+        assert_eq!(alsa_format_name(Format::S24LE), "S24_4_LE");
+        assert_eq!(alsa_format_name(Format::FloatLE), "F32_LE");
+        // A format CamillaDSP can't capture keeps its ALSA name.
+        assert_eq!(alsa_format_name(Format::U8), "U8");
+        assert_eq!(
+            format_from_number(Format::S243LE as i32),
+            Some(Format::S243LE)
+        );
     }
 }

@@ -49,10 +49,12 @@ use crate::alsa_backend::threaded_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsa_backend::utils::{
-    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, find_elem,
-    list_channels_as_text, list_device_names, list_formats_as_text, list_samplerates_as_text,
-    pick_preferred_format, process_events, recover_suspended_pcm, state_desc, sync_linked_controls,
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, FormatPinned,
+    LoopbackNotify, PinnedFormat, find_elem, list_channels_as_text, list_device_names,
+    list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
+    recover_suspended_pcm, state_desc, sync_linked_controls,
 };
+use crate::controller::SourceFormat;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
@@ -83,6 +85,8 @@ pub struct AlsaCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub stop_on_inactive: bool,
+    /// The controller follows the source format, see `audiodevice::new_capture_device`.
+    pub follow: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
 }
@@ -768,6 +772,14 @@ fn capture_buffer(
             "Alsa snd_pcm_state() of capture device returned an unexpected error: {capture_state}"
         );
         return Err(Box::new(nixerr));
+    } else if (capture_state == alsa_sys::SND_PCM_STATE_DRAINING as i32
+        || capture_state == alsa_sys::SND_PCM_STATE_SETUP as i32)
+        && elems.kernel_stop_is_format_change(params)
+    {
+        return Ok((
+            CaptureResult::FormatChange(elems.loopback_format_change()),
+            0,
+        ));
     } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
         debug!(
             "Starting capture from state: {}",
@@ -811,7 +823,9 @@ fn capture_buffer(
                         let event_result =
                             process_events(c, elems, status_channel, params, processing_params);
                         match event_result {
-                            CaptureResult::Done => return Ok((event_result, 0)),
+                            CaptureResult::Done | CaptureResult::FormatChange(_) => {
+                                return Ok((event_result, 0));
+                            }
                             CaptureResult::Stalled => debug!("Capture device is stalled"),
                             CaptureResult::Normal => {}
                         };
@@ -875,6 +889,10 @@ fn capture_buffer(
                 trace!("Capture: encountered EAGAIN error on read, trying later");
                 Ok((CaptureResult::Normal, 0))
             }
+            Errno::EBADFD if elems.kernel_stop_is_format_change(params) => Ok((
+                CaptureResult::FormatChange(elems.loopback_format_change()),
+                0,
+            )),
             Errno::EPIPE => {
                 warn!("Capture: read overrun, trying to recover. Error: {err}");
                 trace!("snd_pcm_prepare");
@@ -898,6 +916,11 @@ fn capture_buffer(
 }
 
 /// Open an Alsa PCM device
+///
+/// With `follow`, a capture sets `PCM Notify` if it is a loopback, before any params,
+/// so a player is never held to them. It then checks that the device offers the
+/// requested format, and fails with [`FormatPinned`] if it only offers another one,
+/// for the controller to follow.
 fn open_pcm(
     devname: String,
     samplerate: u32,
@@ -905,7 +928,8 @@ fn open_pcm(
     sample_format: &Option<AlsaSampleFormat>,
     buf_manager: &mut dyn DeviceBufferManager,
     capture: bool,
-) -> Res<(alsa::PCM, AlsaSampleFormat)> {
+    follow: bool,
+) -> Res<(alsa::PCM, AlsaSampleFormat, Option<LoopbackNotify>)> {
     let direction = if capture { "Capture" } else { "Playback" };
     debug!(
         "Available {} devices: {:?}",
@@ -920,10 +944,24 @@ fn open_pcm(
     } else {
         alsa::PCM::new(&devname, Direction::Playback, true)?
     };
+    let follow = capture && follow;
+    let notify = if follow {
+        LoopbackNotify::enable(&pcmdev)
+    } else {
+        None
+    };
     // Set hardware parameters
     let chosen_format;
     {
         let hwp = HwParams::any(&pcmdev)?;
+
+        if follow
+            && let Some(format) =
+                PinnedFormat::of(&hwp).differs_from(samplerate, channels, sample_format)
+        {
+            info!("The capture device only offers {format}, reporting a format change.");
+            return Err(Box::new(FormatPinned(format)));
+        }
 
         // Set number of channels
         debug!("{}: {}", direction, list_channels_as_text(&hwp));
@@ -974,7 +1012,7 @@ fn open_pcm(
         pcmdev.sw_params(&swp)?;
         debug!("{direction} device \"{devname}\" successfully opened");
     }
-    Ok((pcmdev, chosen_format))
+    Ok((pcmdev, chosen_format, notify))
 }
 
 fn send_playback_device_message(
@@ -1014,6 +1052,8 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 enum AlsaThreadState {
     Ready(BinarySampleFormat, bool),
     Error(String),
+    /// Following, and the capture device only offers this format, see [`FormatPinned`].
+    FormatChange(SourceFormat),
 }
 
 enum PlaybackDeviceMessage {
@@ -1086,8 +1126,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             &conf_sample_format,
                             &mut buf_manager,
                             false,
+                            false,
                         ) {
-                            Ok((pcmdevice, sample_format)) => {
+                            Ok((pcmdevice, sample_format, _)) => {
                                 let binary_format = sample_format.to_binary_format();
                                 // Looked up before reporting ready, so the outer thread knows
                                 // whether rate adjust goes to the device or to capture.
@@ -1313,6 +1354,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             .unwrap_or(());
                         barrier.wait();
                     }
+                    Ok(AlsaThreadState::FormatChange(_)) => {
+                        unreachable!("only a capture follows its source format")
+                    }
                     Err(err) => {
                         status_channel
                             .send(StatusMessage::PlaybackError(err.to_string()))
@@ -1351,6 +1395,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
+        let follow = self.follow;
         let link_volume_control = self.link_volume_control.clone();
         let link_mute_control = self.link_mute_control.clone();
 
@@ -1405,8 +1450,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             &conf_sample_format,
                             &mut buf_manager,
                             true,
+                            follow,
                         ) {
-                            Ok((pcmdevice, sample_format)) => {
+                            Ok((pcmdevice, sample_format, notify)) => {
                                 let binary_format = sample_format.to_binary_format();
 
                                 let pcminfo = pcmdevice.info().unwrap();
@@ -1482,6 +1528,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     stop_on_rate_change,
                                     rate_measure_interval,
                                     stop_on_inactive,
+                                    follow,
                                     link_volume_control,
                                     link_mute_control,
                                     linked_mute_value: None,
@@ -1631,6 +1678,15 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                 .unwrap_or(());
                                             break;
                                         }
+                                        Ok((CaptureResult::FormatChange(format), _)) => {
+                                            status_channel_inner
+                                                .send(StatusMessage::CaptureFormatChange(format))
+                                                .unwrap_or(());
+                                            tx_dev
+                                                .send(CaptureDeviceMessage::EndOfStream)
+                                                .unwrap_or(());
+                                            break;
+                                        }
                                         Err(msg) => {
                                             status_channel_inner
                                                 .send(StatusMessage::CaptureError(
@@ -1667,11 +1723,17 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         }
                                     };
                                 }
+                                // Close the capture before clearing `PCM Notify` again.
+                                drop(io);
+                                drop(pcmdevice);
+                                drop(notify);
                             }
                             Err(err) => {
-                                tx_state_dev
-                                    .send(AlsaThreadState::Error(err.to_string()))
-                                    .unwrap_or(());
+                                let state = match err.downcast::<FormatPinned>() {
+                                    Ok(pinned) => AlsaThreadState::FormatChange(pinned.0),
+                                    Err(err) => AlsaThreadState::Error(err.to_string()),
+                                };
+                                tx_state_dev.send(state).unwrap_or(());
                             }
                         }
                     })
@@ -1913,6 +1975,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                     Ok(AlsaThreadState::Error(err)) => {
                         status_channel
                             .send(StatusMessage::CaptureError(err))
+                            .unwrap_or(());
+                        barrier.wait();
+                    }
+                    Ok(AlsaThreadState::FormatChange(format)) => {
+                        status_channel
+                            .send(StatusMessage::CaptureFormatChange(format))
                             .unwrap_or(());
                         barrier.wait();
                     }

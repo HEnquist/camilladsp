@@ -70,7 +70,8 @@ def alsa_config(tmp_path):
     Built as text rather than edited from a checked in file, since nearly every test
     varies something different and a replacement per key would be longer than the
     config. `devices` and `capture` add keys to those mappings, and a format of None
-    leaves the key out so the backend has to pick one.
+    leaves the key out so the backend has to pick one. `channels` is the same on both
+    ends, so the empty pipeline stays valid.
     """
     count = [0]
 
@@ -83,6 +84,7 @@ def alsa_config(tmp_path):
         chunksize=1024,
         devices=None,
         capture=None,
+        channels=2,
     ):
         lines = [
             "devices:",
@@ -93,7 +95,7 @@ def alsa_config(tmp_path):
         lines += [
             "  capture:",
             "    type: Alsa",
-            "    channels: 2",
+            f"    channels: {channels}",
             f'    device: "{capture_device}"',
         ]
         if capture_format is not None:
@@ -102,7 +104,7 @@ def alsa_config(tmp_path):
         lines += [
             "  playback:",
             "    type: Alsa",
-            "    channels: 2",
+            f"    channels: {channels}",
             f'    device: "{playback_device}"',
         ]
         if playback_format is not None:

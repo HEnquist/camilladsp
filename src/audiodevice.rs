@@ -43,7 +43,7 @@ use crate::CommandMessage;
 use crate::Res;
 use crate::StatusMessage;
 use crate::audiochunk::AudioChunk;
-use crate::controller::{SourceFormat, SourceState};
+use crate::controller::SourceState;
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters};
 
 pub const RATE_CHANGE_THRESHOLD_COUNT: usize = 3;
@@ -245,9 +245,10 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
 /// source to change format.
 pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
     match conf {
-        // Follows in the ALSA work, with the loopback and gadget controls.
         #[cfg(target_os = "linux")]
-        config::CaptureDevice::Alsa { .. } => SourceState::Unknown,
+        config::CaptureDevice::Alsa { device, .. } => {
+            crate::alsa_backend::utils::query_capture_source(device)
+        }
         #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
         config::CaptureDevice::PipeWire { .. } => SourceState::Unknown,
         // Files are out of scope for following.
@@ -257,7 +258,7 @@ pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
         #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio(dev) => {
             match coreaudiodevice::query_capture_format(&dev.device) {
-                Some((rate, channels)) => SourceState::Format(SourceFormat {
+                Some((rate, channels)) => SourceState::Format(crate::controller::SourceFormat {
                     samplerate: rate,
                     channels,
                     format: None,
@@ -357,6 +358,7 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval_s(),
             stop_on_inactive: stop_on_inactive.unwrap_or_default(),
+            follow,
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),
         }),
