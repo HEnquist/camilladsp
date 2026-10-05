@@ -23,8 +23,10 @@ use parking_lot::RwLock;
 use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
+use crate::controller::SourceState;
 use crate::dummy_backend::control::{ControlListener, DummyControl};
 use crate::dummy_backend::pacer::Pacer;
+use crate::dummy_backend::source::{self, SourceWatcher};
 use crate::generatordevice::SignalSource;
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
@@ -105,6 +107,10 @@ pub struct DummyCaptureDevice {
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
     pub control_port: Option<u16>,
+    /// Port of the test's simulated source, see `src/dummy_backend/source.rs`.
+    pub source_port: Option<u16>,
+    /// The controller follows the source format, see `audiodevice::new_capture_device`.
+    pub follow: bool,
 }
 
 pub struct DummyPlaybackDevice {
@@ -137,6 +143,8 @@ struct CaptureParams {
     rate_measure_interval: f32,
     capture_status: Arc<RwLock<CaptureStatus>>,
     control: Arc<DummyControl>,
+    /// Watches the simulated source while following, see `source.rs`.
+    source: Option<SourceWatcher>,
 }
 
 struct PlaybackParams {
@@ -257,6 +265,26 @@ fn capture_loop(
             break;
         }
 
+        // A source that switched to another rate or channel count stops the capture, the
+        // way the kernel stops a loopback capture when its player changes format.
+        let source_state = params.source.as_ref().map(SourceWatcher::state);
+        if let Some(format) = source_state
+            .as_ref()
+            .and_then(|s| source::differs(s, params.capture_samplerate, params.channels))
+        {
+            info!("Dummy capture source changed to {format}");
+            msg_channels
+                .status
+                .send(StatusMessage::CaptureFormatChange(format))
+                .unwrap_or(());
+            msg_channels
+                .audio
+                .send(AudioMessage::EndOfStream)
+                .unwrap_or(());
+            break;
+        }
+        let source_inactive = source_state == Some(SourceState::Inactive);
+
         if params.control.stalled() {
             // A stalled device hands over nothing at all. Keep the pacer anchored to the
             // current time while that lasts, or the deficit built up during the stall
@@ -313,7 +341,7 @@ fn capture_loop(
         }
 
         let mut waveforms = generator.waveforms(params.channels, capture_frames);
-        if params.control.silenced() {
+        if params.control.silenced() || source_inactive {
             // Zero the samples rather than skipping generation, so the phase carries on
             // where it left off when the signal comes back.
             for waveform in waveforms.iter_mut() {
@@ -606,10 +634,25 @@ impl CaptureDevice for DummyCaptureDevice {
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let control_port = self.control_port;
+        let source_port = self.source_port.filter(|_| self.follow);
 
         let handle = thread::Builder::new()
             .name("DummyCapture".to_string())
             .spawn(move || {
+                // The open-time check: a source at another format is reported rather
+                // than opened, like an ALSA capture held to its player's format.
+                let first = source_port.map(source::query);
+                if let Some(format) = first
+                    .as_ref()
+                    .and_then(|s| source::differs(s, capture_samplerate, channels))
+                {
+                    info!("Dummy capture source is at {format}, reporting a format change");
+                    status_channel
+                        .send(StatusMessage::CaptureFormatChange(format))
+                        .unwrap_or(());
+                    barrier.wait();
+                    return;
+                }
                 // Built here rather than in `start`, so the resampler lives on the thread
                 // that uses it, as in the other backends.
                 let resampler = new_resampler(
@@ -636,6 +679,9 @@ impl CaptureDevice for DummyCaptureDevice {
                     rate_measure_interval,
                     capture_status,
                     control: listener.control(),
+                    source: source_port
+                        .zip(first)
+                        .map(|(port, first)| SourceWatcher::start(port, first)),
                 };
                 status_channel
                     .send(StatusMessage::CaptureReady)

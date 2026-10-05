@@ -7,9 +7,13 @@ line out, see `src/dummy_backend/control.rs`.
 
 A connection is opened per command and closed again, so a test that leaves one dangling
 cannot block the device's listener, which serves one connection at a time.
+
+`SimulatedSource` is the other direction: a server the dummy capture asks what its source
+is doing, for the controller tests that follow a source.
 """
 
 import socket
+import threading
 import time
 
 # How long to wait for a reply before giving up. The device answers from a thread of its
@@ -76,3 +80,51 @@ class Control:
         raise TimeoutError(
             f"No dummy control socket on port {self.port} after {timeout} s: {last_error}"
         )
+
+
+class SimulatedSource:
+    """What feeds a dummy capture, the stand-in for a player on a loopback.
+
+    The source has to outlive the sessions, since the controller asks it at startup and
+    while nothing runs, so the test runs it rather than the device. The dummy connects,
+    sends `state`, and gets one line back, see `src/dummy_backend/source.rs`. While
+    following, the capture stops for a source at another rate or channel count, and
+    captures silence from an inactive one.
+    """
+
+    def __init__(self, state="inactive"):
+        self.state = state
+        self._server = socket.create_server(("127.0.0.1", 0))
+        self._server.settimeout(0.05)
+        self.port = self._server.getsockname()[1]
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._server.accept()
+            except (TimeoutError, OSError):
+                continue
+            with conn:
+                try:
+                    conn.settimeout(TIMEOUT)
+                    conn.recv(64)
+                    conn.sendall(f"{self.state}\n".encode())
+                except OSError:
+                    pass
+
+    def play(self, rate, channels=2, fmt="S32_LE"):
+        self.state = f"format {rate} {channels} {fmt}"
+
+    def stop_playing(self):
+        self.state = "inactive"
+
+    def unknown(self):
+        self.state = "unknown"
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=5)
+        self._server.close()

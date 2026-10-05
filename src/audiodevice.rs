@@ -272,7 +272,10 @@ pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
         config::CaptureDevice::Wasapi(_) | config::CaptureDevice::Asio(_) => SourceState::Unknown,
         config::CaptureDevice::SignalGenerator { .. } => SourceState::Unknown,
         #[cfg(feature = "dummy-backend")]
-        config::CaptureDevice::Dummy { .. } => SourceState::Unknown,
+        config::CaptureDevice::Dummy { source_port, .. } => match source_port {
+            Some(port) => crate::dummy_backend::source::query(*port),
+            None => SourceState::Unknown,
+        },
     }
 }
 
@@ -447,6 +450,7 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
             signal,
             channels,
             control_port,
+            source_port,
             ..
         } => Box::new(dummydevice::DummyCaptureDevice {
             signal,
@@ -460,6 +464,8 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval_s(),
             control_port,
+            source_port,
+            follow,
         }),
         #[cfg(target_os = "macos")]
         config::CaptureDevice::CoreAudio(ref dev) => {
