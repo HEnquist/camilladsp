@@ -779,6 +779,9 @@ config providers for a config to run for the new format:
   but absolute paths are recommended.
   This is the provider to use when the channel count changes with the rate,
   as with ADAT S/MUX, since then the mixers have to change as well.
+  The entry config should be one of these files, the one for the format it is written for.
+  It is then selected like any other file. If it isn't, there is a warning, and with Specific
+  alone, the controller waits for the source to change until a file matches.
 - __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
   `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
 

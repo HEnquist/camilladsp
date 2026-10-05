@@ -595,30 +595,6 @@ pub fn select_config(
     {
         return Selection::Run(selected);
     }
-    // The entry config is written for some format, and needs no provider for that one.
-    // Without this, Specific alone would want a file for the rate the entry is already at.
-    if format.samplerate != 0 && check_variant(None, &entry.raw, &format).is_ok() {
-        let mut conf = entry.raw.clone();
-        match config::validate_config_at_rate(
-            &mut conf,
-            entry.filename.as_deref(),
-            NonZeroUsize::new(format.samplerate),
-        ) {
-            Ok(impulses) => {
-                return Selection::Run(Box::new(Selected {
-                    config: conf,
-                    impulses,
-                    provider: Provider::Entry,
-                    format: Some(format),
-                    running: RunningSource {
-                        source: entry.clone(),
-                        kind: LoadKind::Entry,
-                    },
-                }));
-            }
-            Err(err) => return Selection::Invalid(err.to_string()),
-        }
-    }
     if settings.adapt_enabled()
         && let Some(selected) = adapt_config(entry, &format)
     {
@@ -764,7 +740,42 @@ fn find_template_files(template: &Path) -> Vec<(PathBuf, TokenValues)> {
 ///
 /// Each token is a wildcard, and the values read back from a file name give the format
 /// the file is checked against, as in [`check_variant`].
+///
+/// The entry config file should be one of the files, the one for the format it is written
+/// for, so that Specific selects it like any other. If it isn't, that is reported too.
 pub fn preflight(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck> {
+    let mut checks = check_template_files(template, entry);
+    checks.extend(check_entry_name(template, entry, &checks));
+    checks
+}
+
+/// Report an entry config file that isn't one of the files the template matches.
+fn check_entry_name(
+    template: &str,
+    entry: Option<&ConfigSource>,
+    checks: &[FileCheck],
+) -> Option<FileCheck> {
+    let entry_file = entry?.filename.as_ref()?;
+    let canonical = |f: &str| PathBuf::from(f).canonicalize().ok();
+    let entry_path = canonical(entry_file)?;
+    if checks
+        .iter()
+        .any(|c| canonical(&c.file).as_ref() == Some(&entry_path))
+    {
+        return None;
+    }
+    Some(FileCheck {
+        file: entry_file.clone(),
+        samplerate: None,
+        channels: None,
+        format: None,
+        problem: Some(format!(
+            "the entry config is not named by the template '{template}', so Specific can't select it"
+        )),
+    })
+}
+
+fn check_template_files(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck> {
     let path = resolve_template(template, entry.and_then(|e| e.filename.as_deref()));
     let capture = entry.map(|e| &e.raw.devices.capture);
     find_template_files(&path)
@@ -830,9 +841,16 @@ fn check_file(
 
 /// Log the problems [`preflight`] finds, as warnings.
 pub fn log_preflight(template: &str, entry: Option<&ConfigSource>) {
-    let checks = preflight(template, entry);
+    let checks = check_template_files(template, entry);
     if checks.is_empty() {
         warn!("Specific: no files match the template '{template}'");
+    }
+    if let Some(check) = check_entry_name(template, entry, &checks) {
+        warn!(
+            "Specific: '{}': {}",
+            check.file,
+            check.problem.unwrap_or_default()
+        );
     }
     for check in checks {
         match &check.problem {
@@ -1171,37 +1189,41 @@ pipeline:
     }
 
     #[test]
-    fn the_entry_runs_as_is_at_its_own_format() {
+    fn the_entry_is_one_of_the_specific_files() {
         let dir = temp_dir("entry_format");
         let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
-        let e = entry(base_config(48000, 2, ""));
-        // Specific only, and no file for the rate the entry is written for.
-        let selected = run(select_config(
-            &e,
-            Some(&format(48000, Some(2))),
-            &settings(Some(&template), None),
-            None,
-        ));
-        assert_eq!(selected.provider, Provider::Entry);
-        // A file for that rate wins over the entry.
-        write_config(&dir, "conf_48000.yml", &base_config(48000, 2, ""));
-        let selected = run(select_config(
-            &e,
-            Some(&format(48000, Some(2))),
-            &settings(Some(&template), None),
-            None,
-        ));
-        assert!(matches!(selected.provider, Provider::Specific(_)));
-        // The entry at another channel count doesn't match.
+        let s = settings(Some(&template), None);
+        let fmt = format(48000, Some(2));
+
+        // An entry outside the template gets no special treatment: Specific alone has
+        // no file for its rate, and the preflight says why.
+        let outside = write_config(&dir, "entry.yml", &base_config(48000, 2, ""));
+        let e = ConfigSource {
+            raw: base_config(48000, 2, ""),
+            filename: Some(outside.clone()),
+        };
         assert!(matches!(
-            select_config(
-                &e,
-                Some(&format(48000, Some(4))),
-                &settings(Some(&template), None),
-                None
-            ),
+            select_config(&e, Some(&fmt), &s, None),
             Selection::NoConfig(_)
         ));
+        let checks = preflight(&template, Some(&e));
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].file, outside);
+        assert!(checks[0].problem.as_ref().unwrap().contains("template"));
+
+        // Named by the template, it is selected for its own rate like any other file.
+        let inside = write_config(&dir, "conf_48000.yml", &base_config(48000, 2, ""));
+        let e = ConfigSource {
+            raw: base_config(48000, 2, ""),
+            filename: Some(inside),
+        };
+        let selected = run(select_config(&e, Some(&fmt), &s, None));
+        assert!(
+            matches!(selected.provider, Provider::Specific(ref f) if f.ends_with("conf_48000.yml"))
+        );
+        let checks = preflight(&template, Some(&e));
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].problem, None);
     }
 
     #[test]

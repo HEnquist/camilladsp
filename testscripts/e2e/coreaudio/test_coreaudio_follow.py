@@ -62,7 +62,11 @@ def status(cdsp):
 
 @pytest.fixture
 def variants(tmp_path, ca_config):
-    """Factory for Specific variant files named by rate, returning the template."""
+    """Factory for Specific variant files named by rate, returning the template.
+
+    With Specific, the entry config is one of the variants, the one for the rate it
+    starts at. Get its path with `variant(template, rate)`.
+    """
 
     def _write(*rates, **kwargs):
         for rate in rates:
@@ -71,6 +75,10 @@ def variants(tmp_path, ca_config):
         return str(tmp_path / "variant_$samplerate$.yml")
 
     return _write
+
+
+def variant(template, rate):
+    return template.replace("$samplerate$", str(rate))
 
 
 def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
@@ -129,13 +137,20 @@ def test_startup_follows_the_rate_the_source_is_at(start_cdsp, ca_config, feeder
     wait_for_signal(cdsp)
 
 
-def test_specific_switches_between_files(start_cdsp, ca_config, feeder, variants):
-    template = variants(44100, 96000)
-    entry = ca_config()
+def test_specific_switches_between_files(start_cdsp, feeder, variants):
+    template = variants(44100, 48000, 96000)
+    entry = variant(template, 48000)
     feeder()
     cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
     wait_for_signal(cdsp)
-    for rate in (44100, 96000, 44100):
+    # The entry is selected for its own rate like any other variant.
+    assert status(cdsp)["active_config_file"].endswith("variant_48000.yml")
+    assert cdsp.send("CheckControllerFiles") == [
+        {"file": variant(template, rate), "samplerate": rate, "channels": None,
+         "format": None, "problem": None}
+        for rate in (44100, 48000, 96000)
+    ]
+    for rate in (44100, 96000, 48000):
         switch_source(rate)
         wait_for_rate(cdsp, rate)
         wait_for_signal(cdsp)
@@ -148,9 +163,11 @@ def test_specific_with_a_missing_file_waits_for_the_source(
     start_cdsp, ca_config, feeder, variants
 ):
     """Rules 10 and 22: no config for the rate, so wait, and follow once there is one."""
-    template = variants(96000)
+    template = variants(48000, 96000)
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_specific", template])
+    cdsp = start_cdsp(
+        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
+    )
     wait_for_signal(cdsp)
     switch_source(44100)
     waiting = cdsp.poll_until_true(
@@ -166,10 +183,12 @@ def test_specific_with_a_missing_file_waits_for_the_source(
     assert status(cdsp)["active_config_file"].endswith("variant_96000.yml")
 
 
-def test_a_stop_ends_the_wait_for_the_source(start_cdsp, ca_config, feeder, variants):
-    template = variants(96000)
+def test_a_stop_ends_the_wait_for_the_source(start_cdsp, feeder, variants):
+    template = variants(48000, 96000)
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_specific", template])
+    cdsp = start_cdsp(
+        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
+    )
     wait_for_signal(cdsp)
     switch_source(44100)
     cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is not None)
@@ -182,13 +201,18 @@ def test_a_stop_ends_the_wait_for_the_source(start_cdsp, ca_config, feeder, vari
 
 
 def test_specific_falls_back_to_adapt(start_cdsp, ca_config, feeder, variants):
+    """With both providers, a rate with no file adapts the entry, which then doesn't
+    have to follow the naming scheme. The preflight still points it out."""
     template = variants(96000)
+    entry = ca_config()
     feeder()
     cdsp = start_cdsp(
-        config=ca_config(),
+        config=entry,
         extra_args=["--wait", "--follow_specific", template, "--follow_adapt"],
     )
     wait_for_signal(cdsp)
+    misnamed = [c for c in cdsp.send("CheckControllerFiles") if c["file"] == entry]
+    assert "template" in misnamed[0]["problem"]
     switch_source(44100)
     wait_for_rate(cdsp, 44100)
     assert status(cdsp)["active_config_file"] is None
@@ -197,17 +221,19 @@ def test_specific_falls_back_to_adapt(start_cdsp, ca_config, feeder, variants):
     assert status(cdsp)["active_config_file"].endswith("variant_96000.yml")
 
 
-def test_a_variant_at_the_wrong_rate_is_rejected(start_cdsp, ca_config, feeder, tmp_path):
+def test_a_variant_at_the_wrong_rate_is_rejected(start_cdsp, ca_config, feeder, variants):
     """Rule 18: a file whose rate doesn't match its name would select itself forever."""
+    template = variants(48000)
     with open(ca_config(samplerate=48000)) as conf:
-        (tmp_path / "wrong_44100.yml").write_text(conf.read())
-    template = str(tmp_path / "wrong_$samplerate$.yml")
+        open(variant(template, 44100), "w").write(conf.read())
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_specific", template])
+    cdsp = start_cdsp(
+        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
+    )
     wait_for_signal(cdsp)
-    checks = cdsp.send("CheckControllerFiles")
-    assert len(checks) == 1
-    assert "rate" in checks[0]["problem"]
+    problems = {c["samplerate"]: c["problem"] for c in cdsp.send("CheckControllerFiles")}
+    assert problems[48000] is None
+    assert "rate" in problems[44100]
     switch_source(44100)
     cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is not None)
 
