@@ -28,6 +28,4 @@ parking_lot = "0.12.1"
 audioadapter = "5.0.0"
 audioadapter-sample = "5.1.0"
 waveadapter = "0.3.0"
-
-[dev-dependencies]
 serde_json = "1.0"

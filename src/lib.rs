@@ -35,8 +35,6 @@
 extern crate log;
 
 use parking_lot::{Mutex, RwLock};
-use serde::Serialize;
-use std::fmt;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -81,6 +79,13 @@ macro_rules! xerror { ($($x:tt)*) => (
 // The sample precision, the conversions into and out of it, and the result type
 // are defined next to the config types, which need them for reading coefficients.
 pub use camilladsp_config::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
+
+// The types that websocket replies carry are part of the protocol, which is
+// defined in the config crate so that clients can use it too.
+pub use camilladsp_config::protocol::{
+    AudioDeviceDescriptor, CapabilityMode, ChannelCapability, DeviceCapabilitySet, ProcessingState,
+    SamplerateCapability, StopReason,
+};
 
 /// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
@@ -195,20 +200,6 @@ pub enum ControllerMessage {
     Stop,
     /// Shut down the engine entirely.
     Exit,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
-pub enum ProcessingState {
-    /// Processing is running normally.
-    Running,
-    /// Processing is paused because the input signal is silent.
-    Paused,
-    /// Processing is off and devices are closed, waiting for a new configuration.
-    Inactive,
-    /// Opening devices and starting up processing with a new configuration.
-    Starting,
-    /// Capture device is not providing data; processing is stalled.
-    Stalled,
 }
 
 /// Live status of the capture device, updated each processing chunk.
@@ -577,25 +568,6 @@ pub struct ProcessingStatus {
     pub stop_reason: StopReason,
 }
 
-/// Reason a processing run ended, reported via [`ProcessingStatus`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum StopReason {
-    /// Processing is still running; not yet stopped.
-    None,
-    /// Processing completed normally (e.g. end of file input).
-    Done,
-    /// Capture device reported an error.
-    CaptureError(String),
-    /// Playback device reported an error.
-    PlaybackError(String),
-    /// An unexpected internal error occurred.
-    UnknownError(String),
-    /// Capture device sample rate changed to the given value.
-    CaptureFormatChange(usize),
-    /// Playback device sample rate changed to the given value.
-    PlaybackFormatChange(usize),
-}
-
 /// Bundle of `Arc`-wrapped status objects passed between the engine, device threads, and WebSocket server.
 #[derive(Clone)]
 pub struct StatusStructs {
@@ -659,19 +631,6 @@ pub struct SharedConfigs {
     pub previous: Arc<Mutex<Option<config::Configuration>>>,
 }
 
-impl fmt::Display for ProcessingState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let desc = match self {
-            ProcessingState::Running => "RUNNING",
-            ProcessingState::Paused => "PAUSED",
-            ProcessingState::Inactive => "INACTIVE",
-            ProcessingState::Starting => "STARTING",
-            ProcessingState::Stalled => "STALLED",
-        };
-        write!(f, "{desc}")
-    }
-}
-
 /// Return `(playback_types, capture_types)`: the device type names supported by this build.
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
@@ -716,54 +675,6 @@ pub const STANDARD_RATES: &[u32] = &[
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
     352800, 384000, 705600, 768000,
 ];
-
-/// The sample formats supported by a device at a specific sample rate.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct SamplerateCapability {
-    /// Sample rate in Hz.
-    pub samplerate: usize,
-    /// Names of the supported sample formats at this rate.
-    pub formats: Vec<String>,
-}
-
-/// The sample rates (and their formats) supported by a device at a specific channel count.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct ChannelCapability {
-    /// Number of channels.
-    pub channels: usize,
-    /// Supported sample rates for this channel count.
-    pub samplerates: Vec<SamplerateCapability>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-pub enum CapabilityMode {
-    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
-    Unified,
-    /// WASAPI shared-mode capabilities (derived from the mix format).
-    Shared,
-    /// WASAPI exclusive-mode capabilities (probed independently).
-    Exclusive,
-}
-
-/// A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
-#[derive(Debug, PartialEq, Serialize)]
-pub struct DeviceCapabilitySet {
-    /// The access mode these capabilities were probed under.
-    pub mode: CapabilityMode,
-    /// Per-channel-count capability entries.
-    pub capabilities: Vec<ChannelCapability>,
-}
-
-/// Full capability descriptor for a named audio device.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct AudioDeviceDescriptor {
-    /// Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
-    pub name: String,
-    /// Human-readable device name.
-    pub description: String,
-    /// Capability sets, one per access mode supported by the backend.
-    pub capability_sets: Vec<DeviceCapabilitySet>,
-}
 
 /// Return available device names for `backend` (`"alsa"`, `"coreaudio"`, `"wasapi"`, `"asio"`).
 ///

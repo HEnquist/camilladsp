@@ -28,7 +28,8 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPT_DIR.parent
-JSON_PATH = REPO_ROOT / "target" / "doc" / "camillalib.json"
+# The protocol types live in the camilladsp-config crate.
+JSON_PATH = REPO_ROOT / "target" / "doc" / "camilladsp_config.json"
 GROUPS_CONFIG = SCRIPT_DIR / "ws_groups.yaml"
 TEMPLATE_FILE = "ws_template.md.j2"
 OUTPUT_PATH = REPO_ROOT / "websocket.md"
@@ -45,7 +46,7 @@ def run_rustdoc() -> None:
     print("Running rustdoc...", file=sys.stderr)
     result = subprocess.run(
         [
-            "cargo", "+nightly", "rustdoc", "--lib", "--",
+            "cargo", "+nightly", "rustdoc", "-p", "camilladsp-config", "--lib", "--",
             "-Z", "unstable-options",
             "--output-format", "json",
             "--document-private-items",

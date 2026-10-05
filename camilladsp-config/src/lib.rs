@@ -142,5 +142,7 @@ pub mod filters;
 pub mod mixer;
 /// Validation of processor parameters.
 pub mod processors;
+/// The websocket protocol, commands and replies.
+pub mod protocol;
 /// Time unit conversions and wav header handling.
 pub mod utils;
