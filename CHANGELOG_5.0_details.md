@@ -36,6 +36,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   larger than 0 and no larger than 1.0. These previously panicked inside the resampler on the first
   chunk, rather than being reported when the config was loaded.
 - `rate_measure_interval_s` must now be larger than zero, matching `adjust_interval_s`.
+- A mixer mapping that lists the same source channel twice is now rejected. The check existed but
+  never fired, so the channel was simply mixed in twice.
 - The `Compressor` now rejects a `factor` of zero, which previously gave every sample above the
   threshold an infinite gain. Values below 1.0 are still allowed, for upward expansion.
 - No numeric config value accepts `.nan`, `.inf` or `-.inf` any more. The range tests were written
@@ -89,6 +91,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   and then treat the samples as the other layout.
 
 ## Changes
+- Checking a config no longer stops at the first problem. Every problem is listed, one per line,
+  each starting with where it is in the config, like `filters.lp.parameters.freq`. A YAML error
+  still stops the parsing, so only that one is listed.
 - `Volume` filters in the pipeline that use the same fader must now have the same `ramp_time_ms`
   and `limit`, since these now belong to the fader. A `Loudness` filter on an Aux fader without a
   `Volume` filter now also follows `SetFaderVolume`, not only `SetFaderExternalVolume`.

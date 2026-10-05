@@ -14,41 +14,33 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::Issues;
 use crate::filters::lookahead_limiter::validate_times;
+use crate::processors::check_channel_lists;
 
 /// Validate the lookahead limiter config, to give a helpful message intead of a panic.
+///
+/// Issue paths are relative to the parameters.
 pub fn validate_lookahead_limiter(
     config: &config::LookaheadLimiterProcessorParameters,
     samplerate: usize,
-) -> Res<()> {
-    let channels = config.channels;
-    validate_times(
-        config.attack.get(),
-        config.attack_unit,
-        config.release.get(),
-        samplerate,
-    )?;
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    Ok(())
+) -> Result<(), Issues> {
+    let mut issues = Issues::new();
+    issues.nest_result(
+        Vec::new(),
+        validate_times(
+            config.attack.get(),
+            config.attack_unit,
+            config.release.get(),
+            samplerate,
+        ),
+    );
+    check_channel_lists(
+        &mut issues,
+        config.channels,
+        &config.monitor_channels(),
+        &config.process_channels(),
+    );
+    issues.into_result(())
 }

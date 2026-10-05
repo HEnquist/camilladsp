@@ -15,8 +15,10 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config;
+use crate::config::{Issue, Issues, issue_path};
 use crate::filters;
 use std::collections::HashMap;
+use std::path::Path;
 
 // Sample format
 use crate::CamillaFloat;
@@ -96,21 +98,45 @@ pub fn coeffs_from_config(conf: &config::ConvParameters) -> Res<Vec<CamillaFloat
 /// comes from either way. Handing them to `impulses` is what stops them being
 /// read again, both by a later pipeline step naming the same filter and by the
 /// pass that eventually builds it.
+///
+/// Issue paths are relative to the parameters, and point at the file name for
+/// coefficients read from a file. A file that does not exist is reported as
+/// [`IssueKind::MissingFile`](config::IssueKind::MissingFile).
 pub fn validate_config(
     name: &str,
     conf: &config::ConvParameters,
     impulses: &mut ImpulseCache,
-) -> Res<()> {
+) -> Result<(), Issues> {
     // Filter names are unique within a config, so a name already in the cache
     // was read from these same parameters and is already known to be valid.
     if impulses.contains(name) {
         return Ok(());
     }
-    let coeffs = coeffs_from_config(conf)?;
+    let (field, filename) = match conf {
+        config::ConvParameters::Raw(params) => ("filename", Some(params.filename.as_str())),
+        config::ConvParameters::Wav(params) => ("filename", Some(params.filename.as_str())),
+        config::ConvParameters::Values { .. } => ("values", None),
+        config::ConvParameters::Dummy { .. } => ("length", None),
+    };
+    let coeffs = match coeffs_from_config(conf) {
+        Ok(coeffs) => coeffs,
+        Err(err) => {
+            let missing = filename
+                .is_some_and(|filename| matches!(Path::new(filename).try_exists(), Ok(false)));
+            let issue = if missing {
+                Issue::missing_file(issue_path![field], err.to_string())
+            } else {
+                Issue::invalid(issue_path![field], err.to_string())
+            };
+            return Err(issue.into());
+        }
+    };
     if coeffs.is_empty() {
-        return Err(config::ConfigError::new("Conv coefficients are empty").into());
+        return Err(Issue::invalid(issue_path![field], "Conv coefficients are empty").into());
     }
-    config::check_all_finite("coefficients", &coeffs)?;
+    if let Err(err) = config::check_all_finite("coefficients", &coeffs) {
+        return Err(Issue::invalid(issue_path![field], err.to_string()).into());
+    }
     impulses.insert(name, coeffs);
     Ok(())
 }

@@ -34,7 +34,7 @@ pub mod lookahead_limiter;
 pub mod loudness;
 
 use crate::config;
-use crate::config::BinarySampleFormat;
+use crate::config::{BinarySampleFormat, Issues, issue_path};
 use audioadapter_sample::readwrite::ReadSamples;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
 use std::fs::File;
@@ -205,6 +205,9 @@ pub fn read_wav(filename: &str, channel: usize) -> Res<Vec<CamillaFloat>> {
 
 /// Validate the filter config, to give a helpful message intead of a panic.
 ///
+/// Issue paths are relative to the filter, so a problem with the cutoff of a
+/// biquad is at `["parameters", "freq"]`.
+///
 /// A convolution filter is validated by reading its impulse response, so the
 /// result of that read is kept in `impulses` rather than thrown away. See
 /// [`fftconv::ImpulseCache`].
@@ -213,8 +216,8 @@ pub fn validate_filter(
     name: &str,
     filter_config: &config::Filter,
     impulses: &mut fftconv::ImpulseCache,
-) -> Res<()> {
-    match filter_config {
+) -> Result<(), Issues> {
+    let result = match filter_config {
         config::Filter::Conv { parameters, .. } => {
             fftconv::validate_config(name, parameters, impulses)
         }
@@ -234,5 +237,8 @@ pub fn validate_filter(
         config::Filter::LookaheadLimiter { parameters, .. } => {
             lookahead_limiter::validate_config(parameters, fs)
         }
-    }
+    };
+    let mut issues = Issues::new();
+    issues.nest_result(issue_path!["parameters"], result);
+    issues.into_result(())
 }

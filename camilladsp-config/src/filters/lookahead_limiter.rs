@@ -14,35 +14,43 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
 use crate::config::TimeUnit;
+use crate::config::{Issues, issue_path};
 use crate::utils::time::time_to_samples;
 
 /// Validate the attack and release times of a lookahead limiter.
+///
+/// Issue paths are the `attack` and `release` fields of the parameters.
 pub fn validate_times(
     attack: f64,
     attack_unit: TimeUnit,
     release: f64,
     samplerate: usize,
-) -> Res<()> {
+) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     if attack < 0.0 {
         let msg = "Attack time must be greater than or equal to 0.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    let attack_samples = time_to_samples(attack, attack_unit, samplerate).round() as usize;
-    if attack_samples > samplerate {
-        let msg = "Lookahead limiter attack time must be less than or equal to 1 second.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["attack"], msg);
+    } else {
+        let attack_samples = time_to_samples(attack, attack_unit, samplerate).round() as usize;
+        if attack_samples > samplerate {
+            let msg = "Lookahead limiter attack time must be less than or equal to 1 second.";
+            issues.invalid(issue_path!["attack"], msg);
+        }
     }
     if release < 0.0 {
         let msg = "Release time must be greater than or equal to 0.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["release"], msg);
     }
-    Ok(())
+    issues.into_result(())
 }
 
-pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: usize) -> Res<()> {
+/// Validate a LookaheadLimiter filter config. Issue paths are relative to the parameters.
+pub fn validate_config(
+    config: &config::LookaheadLimiterParameters,
+    samplerate: usize,
+) -> Result<(), Issues> {
     validate_times(
         config.attack.get(),
         config.attack_unit(),

@@ -14,10 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::Issues;
 
 /// Validate the clipper config, always return ok to allow any config.
-pub fn validate_config(_config: &config::ClipperParameters) -> Res<()> {
+pub fn validate_config(_config: &config::ClipperParameters) -> Result<(), Issues> {
     Ok(())
 }

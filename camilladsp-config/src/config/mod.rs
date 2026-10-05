@@ -15,9 +15,12 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 mod finite;
+mod issues;
 mod utils;
 
 pub use self::finite::{FiniteF32, FiniteF64, NotFinite};
+pub(crate) use self::issues::issue_path;
+pub use self::issues::{Issue, IssueKind, Issues, PathElement, format_path};
 use crate::utils::wavtools::{WavParams, find_data_in_wav_stream};
 use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
@@ -1795,9 +1798,11 @@ pub enum ConfigChange {
 pub use self::utils::capture_channel_labels;
 pub use self::utils::check_all_finite;
 pub use self::utils::config_diff;
+pub use self::utils::deserialize_config;
 pub use self::utils::load_config;
 pub use self::utils::load_validate_config;
 pub use self::utils::max_channels;
+pub use self::utils::parse_config;
 pub use self::utils::playback_channel_labels;
 pub use self::utils::used_capture_channels;
 pub use self::utils::validate_config;

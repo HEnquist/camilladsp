@@ -14,10 +14,12 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::{Res, config};
+use crate::config;
+use crate::config::{Issues, issue_path};
 
-/// Validate a Dither config.
-pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
+/// Validate a Dither config. Issue paths are relative to the parameters.
+pub fn validate_config(conf: &config::DitherParameters) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     let bits = match conf {
         config::DitherParameters::None { bits }
         | config::DitherParameters::Flat { bits, .. }
@@ -43,17 +45,23 @@ pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
         | config::DitherParameters::ShibataLow192 { bits } => bits,
     };
     if *bits <= 1 {
-        return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
+        issues.invalid(issue_path!["bits"], "Dither bit depth must be at least 2");
     }
 
     if let config::DitherParameters::Flat { amplitude, .. } = conf {
         if *amplitude < 0.0 {
-            return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
+            issues.invalid(
+                issue_path!["amplitude"],
+                "Dither amplitude cannot be negative",
+            );
         }
         if *amplitude > 100.0 {
-            return Err(config::ConfigError::new("Dither amplitude must be less than 100").into());
+            issues.invalid(
+                issue_path!["amplitude"],
+                "Dither amplitude must be less than 100",
+            );
         }
     }
 
-    Ok(())
+    issues.into_result(())
 }

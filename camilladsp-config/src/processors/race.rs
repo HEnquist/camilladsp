@@ -14,39 +14,45 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::{Issues, issue_path};
+use crate::processors::check_channel_count;
 
 /// Validate the RACE processor config, to give a helpful message intead of a panic.
-pub fn validate_race(config: &config::RACEParameters) -> Res<()> {
+///
+/// Issue paths are relative to the parameters.
+pub fn validate_race(config: &config::RACEParameters) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     let channels = config.channels;
     if config.attenuation <= 0.0 {
         let msg = "Attenuation value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["attenuation"], msg);
     }
     if config.delay <= 0.0 {
         let msg = "Delay value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["delay"], msg);
     }
     if config.channel_a == config.channel_b {
         let msg = "Channels a and b must be different";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["channel_b"], msg);
     }
-    if config.channel_a >= channels {
-        let msg = format!(
-            "Invalid channel a to process: {}, max is: {}.",
-            config.channel_a,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
+    if check_channel_count(&mut issues, channels) {
+        if config.channel_a >= channels {
+            let msg = format!(
+                "Invalid channel a to process: {}, max is: {}.",
+                config.channel_a,
+                channels - 1
+            );
+            issues.invalid(issue_path!["channel_a"], msg);
+        }
+        if config.channel_b >= channels {
+            let msg = format!(
+                "Invalid channel b to process: {}, max is: {}.",
+                config.channel_b,
+                channels - 1
+            );
+            issues.invalid(issue_path!["channel_b"], msg);
+        }
     }
-    if config.channel_b >= channels {
-        let msg = format!(
-            "Invalid channel b to process: {}, max is: {}.",
-            config.channel_b,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    Ok(())
+    issues.into_result(())
 }

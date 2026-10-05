@@ -13,8 +13,7 @@
   In YAML it is very important that the indentation is correct, otherwise the parser is not able to deduce which properties belong to what level in the tree.
   This can result in an error message like this:
   ```
-  ERRO Invalid config file!
-  mapping values are not allowed in this context at line 12 column 13, module: camilladsp 
+  ERRO mapping values are not allowed in this context at line 12 column 13, module: camilladsp
   ```
   Check the file carefully, to make sure everything is properly indented. Use only spaces, never tabs.
 

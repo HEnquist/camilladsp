@@ -14,8 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::{Issues, issue_path};
 
 /// Below this the shelf spreads out so far that it no longer reaches its
 /// nominal boost within the audio band.
@@ -25,36 +25,61 @@ const MIN_Q: f64 = 0.1;
 /// shelf level.
 const MAX_Q: f64 = 2.0;
 
-/// Validate a Loudness config.
-pub fn validate_config(samplerate: usize, conf: &config::LoudnessParameters) -> Res<()> {
+/// Validate a Loudness config. Issue paths are relative to the parameters.
+pub fn validate_config(samplerate: usize, conf: &config::LoudnessParameters) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     if conf.reference_level > 20.0 {
-        return Err(config::ConfigError::new("Reference level must be less than 20").into());
+        issues.invalid(
+            issue_path!["reference_level"],
+            "Reference level must be less than 20",
+        );
     } else if conf.reference_level < -100.0 {
-        return Err(config::ConfigError::new("Reference level must be higher than -100").into());
-    } else if conf.high_boost() < 0.0 {
-        return Err(config::ConfigError::new("High boost cannot be less than 0").into());
-    } else if conf.low_boost() < 0.0 {
-        return Err(config::ConfigError::new("Low boost cannot be less than 0").into());
-    } else if conf.high_boost() > 20.0 {
-        return Err(config::ConfigError::new("High boost cannot be larger than 20").into());
-    } else if conf.low_boost() > 20.0 {
-        return Err(config::ConfigError::new("Low boost cannot be larger than 20").into());
-    } else if conf.low_freq() <= 0.0 {
-        return Err(config::ConfigError::new("Low freq must be > 0").into());
-    } else if conf.high_freq() >= samplerate as f64 / 2.0 {
-        return Err(config::ConfigError::new("High freq must be < samplerate/2").into());
-    } else if conf.high_freq() <= conf.low_freq() {
-        return Err(config::ConfigError::new("High freq must be higher than low freq").into());
-    } else if !(MIN_Q..=MAX_Q).contains(&conf.high_q()) {
-        return Err(config::ConfigError::new(&format!(
-            "High Q must be between {MIN_Q:.1} and {MAX_Q:.1}"
-        ))
-        .into());
-    } else if !(MIN_Q..=MAX_Q).contains(&conf.low_q()) {
-        return Err(config::ConfigError::new(&format!(
-            "Low Q must be between {MIN_Q:.1} and {MAX_Q:.1}"
-        ))
-        .into());
+        issues.invalid(
+            issue_path!["reference_level"],
+            "Reference level must be higher than -100",
+        );
     }
-    Ok(())
+    if conf.high_boost() < 0.0 {
+        issues.invalid(
+            issue_path!["high_boost"],
+            "High boost cannot be less than 0",
+        );
+    } else if conf.high_boost() > 20.0 {
+        issues.invalid(
+            issue_path!["high_boost"],
+            "High boost cannot be larger than 20",
+        );
+    }
+    if conf.low_boost() < 0.0 {
+        issues.invalid(issue_path!["low_boost"], "Low boost cannot be less than 0");
+    } else if conf.low_boost() > 20.0 {
+        issues.invalid(
+            issue_path!["low_boost"],
+            "Low boost cannot be larger than 20",
+        );
+    }
+    if conf.low_freq() <= 0.0 {
+        issues.invalid(issue_path!["low_freq"], "Low freq must be > 0");
+    }
+    if conf.high_freq() >= samplerate as f64 / 2.0 {
+        issues.invalid(issue_path!["high_freq"], "High freq must be < samplerate/2");
+    } else if conf.high_freq() <= conf.low_freq() {
+        issues.invalid(
+            issue_path!["high_freq"],
+            "High freq must be higher than low freq",
+        );
+    }
+    if !(MIN_Q..=MAX_Q).contains(&conf.high_q()) {
+        issues.invalid(
+            issue_path!["high_q"],
+            format!("High Q must be between {MIN_Q:.1} and {MAX_Q:.1}"),
+        );
+    }
+    if !(MIN_Q..=MAX_Q).contains(&conf.low_q()) {
+        issues.invalid(
+            issue_path!["low_q"],
+            format!("Low Q must be between {MIN_Q:.1} and {MAX_Q:.1}"),
+        );
+    }
+    issues.into_result(())
 }

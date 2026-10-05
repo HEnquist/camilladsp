@@ -14,8 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::{Issues, issue_path};
 
 /// Check that the poles of the filter are inside the unit circle.
 ///
@@ -47,25 +47,41 @@ fn poles_inside_unit_circle(a: &[f64]) -> bool {
     true
 }
 
-pub fn validate_config(parameters: &config::DiffEqParameters) -> Res<()> {
+/// Validate DiffEq parameters. Issue paths are relative to the parameters.
+///
+/// Each check needs the ones before it to pass, so this stops at the first issue.
+pub fn validate_config(parameters: &config::DiffEqParameters) -> Result<(), Issues> {
     let a = parameters.a();
     let b = parameters.b();
-    if a.iter().chain(b.iter()).any(|coeff| !coeff.is_finite()) {
-        return Err(config::ConfigError::new("All coefficients must be finite numbers").into());
+    let mut issues = Issues::new();
+    for (field, coeffs) in [("a", &a), ("b", &b)] {
+        if coeffs.iter().any(|coeff| !coeff.is_finite()) {
+            issues.invalid(
+                issue_path![field],
+                "All coefficients must be finite numbers",
+            );
+        }
+    }
+    if !issues.is_empty() {
+        return Err(issues);
     }
     if a.is_empty() {
         // Defaults to a single unity coefficient, which gives a stable FIR filter.
         return Ok(());
     }
     if a[0] == 0.0 {
-        return Err(config::ConfigError::new("The first 'a' coefficient must not be zero").into());
+        issues.invalid(
+            issue_path!["a"],
+            "The first 'a' coefficient must not be zero",
+        );
+        return Err(issues);
     }
     let scaled: Vec<f64> = a.iter().map(|coeff| coeff / a[0]).collect();
     if !poles_inside_unit_circle(&scaled) {
-        return Err(config::ConfigError::new(
+        issues.invalid(
+            issue_path!["a"],
             "Unstable filter, the 'a' coefficients give poles on or outside the unit circle",
-        )
-        .into());
+        );
     }
-    Ok(())
+    issues.into_result(())
 }

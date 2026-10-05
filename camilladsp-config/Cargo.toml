@@ -22,8 +22,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(camillafloat_f32)'] }
 [dependencies]
 serde = { version = "1.0", features = ["derive", "rc"] }
 yaml_serde = "0.10.3"
+serde_path_to_error = "0.1"
 log = "0.4.14"
 parking_lot = "0.12.1"
 audioadapter = "5.0.0"
 audioadapter-sample = "5.1.0"
 waveadapter = "0.3.0"
+
+[dev-dependencies]
+serde_json = "1.0"

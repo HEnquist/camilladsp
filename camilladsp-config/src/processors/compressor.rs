@@ -14,45 +14,34 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::config;
+use crate::config::{Issues, issue_path};
+use crate::processors::check_channel_lists;
 
 /// Validate the compressor config, to give a helpful message intead of a panic.
-pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
-    let channels = config.channels;
+///
+/// Issue paths are relative to the parameters.
+pub fn validate_compressor(config: &config::CompressorParameters) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     if config.attack <= 0.0 {
         let msg = "Attack value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["attack"], msg);
     }
     if config.release <= 0.0 {
         let msg = "Release value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["release"], msg);
     }
     // A factor of zero divides by zero in `calculate_linear_gain`, giving every sample above the
     // threshold an infinite gain. A factor below one is legitimate upward expansion.
     if config.factor <= 0.0 {
         let msg = "Factor must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
+        issues.invalid(issue_path!["factor"], msg);
     }
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    Ok(())
+    check_channel_lists(
+        &mut issues,
+        config.channels,
+        &config.monitor_channels(),
+        &config.process_channels(),
+    );
+    issues.into_result(())
 }

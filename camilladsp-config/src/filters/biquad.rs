@@ -17,8 +17,8 @@
 // Based on https://github.com/korken89/biquad-rs
 // coeffs: https://arachnoid.com/BiQuadDesigner/index.html
 
-use crate::Res;
 use crate::config;
+use crate::config::{Issues, issue_path};
 
 /// Struct to hold the biquad coefficients
 #[derive(Clone, Copy, Debug)]
@@ -417,7 +417,24 @@ impl BiquadCoefficients {
     }
 }
 
-pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters) -> Res<()> {
+/// Check a frequency against zero and the Nyquist limit.
+fn check_freq(issues: &mut Issues, field: &str, freq: f64, maxfreq: f64) {
+    if freq <= 0.0 {
+        issues.invalid(issue_path![field], "Frequency must be > 0");
+    } else if freq >= maxfreq {
+        issues.invalid(issue_path![field], "Frequency must be < samplerate/2");
+    }
+}
+
+/// Validate biquad parameters. Issue paths are relative to the parameters.
+///
+/// The stability check needs the coefficients, which are only meaningful once
+/// every parameter is in range, so it only runs when nothing else was found.
+pub fn validate_config(
+    samplerate: usize,
+    parameters: &config::BiquadParameters,
+) -> Result<(), Issues> {
+    let mut issues = Issues::new();
     let maxfreq = samplerate as f64 / 2.0;
     // Check frequency
     match parameters {
@@ -440,11 +457,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Bandpass(config::NotchWidth::Bandwidth { freq, .. })
         | config::BiquadParameters::Allpass(config::NotchWidth::Bandwidth { freq, .. })
         | config::BiquadParameters::AllpassFO { freq, .. } => {
-            if *freq <= 0.0 {
-                return Err(config::ConfigError::new("Frequency must be > 0").into());
-            } else if *freq >= maxfreq {
-                return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
-            }
+            check_freq(&mut issues, "freq", freq.get(), maxfreq);
         }
         _ => {}
     }
@@ -458,10 +471,14 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Allpass(config::NotchWidth::Q { q, .. })
         | config::BiquadParameters::Highshelf(config::ShelfSteepness::Q { q, .. })
         | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Q { q, .. })
-        | config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p: q, .. })
             if *q <= 0.0 =>
         {
-            return Err(config::ConfigError::new("Q must be > 0").into());
+            issues.invalid(issue_path!["q"], "Q must be > 0");
+        }
+        config::BiquadParameters::GeneralNotch(config::GeneralNotchParams { q_p, .. })
+            if *q_p <= 0.0 =>
+        {
+            issues.invalid(issue_path!["q_p"], "Q must be > 0");
         }
         _ => {}
     }
@@ -475,7 +492,7 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         | config::BiquadParameters::Allpass(config::NotchWidth::Bandwidth { bandwidth, .. })
             if *bandwidth <= 0.0 =>
         {
-            return Err(config::ConfigError::new("Bandwidth must be > 0").into());
+            issues.invalid(issue_path!["bandwidth"], "Bandwidth must be > 0");
         }
         _ => {}
     }
@@ -484,9 +501,9 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         config::BiquadParameters::Highshelf(config::ShelfSteepness::Slope { slope, .. })
         | config::BiquadParameters::Lowshelf(config::ShelfSteepness::Slope { slope, .. }) => {
             if *slope <= 0.0 {
-                return Err(config::ConfigError::new("Slope must be > 0").into());
+                issues.invalid(issue_path!["slope"], "Slope must be > 0");
             } else if *slope > 12.0 {
-                return Err(config::ConfigError::new("Slope must be <= 12.0").into());
+                issues.invalid(issue_path!["slope"], "Slope must be <= 12.0");
             }
         }
         _ => {}
@@ -499,29 +516,33 @@ pub fn validate_config(samplerate: usize, parameters: &config::BiquadParameters)
         q_target,
     } = parameters
     {
-        if *freq_act <= 0.0 || *freq_target <= 0.0 {
-            return Err(config::ConfigError::new("Frequency must be > 0").into());
-        } else if *freq_act >= maxfreq || *freq_target >= maxfreq {
-            return Err(config::ConfigError::new("Frequency must be < samplerate/2").into());
+        check_freq(&mut issues, "freq_act", freq_act.get(), maxfreq);
+        check_freq(&mut issues, "freq_target", freq_target.get(), maxfreq);
+        if *q_act <= 0.0 {
+            issues.invalid(issue_path!["q_act"], "Q must be > 0");
         }
-        if *q_act <= 0.0 || *q_target <= 0.0 {
-            return Err(config::ConfigError::new("Q must be > 0").into());
+        if *q_target <= 0.0 {
+            issues.invalid(issue_path!["q_target"], "Q must be > 0");
         }
     }
     // Check GeneralNotch frequencies
     if let config::BiquadParameters::GeneralNotch(params) = parameters {
-        if params.freq_p <= 0.0 || params.freq_z <= 0.0 {
-            return Err(config::ConfigError::new("Pole and zero frequencies must be > 0").into());
-        } else if params.freq_p >= maxfreq || params.freq_z >= maxfreq {
-            return Err(config::ConfigError::new(
-                "Pole and zero frequencies must be < samplerate/2",
-            )
-            .into());
+        for (field, freq) in [("freq_p", params.freq_p), ("freq_z", params.freq_z)] {
+            if freq <= 0.0 {
+                issues.invalid(issue_path![field], "Pole and zero frequencies must be > 0");
+            } else if freq >= maxfreq {
+                issues.invalid(
+                    issue_path![field],
+                    "Pole and zero frequencies must be < samplerate/2",
+                );
+            }
         }
     }
-    let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
-    if !coeffs.is_stable() {
-        return Err(config::ConfigError::new("Unstable filter specified").into());
+    if issues.is_empty() {
+        let coeffs = BiquadCoefficients::from_config(samplerate, parameters.clone());
+        if !coeffs.is_stable() {
+            issues.invalid(issue_path![], "Unstable filter specified");
+        }
     }
-    Ok(())
+    issues.into_result(())
 }
