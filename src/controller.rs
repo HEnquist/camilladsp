@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::config::{self, BinarySampleFormat, CaptureDevice, Configuration};
+use crate::config::{self, Configuration};
 use crate::filters::fftconv::ImpulseCache;
 
 /// The tokens a Specific template can contain.
@@ -48,16 +48,6 @@ const TOKENS: [&str; 3] = [TOKEN_SAMPLERATE, TOKEN_CHANNELS, TOKEN_FORMAT];
 /// 0.2 s window. The closest standard rates, 44100 and 48000, are 8.8% apart, so 3% still
 /// can't snap to the wrong one.
 const SNAP_TOLERANCE: f64 = 0.03;
-
-const ALL_BINARY_FORMATS: [BinarySampleFormat; 7] = [
-    BinarySampleFormat::S16_LE,
-    BinarySampleFormat::S24_3_LE,
-    BinarySampleFormat::S24_4_RJ_LE,
-    BinarySampleFormat::S24_4_LJ_LE,
-    BinarySampleFormat::S32_LE,
-    BinarySampleFormat::F32_LE,
-    BinarySampleFormat::F64_LE,
-];
 
 /// Settings for following the capture source format.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -149,11 +139,15 @@ impl ControllerSettings {
 
 /// The format a capture source reported. The rate is always given, 0 meaning unknown.
 /// Channels and sample format are given where the backend knows them.
+///
+/// The sample format is the backend's own name for it, as its configs and its capability
+/// probing write it ("S24_3_LE" for ALSA, "S24" for CoreAudio). Backends differ in which
+/// formats they have, so a name is what stays general across them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SourceFormat {
     pub samplerate: usize,
     pub channels: Option<usize>,
-    pub format: Option<BinarySampleFormat>,
+    pub format: Option<String>,
 }
 
 impl SourceFormat {
@@ -185,7 +179,7 @@ impl SourceFormat {
         SourceFormat {
             samplerate: snap_rate(self.samplerate),
             channels: self.channels,
-            format: self.format,
+            format: self.format.clone(),
         }
     }
 }
@@ -200,7 +194,7 @@ impl std::fmt::Display for SourceFormat {
         if let Some(channels) = self.channels {
             write!(f, ", {channels} channels")?;
         }
-        if let Some(format) = self.format {
+        if let Some(format) = &self.format {
             write!(f, ", {format}")?;
         }
         Ok(())
@@ -392,11 +386,7 @@ fn resolve_template(template: &str, entry_filename: Option<&str>) -> PathBuf {
 ///
 /// Returns `None` if the template has a token the format gives no value for. A previous
 /// value is never filled in, since that would pick a file for a format the source isn't at.
-pub fn expand_template(
-    template: &str,
-    format: &SourceFormat,
-    capture: &CaptureDevice,
-) -> Option<String> {
+pub fn expand_template(template: &str, format: &SourceFormat) -> Option<String> {
     let mut expanded = template.to_string();
     if expanded.contains(TOKEN_SAMPLERATE) {
         if format.samplerate == 0 {
@@ -408,7 +398,7 @@ pub fn expand_template(
         expanded = expanded.replace(TOKEN_CHANNELS, &format.channels?.to_string());
     }
     if expanded.contains(TOKEN_FORMAT) {
-        expanded = expanded.replace(TOKEN_FORMAT, &capture.format_name(&format.format?));
+        expanded = expanded.replace(TOKEN_FORMAT, format.format.as_deref()?);
     }
     Some(expanded)
 }
@@ -451,8 +441,8 @@ pub fn check_variant(
             ));
         }
     }
-    if let Some(fmt) = format.format
-        && variant.devices.capture.format_matches(&fmt) == Some(false)
+    if let Some(fmt) = &format.format
+        && variant.devices.capture.format_matches(fmt) == Some(false)
     {
         return Err(format!("its capture format is not {fmt}"));
     }
@@ -465,7 +455,7 @@ fn specific_config(
     template: &str,
     format: &SourceFormat,
 ) -> Option<Box<Selected>> {
-    let Some(expanded) = expand_template(template, format, &entry.raw.devices.capture) else {
+    let Some(expanded) = expand_template(template, format) else {
         info!("Specific: the template '{template}' has a token with no reported value");
         return None;
     };
@@ -529,9 +519,9 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
         return None;
     }
     let mut conf = entry.raw.clone();
-    if let Some(fmt) = format.format
-        && conf.devices.capture.format_matches(&fmt) == Some(false)
-        && let Err(err) = config::set_capture_sample_format(&mut conf.devices.capture, fmt)
+    if let Some(fmt) = &format.format
+        && conf.devices.capture.format_matches(fmt) == Some(false)
+        && let Err(err) = config::set_capture_format_by_name(&mut conf.devices.capture, fmt)
     {
         info!("Adapt: can't change the capture format to {fmt}: {err}");
         return None;
@@ -777,20 +767,19 @@ fn check_entry_name(
 
 fn check_template_files(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck> {
     let path = resolve_template(template, entry.and_then(|e| e.filename.as_deref()));
-    let capture = entry.map(|e| &e.raw.devices.capture);
     find_template_files(&path)
         .into_iter()
         .map(|(file, values)| {
             let file_str = file.to_string_lossy().to_string();
             let samplerate = values.samplerate.as_ref().and_then(|v| v.parse().ok());
             let channels = values.channels.as_ref().and_then(|v| v.parse().ok());
-            let format = values.format.as_ref().and_then(|name| {
-                ALL_BINARY_FORMATS.into_iter().find(|f| match capture {
-                    Some(dev) => dev.format_name(f) == *name,
-                    None => f.to_string() == *name,
-                })
-            });
-            let problem = check_file(&file_str, entry, samplerate, channels, format, &values);
+            let problem = check_file(
+                &file_str,
+                entry,
+                samplerate,
+                channels,
+                values.format.as_deref(),
+            );
             FileCheck {
                 file: file_str,
                 samplerate,
@@ -807,23 +796,21 @@ fn check_file(
     entry: Option<&ConfigSource>,
     samplerate: Option<usize>,
     channels: Option<usize>,
-    format: Option<BinarySampleFormat>,
-    values: &TokenValues,
+    format: Option<&str>,
 ) -> Option<String> {
-    if values.format.is_some() && format.is_none() {
-        return Some(format!(
-            "'{}' is not a known sample format",
-            values.format.as_deref().unwrap_or_default()
-        ));
-    }
     let raw = match config::load_config(file) {
         Ok(raw) => raw,
         Err(err) => return Some(err.to_string()),
     };
+    if let Some(name) = format
+        && !raw.devices.capture.is_format_name(name)
+    {
+        return Some(format!("'{name}' is not a known sample format"));
+    }
     let source_format = SourceFormat {
         samplerate: samplerate.unwrap_or(0),
         channels,
-        format,
+        format: format.map(str::to_string),
     };
     if let Err(err) = check_variant(entry.map(|e| &e.raw), &raw, &source_format) {
         return Some(err);
@@ -863,6 +850,7 @@ pub fn log_preflight(template: &str, entry: Option<&ConfigSource>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::CaptureDevice;
 
     fn settings(specific: Option<&str>, adapt: Option<bool>) -> ControllerSettings {
         ControllerSettings {
@@ -962,27 +950,26 @@ mod tests {
 
     #[test]
     fn template_expansion() {
-        let dev = base_config(48000, 2, "").devices.capture;
         let full = SourceFormat {
             samplerate: 96000,
             channels: Some(4),
-            format: Some(BinarySampleFormat::S16_LE),
+            format: Some("S24_3_LE".to_string()),
         };
         assert_eq!(
-            expand_template("c_$samplerate$_$channels$_$format$.yml", &full, &dev),
-            Some("c_96000_4_S16_LE.yml".to_string())
+            expand_template("c_$samplerate$_$channels$_$format$.yml", &full),
+            Some("c_96000_4_S24_3_LE.yml".to_string())
         );
         // A token without a value gives nothing.
         assert_eq!(
-            expand_template("c_$channels$.yml", &format(96000, None), &dev),
+            expand_template("c_$channels$.yml", &format(96000, None)),
             None
         );
         assert_eq!(
-            expand_template("c_$samplerate$.yml", &format(0, Some(2)), &dev),
+            expand_template("c_$samplerate$.yml", &format(0, Some(2))),
             None
         );
         assert_eq!(
-            expand_template("c_$samplerate$.yml", &format(44100, None), &dev),
+            expand_template("c_$samplerate$.yml", &format(44100, None)),
             Some("c_44100.yml".to_string())
         );
     }
@@ -1127,7 +1114,7 @@ pipeline:
             Some(&SourceFormat {
                 samplerate: 48000,
                 channels: None,
-                format: Some(BinarySampleFormat::S16_LE),
+                format: Some("S16_LE".to_string()),
             }),
             &settings(None, Some(true)),
             None,
@@ -1135,7 +1122,22 @@ pipeline:
         let CaptureDevice::RawFile(dev) = &selected.config.devices.capture else {
             panic!("not a raw file");
         };
-        assert_eq!(dev.format, BinarySampleFormat::S16_LE);
+        assert_eq!(dev.format, config::BinarySampleFormat::S16_LE);
+    }
+
+    #[test]
+    fn adapt_refuses_a_format_the_backend_lacks() {
+        let selected = select_config(
+            &entry(base_config(48000, 2, "")),
+            Some(&SourceFormat {
+                samplerate: 48000,
+                channels: None,
+                format: Some("S24".to_string()),
+            }),
+            &settings(None, Some(true)),
+            None,
+        );
+        assert!(matches!(selected, Selection::NoConfig(_)));
     }
 
     #[test]
@@ -1279,10 +1281,10 @@ pipeline:
     fn variant_check_on_format() {
         let variant = base_config(48000, 2, "");
         let mut fmt = format(48000, Some(2));
-        fmt.format = Some(BinarySampleFormat::S16_LE);
+        fmt.format = Some("S16_LE".to_string());
         // The raw file capture has an explicit S32_LE format.
         assert!(check_variant(None, &variant, &fmt).is_err());
-        fmt.format = Some(BinarySampleFormat::S32_LE);
+        fmt.format = Some("S32_LE".to_string());
         assert!(check_variant(None, &variant, &fmt).is_ok());
     }
 

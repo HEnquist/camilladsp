@@ -327,6 +327,38 @@ pub fn set_capture_sample_format(capture: &mut CaptureDevice, fmt: BinarySampleF
     Ok(())
 }
 
+/// Set the sample format of the capture device from its name in the backend's configs,
+/// the name a capture reports a format change with.
+///
+/// Devices that have no format setting are left alone. A name the backend doesn't know
+/// gives an error.
+pub fn set_capture_format_by_name(capture: &mut CaptureDevice, name: &str) -> Res<()> {
+    fn parse<T: serde::de::DeserializeOwned>(name: &str) -> Res<T> {
+        format_from_name(name)
+            .ok_or_else(|| ConfigError::new(&format!("unknown sample format {name}")).into())
+    }
+    match capture {
+        CaptureDevice::RawFile(dev) => {
+            dev.format = BinarySampleFormat::from_name(name)
+                .ok_or_else(|| ConfigError::new(&format!("unknown sample format {name}")))?;
+        }
+        CaptureDevice::Stdin(dev) => {
+            dev.format = BinarySampleFormat::from_name(name)
+                .ok_or_else(|| ConfigError::new(&format!("unknown sample format {name}")))?;
+        }
+        #[cfg(target_os = "linux")]
+        CaptureDevice::Alsa { format, .. } => *format = Some(parse(name)?),
+        #[cfg(target_os = "macos")]
+        CaptureDevice::CoreAudio(dev) => dev.format = Some(parse(name)?),
+        #[cfg(target_os = "windows")]
+        CaptureDevice::Wasapi(dev) => dev.format = Some(parse(name)?),
+        #[cfg(target_os = "windows")]
+        CaptureDevice::Asio(dev) => dev.format = Some(parse(name)?),
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Adapt a configuration to a new capture sample rate, the way the `-r` override does.
 ///
 /// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk

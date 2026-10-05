@@ -455,54 +455,46 @@ impl CaptureDevice {
         }
     }
 
-    /// Whether the sample format is set explicitly, and if so, whether it is the one
-    /// the backend uses for `format`. `None` means the format is automatic, or that the
+    /// The name of the explicitly set sample format, as the backend's configs and its
+    /// capability probing write it. `None` means the format is automatic, or that the
     /// device has no format setting.
-    pub fn format_matches(&self, format: &BinarySampleFormat) -> Option<bool> {
+    pub fn format_name(&self) -> Option<String> {
         match self {
             #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { format: fmt, .. } => {
-                fmt.map(|f| f == AlsaSampleFormat::from_binary_format(format))
-            }
-            CaptureDevice::RawFile(dev) => Some(dev.format == *format),
-            CaptureDevice::Stdin(dev) => Some(dev.format == *format),
+            CaptureDevice::Alsa { format, .. } => format.as_ref().map(format_variant_name),
+            CaptureDevice::RawFile(dev) => Some(dev.format.to_string()),
+            CaptureDevice::Stdin(dev) => Some(dev.format.to_string()),
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio(dev) => dev
-                .format
-                .map(|f| Some(f) == CoreAudioSampleFormat::from_binary_format(format)),
+            CaptureDevice::CoreAudio(dev) => dev.format.as_ref().map(format_variant_name),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi(dev) => dev
-                .format
-                .map(|f| Some(f) == WasapiSampleFormat::from_binary_format(format)),
+            CaptureDevice::Wasapi(dev) => dev.format.as_ref().map(format_variant_name),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Asio(dev) => dev
-                .format
-                .map(|f| Some(f) == AsioSampleFormat::from_binary_format(format)),
+            CaptureDevice::Asio(dev) => dev.format.as_ref().map(format_variant_name),
             _ => None,
         }
     }
 
-    /// The name a sample format goes by in this backend's configs, used for the
-    /// `$format$` token.
-    pub fn format_name(&self, format: &BinarySampleFormat) -> String {
+    /// Whether the sample format is set explicitly, and if so, whether it is the named
+    /// one. `None` means the format is automatic, or that the device has no format
+    /// setting.
+    pub fn format_matches(&self, format: &str) -> Option<bool> {
+        self.format_name().map(|name| name == format)
+    }
+
+    /// Whether `name` is a sample format this backend's configs know.
+    pub fn is_format_name(&self, name: &str) -> bool {
         match self {
             #[cfg(target_os = "linux")]
-            CaptureDevice::Alsa { .. } => {
-                format!("{:?}", AlsaSampleFormat::from_binary_format(format))
-            }
+            CaptureDevice::Alsa { .. } => format_from_name::<AlsaSampleFormat>(name).is_some(),
             #[cfg(target_os = "macos")]
-            CaptureDevice::CoreAudio(_) => CoreAudioSampleFormat::from_binary_format(format)
-                .map(|f| format!("{f:?}"))
-                .unwrap_or_else(|| format.to_string()),
+            CaptureDevice::CoreAudio(_) => {
+                format_from_name::<CoreAudioSampleFormat>(name).is_some()
+            }
             #[cfg(target_os = "windows")]
-            CaptureDevice::Wasapi(_) => WasapiSampleFormat::from_binary_format(format)
-                .map(|f| format!("{f:?}"))
-                .unwrap_or_else(|| format.to_string()),
+            CaptureDevice::Wasapi(_) => format_from_name::<WasapiSampleFormat>(name).is_some(),
             #[cfg(target_os = "windows")]
-            CaptureDevice::Asio(_) => AsioSampleFormat::from_binary_format(format)
-                .map(|f| format!("{f:?}"))
-                .unwrap_or_else(|| format.to_string()),
-            _ => format.to_string(),
+            CaptureDevice::Asio(_) => format_from_name::<AsioSampleFormat>(name).is_some(),
+            _ => BinarySampleFormat::from_name(name).is_some(),
         }
     }
 
@@ -516,6 +508,19 @@ impl CaptureDevice {
             _ => false,
         }
     }
+}
+
+/// The config name of a backend sample format, like "S24_3_LE" or "S24".
+fn format_variant_name<T: Serialize>(format: &T) -> String {
+    serde_json::to_value(format)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// A backend sample format from its config name, the inverse of `format_variant_name`.
+pub(crate) fn format_from_name<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
+    serde_json::from_value(serde_json::Value::String(name.to_string())).ok()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -1893,6 +1898,7 @@ pub use self::utils::load_config;
 pub use self::utils::load_validate_config;
 pub use self::utils::max_channels;
 pub use self::utils::playback_channel_labels;
+pub use self::utils::set_capture_format_by_name;
 pub use self::utils::set_capture_sample_format;
 pub use self::utils::used_capture_channels;
 pub use self::utils::validate_config;
