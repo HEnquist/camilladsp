@@ -122,9 +122,14 @@ mod tests {
     use crate::config::BinarySampleFormat;
     use std::io::Cursor;
 
+    /// The test files are shared with the camilladsp crate, one level up.
+    fn testdata(name: &str) -> String {
+        format!("{}/../testdata/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
     #[test]
     pub fn test_analyze_wav() {
-        let info = find_data_in_wav("testdata/int32.wav").unwrap();
+        let info = find_data_in_wav(&testdata("int32.wav")).unwrap();
         println!("{info:?}");
         assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
         assert_eq!(info.data_offset, 44);
@@ -135,7 +140,7 @@ mod tests {
 
     #[test]
     pub fn test_analyze_wavex() {
-        let info = find_data_in_wav("testdata/f32_ex.wav").unwrap();
+        let info = find_data_in_wav(&testdata("f32_ex.wav")).unwrap();
         println!("{info:?}");
         assert_eq!(info.sample_format, BinarySampleFormat::F32_LE);
         assert_eq!(info.data_offset, 104);
@@ -148,7 +153,7 @@ mod tests {
     pub fn test_analyze_rf64() {
         // The data chunk size field is the 0xFFFFFFFF placeholder; the real
         // length is resolved from the ds64 chunk.
-        let info = find_data_in_wav("testdata/int32_rf64.wav").unwrap();
+        let info = find_data_in_wav(&testdata("int32_rf64.wav")).unwrap();
         println!("{info:?}");
         assert_eq!(info.sample_format, BinarySampleFormat::S32_LE);
         assert_eq!(info.data_offset, 138);

@@ -14,13 +14,11 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-pub mod capture_command;
-pub mod conversions;
-pub mod countertimer;
-pub mod decibels;
-pub mod rate_controller;
-pub mod resampling;
-pub mod ringbuffer;
-pub mod rt_priority;
-pub mod stash;
-pub use camilladsp_config::utils::{time, wavtools};
+/// Dynamic range compressor processor.
+pub mod compressor;
+/// Multichannel lookahead limiter processor.
+pub mod lookahead_limiter;
+/// Noise gate processor.
+pub mod noisegate;
+/// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
+pub mod race;

@@ -14,13 +14,10 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-pub mod capture_command;
-pub mod conversions;
-pub mod countertimer;
-pub mod decibels;
-pub mod rate_controller;
-pub mod resampling;
-pub mod ringbuffer;
-pub mod rt_priority;
-pub mod stash;
-pub use camilladsp_config::utils::{time, wavtools};
+use crate::Res;
+use crate::config;
+
+/// Validate the clipper config, always return ok to allow any config.
+pub fn validate_config(_config: &config::ClipperParameters) -> Res<()> {
+    Ok(())
+}

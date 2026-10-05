@@ -15,13 +15,15 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/en-US/MPL/2.0/>.
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::ToCamillaFloat;
 use crate::config;
 use crate::config::TimeUnit;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
+
+/// Parameter validation lives in `camilladsp-config`.
+pub use camilladsp_config::filters::lookahead_limiter::{validate_config, validate_times};
 use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
@@ -41,29 +43,6 @@ pub fn limiter_parameters(
     let release_samples = time_to_samples(release, release_unit, samplerate);
     let release_coeff = (-1.0 / release_samples).exp().to_camilla_float();
     (limit, attack_samples, release_coeff)
-}
-
-/// Validate the attack and release times of a lookahead limiter.
-pub fn validate_times(
-    attack: f64,
-    attack_unit: TimeUnit,
-    release: f64,
-    samplerate: usize,
-) -> Res<()> {
-    if attack < 0.0 {
-        let msg = "Attack time must be greater than or equal to 0.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    let attack_samples = time_to_samples(attack, attack_unit, samplerate).round() as usize;
-    if attack_samples > samplerate {
-        let msg = "Lookahead limiter attack time must be less than or equal to 1 second.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if release < 0.0 {
-        let msg = "Release time must be greater than or equal to 0.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    Ok(())
 }
 
 /// A view of the lookahead window, the `attack_samples` newest samples of the
@@ -341,15 +320,6 @@ impl Filter for LookaheadLimiter {
             panic!("Invalid config change!");
         }
     }
-}
-
-pub fn validate_config(config: &config::LookaheadLimiterParameters, samplerate: usize) -> Res<()> {
-    validate_times(
-        config.attack.get(),
-        config.attack_unit(),
-        config.release.get(),
-        samplerate,
-    )
 }
 
 #[cfg(test)]

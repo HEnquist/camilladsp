@@ -17,7 +17,6 @@
 // RACE, recursive ambiophonic crosstalk eliminator
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::DelayParameters;
@@ -27,6 +26,9 @@ use crate::filters::Filter;
 use crate::filters::basicfilters::Delay;
 use crate::filters::basicfilters::Gain;
 use crate::processors::Processor;
+
+/// Parameter validation lives in `camilladsp-config`.
+pub use camilladsp_config::processors::race::validate_race;
 
 //#[derive(Debug)]
 pub struct RACE {
@@ -182,38 +184,4 @@ impl Processor for RACE {
             panic!("Invalid config change!");
         }
     }
-}
-
-/// Validate the RACE processor config, to give a helpful message intead of a panic.
-pub fn validate_race(config: &config::RACEParameters) -> Res<()> {
-    let channels = config.channels;
-    if config.attenuation <= 0.0 {
-        let msg = "Attenuation value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.delay <= 0.0 {
-        let msg = "Delay value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.channel_a == config.channel_b {
-        let msg = "Channels a and b must be different";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.channel_a >= channels {
-        let msg = format!(
-            "Invalid channel a to process: {}, max is: {}.",
-            config.channel_a,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    if config.channel_b >= channels {
-        let msg = format!(
-            "Invalid channel b to process: {}, max is: {}.",
-            config.channel_b,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    Ok(())
 }
