@@ -345,3 +345,45 @@ def test_specific_and_adapt_chain_through_rates(start_cdsp, alsa_config, feeder,
         wait_for_signal(cdsp)
         expected = variant(template, 96000, 2) if rate == 96000 else None
         assert status(cdsp)["active_config_file"] == expected
+
+
+def test_specific_follows_rate_and_channels_changing_together(start_cdsp, feeder, variants):
+    """Like an interface whose channel count follows the rate: one player switch changes
+    both, and the file for that pair is selected, there and back."""
+    template = variants((48000, 2), (96000, 4))
+    entry = variant(template, 48000, 2)
+    current = feeder()
+    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
+    wait_for_signal(cdsp)
+    for rate, channels in ((96000, 4), (48000, 2)):
+        current.stop()
+        current = feeder(rate=rate, channels=channels)
+        cdsp.poll_until_true(
+            "GetControllerStatus",
+            lambda s: s["active_config_file"] == variant(template, rate, channels),
+        )
+        wait_for_rate(cdsp, rate)
+        wait_for_capture("channels", str(channels))
+    wait_for_signal(cdsp)
+
+
+def test_specific_selects_a_file_by_sample_format(start_cdsp, alsa_config, feeder, tmp_path):
+    """A `$format$` template, with an explicit capture format in each file."""
+    for fmt in ("S16_LE", "S32_LE"):
+        with open(alsa_config(capture_format=fmt)) as conf:
+            (tmp_path / f"conf_{fmt}.yml").write_text(conf.read())
+    template = str(tmp_path / "conf_$format$.yml")
+    entry = template.replace("$format$", "S16_LE")
+    first = feeder(fmt="S16_LE")
+    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
+    wait_for_signal(cdsp)
+    assert status(cdsp)["active_config_file"] == entry
+    first.stop()
+    feeder(fmt="S32_LE")
+    cdsp.poll_until_true(
+        "GetControllerStatus",
+        lambda s: s["active_config_file"] == template.replace("$format$", "S32_LE"),
+    )
+    cdsp.poll_until("GetState", "Running")
+    wait_for_capture("format", "S32_LE")
+    wait_for_signal(cdsp)
