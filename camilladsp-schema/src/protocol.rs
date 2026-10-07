@@ -1254,6 +1254,193 @@ pub enum WsReply {
     Invalid { error: String },
 }
 
+/// Implements `name()` for a protocol enum. The match is exhaustive, so a new variant does not
+/// compile until it is listed here.
+macro_rules! variant_names {
+    ($enum:ident { $($variant:ident),* $(,)? }) => {
+        impl $enum {
+            /// The variant name, which is also the value of the tag field
+            /// (`"command"` or `"reply"`) in the JSON message.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(Self::$variant { .. } => stringify!($variant),)*
+                }
+            }
+
+            #[cfg(test)]
+            const NAMES: &[&str] = &[$(stringify!($variant)),*];
+        }
+    };
+}
+
+variant_names!(WsCommand {
+    SetConfigFilePath,
+    SetConfig,
+    SetConfigJson,
+    PatchConfig,
+    SetConfigValue,
+    Reload,
+    GetConfig,
+    GetConfigValue,
+    GetConfigTitle,
+    GetConfigDescription,
+    GetPreviousConfig,
+    ReadConfig,
+    ReadConfigJson,
+    ReadConfigFile,
+    ValidateConfig,
+    ValidateConfigJson,
+    GetConfigJson,
+    GetConfigFilePath,
+    GetStateFilePath,
+    GetStateFileUpdated,
+    GetSignalRange,
+    GetCaptureSignalRms,
+    GetCaptureSignalRmsSince,
+    GetCaptureSignalRmsSinceLast,
+    GetCaptureSignalPeak,
+    GetCaptureSignalPeakSince,
+    GetCaptureSignalPeakSinceLast,
+    GetPlaybackSignalRms,
+    GetPlaybackSignalRmsSince,
+    GetPlaybackSignalRmsSinceLast,
+    GetPlaybackSignalPeak,
+    GetPlaybackSignalPeakSince,
+    GetPlaybackSignalPeakSinceLast,
+    GetSignalLevels,
+    GetSignalLevelsSince,
+    GetSignalLevelsSinceLast,
+    SubscribeSignalLevels,
+    SubscribeVuLevels,
+    StopSubscription,
+    SubscribeState,
+    GetSignalPeaksSinceStart,
+    ResetSignalPeaksSinceStart,
+    GetChannelLabels,
+    GetCaptureRate,
+    GetUpdateInterval,
+    SetUpdateInterval,
+    GetVolume,
+    SetVolume,
+    AdjustVolume,
+    GetMute,
+    SetMute,
+    ToggleMute,
+    GetFaders,
+    GetFaderVolume,
+    SetFaderVolume,
+    SetFaderExternalVolume,
+    AdjustFaderVolume,
+    GetFaderMute,
+    SetFaderMute,
+    ToggleFaderMute,
+    GetVersion,
+    GetState,
+    GetStopReason,
+    GetRateAdjust,
+    GetClippedSamples,
+    ResetClippedSamples,
+    GetBufferLevel,
+    GetSupportedDeviceTypes,
+    GetAvailableCaptureDevices,
+    GetAvailablePlaybackDevices,
+    GetCaptureDeviceCapabilities,
+    GetPlaybackDeviceCapabilities,
+    GetProcessingLoad,
+    GetResamplerLoad,
+    GetSpectrum,
+    SubscribeSpectrum,
+    Exit,
+    Stop,
+    None,
+});
+
+variant_names!(WsReply {
+    SetConfigFilePath,
+    SetConfig,
+    SetConfigJson,
+    PatchConfig,
+    SetConfigValue,
+    Reload,
+    GetConfig,
+    GetConfigJson,
+    GetConfigValue,
+    GetConfigTitle,
+    GetConfigDescription,
+    GetPreviousConfig,
+    ReadConfig,
+    ReadConfigJson,
+    ReadConfigFile,
+    ValidateConfig,
+    ValidateConfigJson,
+    GetConfigFilePath,
+    GetStateFilePath,
+    GetStateFileUpdated,
+    GetSignalRange,
+    GetPlaybackSignalRms,
+    GetPlaybackSignalRmsSince,
+    GetPlaybackSignalRmsSinceLast,
+    GetPlaybackSignalPeak,
+    GetPlaybackSignalPeakSince,
+    GetPlaybackSignalPeakSinceLast,
+    GetCaptureSignalRms,
+    GetCaptureSignalRmsSince,
+    GetCaptureSignalRmsSinceLast,
+    GetCaptureSignalPeak,
+    GetCaptureSignalPeakSince,
+    GetCaptureSignalPeakSinceLast,
+    GetSignalLevels,
+    GetSignalLevelsSince,
+    GetSignalLevelsSinceLast,
+    SubscribeSignalLevels,
+    SubscribeVuLevels,
+    SubscribeState,
+    StopSubscription,
+    SignalLevelsEvent,
+    VuLevelsEvent,
+    StateEvent,
+    GetSignalPeaksSinceStart,
+    ResetSignalPeaksSinceStart,
+    GetChannelLabels,
+    GetCaptureRate,
+    GetUpdateInterval,
+    SetUpdateInterval,
+    SetVolume,
+    GetVolume,
+    AdjustVolume,
+    SetMute,
+    GetMute,
+    ToggleMute,
+    SetFaderVolume,
+    SetFaderExternalVolume,
+    GetFaders,
+    GetFaderVolume,
+    AdjustFaderVolume,
+    SetFaderMute,
+    GetFaderMute,
+    ToggleFaderMute,
+    GetVersion,
+    GetState,
+    GetStopReason,
+    GetRateAdjust,
+    GetBufferLevel,
+    GetClippedSamples,
+    ResetClippedSamples,
+    GetSupportedDeviceTypes,
+    GetAvailableCaptureDevices,
+    GetAvailablePlaybackDevices,
+    GetCaptureDeviceCapabilities,
+    GetPlaybackDeviceCapabilities,
+    GetProcessingLoad,
+    GetResamplerLoad,
+    GetSpectrum,
+    SubscribeSpectrum,
+    SpectrumEvent,
+    Exit,
+    Stop,
+    Invalid,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1403,5 +1590,86 @@ mod tests {
             serde_json::to_string(&reply).unwrap(),
             r#"{"reply":"GetUpdateInterval","result":"Ok","value":500}"#
         );
+    }
+
+    fn tag_of(message: &impl Serialize, field: &str) -> String {
+        serde_json::to_value(message).unwrap()[field]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn command_name_is_the_tag() {
+        for command in [
+            WsCommand::GetVersion,
+            WsCommand::SetConfigJson {
+                value: "{}".to_string(),
+            },
+            WsCommand::AdjustFaderVolume {
+                fader: 1,
+                value: -3.0,
+                min: None,
+                max: Some(0.0),
+            },
+            WsCommand::None,
+        ] {
+            assert_eq!(command.name(), tag_of(&command, "command"));
+        }
+    }
+
+    #[test]
+    fn reply_name_is_the_tag() {
+        for reply in [
+            WsReply::GetConfigJson {
+                result: WsResult::Ok,
+                value: "{}".to_string(),
+            },
+            WsReply::SetConfig {
+                result: WsResult::ConfigValidationError {
+                    message: "x".to_string(),
+                },
+            },
+            WsReply::StateEvent {
+                result: WsResult::Ok,
+                value: StateUpdate {
+                    state: ProcessingState::Running,
+                    stop_reason: None,
+                },
+            },
+            WsReply::Invalid {
+                error: "bad".to_string(),
+            },
+        ] {
+            assert_eq!(reply.name(), tag_of(&reply, "reply"));
+        }
+    }
+
+    /// The tag names serde accepts, read from the error for an unknown tag. It lists them as
+    /// "expected one of `A`, `B`, ...".
+    fn serde_tags<T: serde::de::DeserializeOwned + fmt::Debug>(field: &str) -> Vec<String> {
+        let json = format!(r#"{{"{field}": "NoSuchVariant"}}"#);
+        let error = serde_json::from_str::<T>(&json).unwrap_err().to_string();
+        let list = error.split("expected one of").nth(1).expect(&error);
+        let mut tags: Vec<String> = list
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(String::from)
+            .collect();
+        tags.sort();
+        tags
+    }
+
+    /// `name()` returns the variant identifier, so it matches the tag for every variant as long
+    /// as serde uses the same set of names, i.e. no variant is renamed.
+    #[test]
+    fn every_name_is_a_tag() {
+        let mut names: Vec<&str> = WsCommand::NAMES.to_vec();
+        names.sort();
+        assert_eq!(names, serde_tags::<WsCommand>("command"));
+        let mut names: Vec<&str> = WsReply::NAMES.to_vec();
+        names.sort();
+        assert_eq!(names, serde_tags::<WsReply>("reply"));
     }
 }
