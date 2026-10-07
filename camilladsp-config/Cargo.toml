@@ -13,6 +13,9 @@ repository = "https://github.com/HEnquist/camilladsp"
 # features of the same names enable them.
 pipewire-backend = []
 dummy-backend = []
+# OpenAPI schemas for the config types and the protocol types a client passes
+# on, for the GUI's API spec. camilladsp does not enable it.
+utoipa = ["dep:utoipa"]
 
 # The sample precision is a raw rustc cfg, see CamillaFloat. RUSTFLAGS applies to
 # every crate in the build, so this crate always agrees with camilladsp on it.
@@ -29,3 +32,4 @@ audioadapter = "5.0.0"
 audioadapter-sample = "5.1.0"
 waveadapter = "0.3.0"
 serde_json = "1.0"
+utoipa = { version = "6.0.0", optional = true }

@@ -26,6 +26,7 @@ use std::fmt;
 /// `["pipeline", 2, "names", 0]`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum PathElement {
     Key(String),
     Index(usize),
@@ -85,6 +86,7 @@ pub fn format_path(path: &[PathElement]) -> String {
 /// What sort of problem an issue is. The validator does not decide how serious
 /// each kind is, that is up to whoever asked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum IssueKind {
     /// The config is wrong as written.
     Invalid,
@@ -99,6 +101,7 @@ pub enum IssueKind {
 
 /// A single problem with a config.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Issue {
     /// Where in the config the problem is. Empty for the config as a whole.
     pub path: Vec<PathElement>,

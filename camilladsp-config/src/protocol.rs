@@ -61,6 +61,7 @@ use std::sync::Arc;
 
 /// The state of the processing, as reported by [`WsCommand::GetState`].
 #[derive(Clone, Debug, Copy, Deserialize, Serialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ProcessingState {
     /// Processing is running normally.
     Running,
@@ -89,6 +90,7 @@ impl fmt::Display for ProcessingState {
 
 /// Reason a processing run ended.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum StopReason {
     /// Processing is still running; not yet stopped.
     None,
@@ -108,6 +110,7 @@ pub enum StopReason {
 
 /// The sample formats supported by a device at a specific sample rate.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SamplerateCapability {
     /// Sample rate in Hz.
     pub samplerate: usize,
@@ -117,6 +120,7 @@ pub struct SamplerateCapability {
 
 /// The sample rates (and their formats) supported by a device at a specific channel count.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChannelCapability {
     /// Number of channels.
     pub channels: usize,
@@ -125,6 +129,7 @@ pub struct ChannelCapability {
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CapabilityMode {
     /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
     Unified,
@@ -136,6 +141,7 @@ pub enum CapabilityMode {
 
 /// A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeviceCapabilitySet {
     /// The access mode these capabilities were probed under.
     pub mode: CapabilityMode,
@@ -145,6 +151,7 @@ pub struct DeviceCapabilitySet {
 
 /// Full capability descriptor for a named audio device.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AudioDeviceDescriptor {
     /// Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
     pub name: String,
@@ -156,8 +163,10 @@ pub struct AudioDeviceDescriptor {
 
 /// Log-spaced spectrum, as returned by [`WsCommand::GetSpectrum`].
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SpectrumData {
     /// Center frequency of each output bin in Hz.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<f32>))]
     pub frequencies: Arc<[f32]>,
     /// Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
     pub magnitudes: Vec<f32>,
@@ -184,6 +193,7 @@ pub enum WsSignalLevelSide {
 /// Serialised as a lowercase string: `"playback"` or `"capture"`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum SpectrumSide {
     /// Playback side.
     Playback,
@@ -214,8 +224,11 @@ pub struct SpectrumRequest {
 ///
 /// Same fields as [`SpectrumRequest`] plus an optional `max_rate` cap.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct SpectrumSubscription {
     /// Which side to analyze: `"capture"` or `"playback"`.
+    // As a query parameter it is inlined, since a parameter's $ref is not added to the spec.
+    #[cfg_attr(feature = "utoipa", param(inline))]
     pub side: SpectrumSide,
     /// Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
     pub channel: Option<usize>,
@@ -692,12 +705,15 @@ pub enum WsResult {
 }
 
 /// Channel display labels returned by [`WsCommand::GetChannelLabels`].
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChannelLabels {
     /// Labels for playback channels. `null` if no labels are configured. Each entry is a label
     /// string, or `null` if that specific channel has no label.
+    #[cfg_attr(feature = "utoipa", schema(required))]
     pub playback: Option<Vec<Option<String>>>,
     /// Labels for capture channels. Same structure as `playback`.
+    #[cfg_attr(feature = "utoipa", schema(required))]
     pub capture: Option<Vec<Option<String>>>,
 }
 
@@ -729,6 +745,7 @@ pub struct PbCapLevels {
 
 /// Volume and mute state for one fader, as returned by [`WsCommand::GetFaders`].
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Fader {
     /// Current volume in dB.
     pub volume: f32,
@@ -751,6 +768,7 @@ pub struct StreamLevels {
 ///
 /// All values are smoothed dB levels, per channel.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VuLevels {
     pub playback_rms: Vec<f32>,
     pub playback_peak: Vec<f32>,
@@ -760,6 +778,7 @@ pub struct VuLevels {
 
 /// Payload of a [`WsReply::StateEvent`] pushed by [`WsCommand::SubscribeState`].
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct StateUpdate {
     pub state: ProcessingState,
     /// Present only when `state` is `Inactive`.

@@ -42,6 +42,7 @@ pub use self::utils::OVERRIDES;
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum FileSampleFormat {
     TEXT,
     S16_LE,
@@ -72,6 +73,7 @@ impl fmt::Display for FileSampleFormat {
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum BinarySampleFormat {
     /// Signed integer, 16 bits in 2 bytes, little-endian
     S16_LE,
@@ -175,6 +177,7 @@ impl fmt::Display for BinarySampleFormat {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WasapiSampleFormat {
     S16,
     S24,
@@ -201,6 +204,7 @@ impl WasapiSampleFormat {
 #[allow(clippy::upper_case_acronyms, non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsioSampleFormat {
     S16_LE,
     S24_4_LE,
@@ -229,6 +233,7 @@ impl AsioSampleFormat {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CoreAudioSampleFormat {
     S16,
     S24,
@@ -255,6 +260,7 @@ impl CoreAudioSampleFormat {
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AlsaSampleFormat {
     /// SND_PCM_FORMAT_S16_LE
     S16_LE,
@@ -302,6 +308,7 @@ impl AlsaSampleFormat {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Signal {
     /// Sine wave at `freq` Hz and `level` dBFS.
     Sine { freq: FiniteF64, level: FiniteF64 },
@@ -314,8 +321,10 @@ pub enum Signal {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CaptureDevice {
     Alsa {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         device: String,
         #[serde(default)]
@@ -330,6 +339,7 @@ pub enum CaptureDevice {
         labels: Option<Vec<Option<String>>>,
     },
     PipeWire {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         #[serde(default)]
         node_name: Option<String>,
@@ -351,6 +361,7 @@ pub enum CaptureDevice {
     Wasapi(CaptureDeviceWasapi),
     Asio(CaptureDeviceAsio),
     SignalGenerator {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         signal: Signal,
         #[serde(default)]
@@ -358,6 +369,7 @@ pub enum CaptureDevice {
     },
     /// Test-only paced capture device, see `src/dummy_backend`.
     Dummy {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         signal: Signal,
         #[serde(default)]
@@ -441,7 +453,9 @@ impl CaptureDevice {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceRawFile {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     pub filename: String,
     pub format: BinarySampleFormat,
@@ -469,6 +483,7 @@ impl CaptureDeviceRawFile {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceWavFile {
     pub filename: String,
     #[serde(default)]
@@ -498,7 +513,9 @@ impl CaptureDeviceWavFile {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceStdin {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     pub format: BinarySampleFormat,
     #[serde(default)]
@@ -525,7 +542,9 @@ impl CaptureDeviceStdin {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceWasapi {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
     pub device: Option<String>,
@@ -557,7 +576,9 @@ impl CaptureDeviceWasapi {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceAsio {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     pub device: String,
     #[serde(default)]
@@ -568,7 +589,9 @@ pub struct CaptureDeviceAsio {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CaptureDeviceCA {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
     pub device: Option<String>,
@@ -581,14 +604,17 @@ pub struct CaptureDeviceCA {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum PlaybackDevice {
     Alsa {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         device: String,
         #[serde(default)]
         format: Option<AlsaSampleFormat>,
     },
     PipeWire {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         #[serde(default)]
         node_name: Option<String>,
@@ -600,6 +626,7 @@ pub enum PlaybackDevice {
         autoconnect_to: Option<String>,
     },
     File {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         filename: String,
         format: BinarySampleFormat,
@@ -611,6 +638,7 @@ pub enum PlaybackDevice {
         use_rf64: Option<bool>,
     },
     Stdout {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         format: BinarySampleFormat,
         #[serde(default)]
@@ -621,6 +649,7 @@ pub enum PlaybackDevice {
     Asio(PlaybackDeviceAsio),
     /// Test-only paced playback device, see `src/dummy_backend`.
     Dummy {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
         channels: NonZeroUsize,
         /// Sample format to convert each chunk to before discarding it.
         ///
@@ -681,7 +710,9 @@ impl PlaybackDevice {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PlaybackDeviceWasapi {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
     pub device: Option<String>,
@@ -705,7 +736,9 @@ impl PlaybackDeviceWasapi {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PlaybackDeviceAsio {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     pub device: String,
     #[serde(default)]
@@ -714,7 +747,9 @@ pub struct PlaybackDeviceAsio {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PlaybackDeviceCA {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
     pub device: Option<String>,
@@ -733,10 +768,13 @@ impl PlaybackDeviceCA {
 /// Top-level device and pipeline timing configuration.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Devices {
     /// Output sample rate in Hz.
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub samplerate: NonZeroUsize,
     /// Number of frames per processing chunk.
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub chunksize: NonZeroUsize,
     #[serde(default)]
     pub queuelimit: Option<usize>,
@@ -755,6 +793,7 @@ pub struct Devices {
     #[serde(default)]
     pub resampler: Option<Resampler>,
     #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<usize>, minimum = 1))]
     pub capture_samplerate: Option<NonZeroUsize>,
     #[serde(default)]
     pub stop_on_rate_change: Option<bool>,
@@ -838,6 +877,7 @@ impl Devices {
 
 /// Sinc interpolation quality for the async sinc resampler.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsyncSincInterpolation {
     Nearest,
     Linear,
@@ -847,6 +887,7 @@ pub enum AsyncSincInterpolation {
 
 /// Preset quality profile for the async sinc resampler.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsyncSincProfile {
     VeryFast,
     Fast,
@@ -858,6 +899,7 @@ pub enum AsyncSincProfile {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsyncSincParameters {
     Profile {
         profile: AsyncSincProfile,
@@ -875,6 +917,7 @@ pub enum AsyncSincParameters {
 /// Window function used by the async sinc resampler.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsyncSincWindow {
     Hann,
     Hann2,
@@ -886,6 +929,7 @@ pub enum AsyncSincWindow {
 
 /// Polynomial interpolation order for the async polynomial resampler.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum AsyncPolyInterpolation {
     Linear,
     Cubic,
@@ -897,6 +941,7 @@ pub enum AsyncPolyInterpolation {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Resampler {
     /// Async polynomial resampler (low CPU, moderate quality).
     AsyncPoly {
@@ -918,6 +963,7 @@ pub enum Resampler {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Filter {
     Conv {
         #[serde(default)]
@@ -980,16 +1026,23 @@ pub enum Filter {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ConvParameters {
     Raw(ConvParametersRaw),
     Wav(ConvParametersWav),
-    Values { values: Vec<FiniteF64> },
-    Dummy { length: NonZeroUsize },
+    Values {
+        values: Vec<FiniteF64>,
+    },
+    Dummy {
+        #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
+        length: NonZeroUsize,
+    },
 }
 
 /// Coefficients loaded from a raw binary or text file.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ConvParametersRaw {
     pub filename: String,
     #[serde(default)]
@@ -1017,6 +1070,7 @@ impl ConvParametersRaw {
 /// Coefficients loaded from a specific channel of a WAV file.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ConvParametersWav {
     pub filename: String,
     #[serde(default)]
@@ -1032,6 +1086,7 @@ impl ConvParametersWav {
 /// Shelf steepness specified either as a Q factor or a slope in dB/octave.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ShelfSteepness {
     Q {
         freq: FiniteF64,
@@ -1048,6 +1103,7 @@ pub enum ShelfSteepness {
 /// Peaking filter width specified either as a Q factor or a bandwidth in octaves.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum PeakingWidth {
     Q {
         freq: FiniteF64,
@@ -1064,6 +1120,7 @@ pub enum PeakingWidth {
 /// Notch / allpass / bandpass width specified either as a Q factor or a bandwidth in octaves.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum NotchWidth {
     Q {
         freq: FiniteF64,
@@ -1078,6 +1135,7 @@ pub enum NotchWidth {
 /// Parameters for the general (asymmetric pole/zero) notch biquad.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GeneralNotchParams {
     pub freq_p: FiniteF64,
     pub freq_z: FiniteF64,
@@ -1097,6 +1155,7 @@ impl GeneralNotchParams {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum BiquadParameters {
     Free {
         a1: FiniteF64,
@@ -1149,6 +1208,7 @@ pub enum BiquadParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum BiquadComboParameters {
     LinkwitzRileyHighpass { freq: FiniteF64, order: usize },
     LinkwitzRileyLowpass { freq: FiniteF64, order: usize },
@@ -1165,6 +1225,7 @@ pub enum BiquadComboParameters {
 /// the last one a high shelf, and the ones in between are peaking filters.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PeqBand {
     pub freq: FiniteF64,
     pub q: FiniteF64,
@@ -1174,6 +1235,7 @@ pub struct PeqBand {
 /// Parameters for the graphic equalizer biquad combo filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GraphicEqualizerParameters {
     #[serde(default)]
     freq_min: Option<FiniteF32>,
@@ -1199,6 +1261,7 @@ impl GraphicEqualizerParameters {
 
 /// Which aux fader a Volume filter is linked to (faders 1–4; the main fader is always 0).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum VolumeFader {
     Aux1 = 1,
     Aux2 = 2,
@@ -1209,6 +1272,7 @@ pub enum VolumeFader {
 /// Parameters for the volume-ramp filter linked to a specific fader.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VolumeParameters {
     #[serde(default)]
     pub ramp_time_ms: Option<FiniteF32>,
@@ -1229,6 +1293,7 @@ impl VolumeParameters {
 
 /// Which fader drives the loudness filter's compensation level.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum LoudnessFader {
     Main = 0,
     Aux1 = 1,
@@ -1240,6 +1305,7 @@ pub enum LoudnessFader {
 /// Parameters for the loudness (Fletcher-Munson) compensation filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LoudnessParameters {
     pub reference_level: FiniteF32,
     #[serde(default)]
@@ -1301,6 +1367,7 @@ impl LoudnessParameters {
 /// Parameters for the static gain filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GainParameters {
     pub gain: FiniteF64,
     #[serde(default)]
@@ -1313,6 +1380,7 @@ pub struct GainParameters {
 
 /// Whether a gain value is interpreted as a linear factor or in decibels.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum GainScale {
     #[serde(rename = "linear")]
     Linear,
@@ -1337,6 +1405,7 @@ impl GainParameters {
 /// Parameters for a time-delay filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DelayParameters {
     pub delay: FiniteF64,
     pub delay_unit: DelayUnit,
@@ -1357,6 +1426,7 @@ impl DelayParameters {
 /// Unit for a time value (attack, release, envelope times).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum TimeUnit {
     #[serde(rename = "us")]
     Microseconds,
@@ -1371,6 +1441,7 @@ pub enum TimeUnit {
 /// Unit for a time or distance value used by delays (Delay filter, RACE processor).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum DelayUnit {
     #[serde(rename = "us")]
     Microseconds,
@@ -1388,6 +1459,7 @@ pub enum DelayUnit {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum DitherParameters {
     None { bits: usize },
     Flat { bits: usize, amplitude: FiniteF64 },
@@ -1416,6 +1488,7 @@ pub enum DitherParameters {
 /// Parameters for the difference-equation (IIR) filter: `a` (feedback) and `b` (feedforward) coefficients.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DiffEqParameters {
     #[serde(default)]
     pub a: Option<Vec<FiniteF64>>,
@@ -1446,8 +1519,11 @@ impl DiffEqParameters {
 /// Input and output channel counts for a mixer.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct MixerChannels {
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub r#in: NonZeroUsize,
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub out: NonZeroUsize,
 }
 
@@ -1466,6 +1542,7 @@ impl MixerChannels {
 /// One input source contributing to a mixer output channel.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct MixerSource {
     pub channel: usize,
     #[serde(default)]
@@ -1499,6 +1576,7 @@ impl MixerSource {
 /// Routing rule: which sources feed a given destination channel in a mixer.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct MixerMapping {
     pub dest: usize,
     pub sources: Vec<MixerSource>,
@@ -1515,6 +1593,7 @@ impl MixerMapping {
 /// Configuration for a named mixer: channel counts, routing rules, and optional labels.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Mixer {
     #[serde(default)]
     pub description: Option<String>,
@@ -1528,6 +1607,7 @@ pub struct Mixer {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Processor {
     Compressor {
         #[serde(default)]
@@ -1554,6 +1634,7 @@ pub enum Processor {
 /// Parameters for the dynamic range compressor processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
@@ -1595,6 +1676,7 @@ impl CompressorParameters {
 /// Parameters for the noise gate processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct NoiseGateParameters {
     pub channels: usize,
     #[serde(default)]
@@ -1622,6 +1704,7 @@ impl NoiseGateParameters {
 /// Parameters for the multichannel lookahead limiter processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LookaheadLimiterProcessorParameters {
     pub channels: usize,
     #[serde(default)]
@@ -1655,6 +1738,7 @@ impl LookaheadLimiterProcessorParameters {
 /// Parameters for the RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RACEParameters {
     pub channels: usize,
     pub channel_a: usize,
@@ -1679,6 +1763,7 @@ impl RACEParameters {
 /// Parameters for the hard/soft-clipping filter.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ClipperParameters {
     #[serde(default)]
     pub soft_clip: Option<bool>,
@@ -1694,6 +1779,7 @@ impl ClipperParameters {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LookaheadLimiterParameters {
     #[serde(default)]
     pub limit: FiniteF64,
@@ -1717,6 +1803,7 @@ impl LookaheadLimiterParameters {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(tag = "type")]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum PipelineStep {
     Mixer(PipelineStepMixer),
     Filter(PipelineStepFilter),
@@ -1726,6 +1813,7 @@ pub enum PipelineStep {
 /// Configuration for a mixer pipeline step.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PipelineStepMixer {
     pub name: String,
     #[serde(default)]
@@ -1743,6 +1831,7 @@ impl PipelineStepMixer {
 /// Configuration for a filter pipeline step.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PipelineStepFilter {
     #[serde(default)]
     pub channels: Option<Vec<usize>>,
@@ -1762,6 +1851,7 @@ impl PipelineStepFilter {
 /// Configuration for a processor pipeline step.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PipelineStepProcessor {
     pub name: String,
     #[serde(default)]
@@ -1779,6 +1869,7 @@ impl PipelineStepProcessor {
 /// A complete CamillaDSP configuration: devices, filters, mixers, processors, and the pipeline.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Configuration {
     #[serde(default)]
     pub title: Option<String>,
