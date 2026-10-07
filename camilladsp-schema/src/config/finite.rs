@@ -31,7 +31,7 @@ use std::fmt;
 use std::ops::Deref;
 
 macro_rules! finite_float {
-    ($name:ident, $prim:ty, $doc:literal) => {
+    ($name:ident, $prim:ty, $format:ident, $doc:literal) => {
         #[doc = $doc]
         ///
         /// Construct one with [`new`](Self::new), which rejects a non-finite value, and read the
@@ -139,6 +139,21 @@ macro_rules! finite_float {
                 })
             }
         }
+
+        /// A plain number. JSON has no NaN or infinity, so there is nothing more to say.
+        #[cfg(feature = "utoipa")]
+        impl utoipa::PartialSchema for $name {
+            fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+                use utoipa::openapi::schema::{KnownFormat, ObjectBuilder, SchemaFormat, Type};
+                ObjectBuilder::new()
+                    .schema_type(Type::Number)
+                    .format(Some(SchemaFormat::KnownFormat(KnownFormat::$format)))
+                    .into()
+            }
+        }
+
+        #[cfg(feature = "utoipa")]
+        impl utoipa::ToSchema for $name {}
     };
 }
 
@@ -157,34 +172,15 @@ impl std::error::Error for NotFinite {}
 finite_float!(
     FiniteF64,
     f64,
+    Double,
     "An `f64` that is guaranteed to be neither `NaN` nor an infinity."
 );
 finite_float!(
     FiniteF32,
     f32,
+    Float,
     "An `f32` that is guaranteed to be neither `NaN` nor an infinity."
 );
-
-/// Shorthand for [`FiniteF64::expect_finite`], for building config values in tests and in the
-/// filter builders that generate sections from constants.
-macro_rules! finite {
-    ($value:expr) => {
-        $crate::config::FiniteF64::expect_finite($value)
-    };
-}
-
-/// The [`FiniteF32`] counterpart of [`finite!`]. Only the tests build `f32` config values
-/// directly, everything else reads them through a getter.
-#[cfg(test)]
-macro_rules! finite32 {
-    ($value:expr) => {
-        $crate::config::FiniteF32::expect_finite($value)
-    };
-}
-
-pub(crate) use finite;
-#[cfg(test)]
-pub(crate) use finite32;
 
 #[cfg(test)]
 mod tests {

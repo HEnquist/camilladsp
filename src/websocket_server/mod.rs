@@ -17,41 +17,7 @@
 //! Websocket server for controlling CamillaDSP.
 //!
 //! Connect to the server at `ws://127.0.0.1:<port>` (or a custom address set with `-a`).
-//! All messages are UTF-8 text frames containing a JSON value.
-//!
-//! ## Command syntax
-//!
-//! Every command is a JSON object with a `"command"` field naming the command:
-//! ```json
-//! {"command": "GetVersion"}
-//! ```
-//!
-//! Commands with arguments carry them in additional named fields:
-//! ```json
-//! {"command": "SetUpdateInterval", "value": 500}
-//! ```
-//!
-//! ## Response format
-//!
-//! Every reply is a JSON object with a `"reply"` field naming the reply. Replies that do not
-//! return a value carry only the `"result"` status:
-//! ```json
-//! {"reply": "SetUpdateInterval", "result": "Ok"}
-//! ```
-//!
-//! Replies that return a value add a `"value"` field:
-//! ```json
-//! {"reply": "GetUpdateInterval", "result": "Ok", "value": 500}
-//! ```
-//!
-//! If a command fails the `"result"` field holds the error name instead of `"Ok"`, and there is
-//! no `"value"` field. Errors that carry a description add a top-level `"message"` field:
-//! ```json
-//! {"reply": "SetConfig", "result": "ConfigValidationError", "message": "details..."}
-//! ```
-//! Errors without a message have just the name: `{"reply": "SetFaderVolume", "result": "InvalidFaderError"}`.
-//!
-//! Unrecognised commands get a `{"reply": "Invalid", "error": "..."}` response.
+//! The messages and their format are in the `protocol` module of the `camilladsp-schema` crate.
 //!
 //! ## Subscription commands
 //!
@@ -68,7 +34,6 @@
 //! ```
 //! then navigate to **`camilladsp::websocket_server`**.
 
-mod datastructures;
 mod utils;
 
 use clap::crate_version;
@@ -86,11 +51,6 @@ use std::time::{Duration, Instant};
 use tungstenite::Message;
 use tungstenite::WebSocket;
 
-use self::datastructures::{
-    AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
-    SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
-    WsSignalLevelSide,
-};
 use self::utils::{
     accept_plain_stream, capture_signal_global_peak, capture_signal_peak,
     capture_signal_peak_since, capture_signal_peak_since_last, capture_signal_rms,
@@ -113,6 +73,11 @@ use crate::{
     list_supported_devices,
 };
 use crate::{ControllerMessage, config};
+use camilladsp_schema::protocol::{
+    AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
+    SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
+    WsSignalLevelSide,
+};
 
 const SUBSCRIPTION_READ_TIMEOUT_MS: u64 = 10;
 
@@ -2074,9 +2039,9 @@ fn handle_get_spectrum(req: SpectrumRequest, shared_data: &SharedData) -> WsRepl
 #[cfg(test)]
 mod tests {
     use super::VuSubscriptionState;
-    use super::datastructures::{VuSubscription, WsCommand, WsResult, WsSignalLevelSide};
     use super::utils::{parse_command, validate_vu_subscription};
     use crate::signal_monitor::SignalLevelSide as MonitorSignalLevelSide;
+    use camilladsp_schema::protocol::{VuSubscription, WsCommand, WsResult, WsSignalLevelSide};
     use std::time::{Duration, Instant};
     use tungstenite::Message;
 
@@ -2229,7 +2194,7 @@ mod tests {
 
     #[test]
     fn adjust_volume_serde_format() {
-        use super::datastructures::WsCommand;
+        use camilladsp_schema::protocol::WsCommand;
         let plain: WsCommand =
             serde_json::from_str("{\"command\": \"AdjustVolume\", \"value\": -3.0}").unwrap();
         assert_eq!(

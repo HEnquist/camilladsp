@@ -15,13 +15,15 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Delay;
-use crate::filters::lookahead_limiter::{LookaheadGain, limiter_parameters, validate_times};
+use crate::filters::lookahead_limiter::{LookaheadGain, limiter_parameters};
 use crate::processors::Processor;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::lookahead_limiter::validate_lookahead_limiter;
 
 /// Multichannel lookahead limiter.
 ///
@@ -197,41 +199,6 @@ impl Processor for LookaheadLimiter {
             panic!("Invalid config change!");
         }
     }
-}
-
-/// Validate the lookahead limiter config, to give a helpful message intead of a panic.
-pub fn validate_lookahead_limiter(
-    config: &config::LookaheadLimiterProcessorParameters,
-    samplerate: usize,
-) -> Res<()> {
-    let channels = config.channels;
-    validate_times(
-        config.attack.get(),
-        config.attack_unit,
-        config.release.get(),
-        samplerate,
-    )?;
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -15,11 +15,13 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::ToCamillaFloat;
 use crate::config;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::clipper::validate_config;
 
 const CUBEFACTOR: CamillaFloat = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
@@ -104,9 +106,4 @@ impl Filter for Clipper {
             panic!("Invalid config change!");
         }
     }
-}
-
-/// Validate the clipper config, always return ok to allow any config.
-pub fn validate_config(_config: &config::ClipperParameters) -> Res<()> {
-    Ok(())
 }

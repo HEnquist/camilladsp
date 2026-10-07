@@ -35,9 +35,6 @@
 extern crate log;
 
 use parking_lot::{Mutex, RwLock};
-use serde::Serialize;
-use std::error;
-use std::fmt;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -79,108 +76,16 @@ macro_rules! xerror { ($($x:tt)*) => (
     }
 ) }
 
-/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
-///
-/// `f64` is correct for nearly all use cases. `f32` is available for the few
-/// setups where it measurably helps, mainly resampling and FIR convolution on
-/// weak in-order CPUs, and is deliberately not a Cargo feature: features are
-/// unified across the whole dependency graph, so any crate depending on this one
-/// could silently flip the precision for everyone else in the build. It is a raw
-/// rustc cfg instead, set with:
-///
-/// ```text
-/// RUSTFLAGS="--cfg camillafloat_f32" cargo build --release
-/// ```
-#[cfg(camillafloat_f32)]
-pub type CamillaFloat = f32;
-/// Internal floating-point sample type: `f64` by default, `f32` in an f32 build.
-///
-/// See the f32 variant of this alias for how to select the other precision.
-#[cfg(not(camillafloat_f32))]
-pub type CamillaFloat = f64;
+// The sample precision, the conversions into and out of it, and the result type
+// are defined next to the config types, which need them for reading coefficients.
+pub use camilladsp_schema::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
 
-/// Conversion from a setup-time `f64` value to the processing precision.
-///
-/// Configuration values and filter coefficient math always run in `f64`, no
-/// matter what [`CamillaFloat`] is, so that an f32 build gets the same
-/// coefficients as an f64 one and only rounds once, on the way in. This trait
-/// marks that single crossing point: a no-op in a default build, a narrowing
-/// conversion in an f32 build.
-pub trait ToCamillaFloat {
-    /// Convert a setup value into the processing precision.
-    fn to_camilla_float(self) -> CamillaFloat;
-}
-
-#[cfg(camillafloat_f32)]
-impl ToCamillaFloat for f64 {
-    #[inline]
-    fn to_camilla_float(self) -> CamillaFloat {
-        self as f32
-    }
-}
-
-#[cfg(not(camillafloat_f32))]
-impl ToCamillaFloat for f64 {
-    #[inline]
-    fn to_camilla_float(self) -> CamillaFloat {
-        self
-    }
-}
-
-/// Conversion from the processing precision down to `f32`.
-///
-/// Signal levels, volumes and spectrum data are reported as `f32` whatever
-/// [`CamillaFloat`] is. Implemented for both float types and written as a method
-/// rather than an `as` cast, so that the direction which is a no-op in a given
-/// build does not need a blanket `clippy::unnecessary_cast` allow over a whole
-/// file, which would also hide genuinely redundant casts.
-pub trait ToF32 {
-    /// Convert to `f32` for reporting.
-    fn to_f32(self) -> f32;
-}
-
-impl ToF32 for f64 {
-    #[inline]
-    fn to_f32(self) -> f32 {
-        self as f32
-    }
-}
-
-impl ToF32 for f32 {
-    #[inline]
-    fn to_f32(self) -> f32 {
-        self
-    }
-}
-
-/// Conversion from the processing precision up to `f64`.
-///
-/// Analysis that must stay numerically robust whatever [`CamillaFloat`] is,
-/// such as the biquad state guard, works in `f64` throughout. Written as a
-/// method rather than an `as` cast for the same reason as [`ToF32`]: the
-/// direction that is a no-op in a given build would otherwise need a blanket
-/// `clippy::unnecessary_cast` allow over a whole file.
-pub trait ToF64 {
-    /// Convert up to `f64` for analysis.
-    fn to_f64(self) -> f64;
-}
-
-impl ToF64 for f32 {
-    #[inline]
-    fn to_f64(self) -> f64 {
-        self as f64
-    }
-}
-
-impl ToF64 for f64 {
-    #[inline]
-    fn to_f64(self) -> f64 {
-        self
-    }
-}
-
-/// Convenience `Result` type used throughout CamillaDSP.
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
+// The types that websocket replies carry are part of the protocol, which is
+// defined in camilladsp-schema so that clients can use it too.
+pub use camilladsp_schema::protocol::{
+    AudioDeviceDescriptor, CapabilityMode, ChannelCapability, DeviceCapabilitySet, ProcessingState,
+    SamplerateCapability, StopReason,
+};
 
 /// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
@@ -295,20 +200,6 @@ pub enum ControllerMessage {
     Stop,
     /// Shut down the engine entirely.
     Exit,
-}
-
-#[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
-pub enum ProcessingState {
-    /// Processing is running normally.
-    Running,
-    /// Processing is paused because the input signal is silent.
-    Paused,
-    /// Processing is off and devices are closed, waiting for a new configuration.
-    Inactive,
-    /// Opening devices and starting up processing with a new configuration.
-    Starting,
-    /// Capture device is not providing data; processing is stalled.
-    Stalled,
 }
 
 /// Live status of the capture device, updated each processing chunk.
@@ -470,7 +361,7 @@ pub struct ProcessingParameters {
 
 impl ProcessingParameters {
     /// Number of independent volume faders.
-    pub const NUM_FADERS: usize = 5;
+    pub const NUM_FADERS: usize = camilladsp_schema::fader::NUM_FADERS;
 
     /// Default volume level in dB (0 dB = unity gain).
     pub const DEFAULT_VOLUME: f32 = 0.0;
@@ -677,25 +568,6 @@ pub struct ProcessingStatus {
     pub stop_reason: StopReason,
 }
 
-/// Reason a processing run ended, reported via [`ProcessingStatus`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum StopReason {
-    /// Processing is still running; not yet stopped.
-    None,
-    /// Processing completed normally (e.g. end of file input).
-    Done,
-    /// Capture device reported an error.
-    CaptureError(String),
-    /// Playback device reported an error.
-    PlaybackError(String),
-    /// An unexpected internal error occurred.
-    UnknownError(String),
-    /// Capture device sample rate changed to the given value.
-    CaptureFormatChange(usize),
-    /// Playback device sample rate changed to the given value.
-    PlaybackFormatChange(usize),
-}
-
 /// Bundle of `Arc`-wrapped status objects passed between the engine, device threads, and WebSocket server.
 #[derive(Clone)]
 pub struct StatusStructs {
@@ -759,19 +631,6 @@ pub struct SharedConfigs {
     pub previous: Arc<Mutex<Option<config::Configuration>>>,
 }
 
-impl fmt::Display for ProcessingState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let desc = match self {
-            ProcessingState::Running => "RUNNING",
-            ProcessingState::Paused => "PAUSED",
-            ProcessingState::Inactive => "INACTIVE",
-            ProcessingState::Starting => "STARTING",
-            ProcessingState::Stalled => "STALLED",
-        };
-        write!(f, "{desc}")
-    }
-}
-
 /// Return `(playback_types, capture_types)`: the device type names supported by this build.
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
@@ -816,54 +675,6 @@ pub const STANDARD_RATES: &[u32] = &[
     5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
     352800, 384000, 705600, 768000,
 ];
-
-/// The sample formats supported by a device at a specific sample rate.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct SamplerateCapability {
-    /// Sample rate in Hz.
-    pub samplerate: usize,
-    /// Names of the supported sample formats at this rate.
-    pub formats: Vec<String>,
-}
-
-/// The sample rates (and their formats) supported by a device at a specific channel count.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct ChannelCapability {
-    /// Number of channels.
-    pub channels: usize,
-    /// Supported sample rates for this channel count.
-    pub samplerates: Vec<SamplerateCapability>,
-}
-
-#[derive(Debug, PartialEq, Serialize)]
-pub enum CapabilityMode {
-    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
-    Unified,
-    /// WASAPI shared-mode capabilities (derived from the mix format).
-    Shared,
-    /// WASAPI exclusive-mode capabilities (probed independently).
-    Exclusive,
-}
-
-/// A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
-#[derive(Debug, PartialEq, Serialize)]
-pub struct DeviceCapabilitySet {
-    /// The access mode these capabilities were probed under.
-    pub mode: CapabilityMode,
-    /// Per-channel-count capability entries.
-    pub capabilities: Vec<ChannelCapability>,
-}
-
-/// Full capability descriptor for a named audio device.
-#[derive(Debug, PartialEq, Serialize)]
-pub struct AudioDeviceDescriptor {
-    /// Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
-    pub name: String,
-    /// Human-readable device name.
-    pub description: String,
-    /// Capability sets, one per access mode supported by the backend.
-    pub capability_sets: Vec<DeviceCapabilitySet>,
-}
 
 /// Return available device names for `backend` (`"alsa"`, `"coreaudio"`, `"wasapi"`, `"asio"`).
 ///

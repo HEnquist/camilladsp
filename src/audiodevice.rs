@@ -236,6 +236,12 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 full_duplex,
             })
         }
+        // Every device type parses on every platform, and validation rejects the
+        // ones this build has no backend for.
+        other => unreachable!(
+            "{} playback is not supported by this build, validation should have rejected it",
+            other.type_name()
+        ),
     }
 }
 
@@ -462,6 +468,12 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
                 full_duplex,
             })
         }
+        // Every device type parses on every platform, and validation rejects the
+        // ones this build has no backend for.
+        other => unreachable!(
+            "{} capture is not supported by this build, validation should have rejected it",
+            other.type_name()
+        ),
     }
 }
 

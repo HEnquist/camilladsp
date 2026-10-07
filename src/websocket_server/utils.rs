@@ -13,13 +13,13 @@ use tungstenite::Message;
 use tungstenite::WebSocket;
 use tungstenite::accept;
 
-use super::datastructures::{
-    StateUpdate, StreamLevels, VuSubscription, WsCommand, WsReply, WsResult, WsSignalLevelSide,
-};
 use super::{LocalData, SharedData};
 use crate::ProcessingState;
 use crate::Res;
 use crate::utils::decibels::linear_to_db_inplace;
+use camilladsp_schema::protocol::{
+    StateUpdate, StreamLevels, VuSubscription, WsCommand, WsReply, WsResult, WsSignalLevelSide,
+};
 
 const MAX_VU_TIME_CONSTANT_MS: f32 = 60_000.0;
 

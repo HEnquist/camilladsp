@@ -161,13 +161,8 @@ fn get_hann_window(n: usize) -> Arc<[f32]> {
 // --- Spectrum computation ---
 
 /// Log-spaced spectrum result returned by [`compute_spectrum`] and related functions.
-#[derive(Debug, serde::Serialize, PartialEq)]
-pub struct SpectrumData {
-    /// Center frequency of each output bin in Hz.
-    pub frequencies: Arc<[f32]>,
-    /// Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
-    pub magnitudes: Vec<f32>,
-}
+/// Defined with the websocket protocol, which carries it.
+pub use camilladsp_schema::protocol::SpectrumData;
 
 type FreqCacheMap = Mutex<HashMap<(u64, u64, usize), Arc<[f32]>>>;
 static FREQ_CACHE: LazyLock<FreqCacheMap> = LazyLock::new(|| Mutex::new(HashMap::new()));

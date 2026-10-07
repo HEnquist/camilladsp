@@ -31,6 +31,11 @@ use crate::ToCamillaFloat;
 use crate::config;
 use crate::utils::decibels::db_to_linear;
 
+/// Collecting the fader settings from a config, and checking them, lives in `camilladsp-schema`.
+pub use camilladsp_schema::fader::{
+    FaderSettings, UNUSED_AUX_FADER, fader_settings, validate_fader_settings,
+};
+
 const NUM_FADERS: usize = ProcessingParameters::NUM_FADERS;
 
 /// The level in dB that a mute ramps towards, before the gain is set to zero.
@@ -99,84 +104,6 @@ impl FaderLevels {
         level.start_db.store(start_db.to_bits(), Ordering::Relaxed);
         level.end_db.store(end_db.to_bits(), Ordering::Relaxed);
         level.ramping.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Ramp time and volume limit of one fader.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FaderSettings {
-    pub ramp_time_ms: f32,
-    pub limit: f32,
-}
-
-/// Settings for an aux fader that no Volume filter uses. With nothing to ramp,
-/// its level follows the target directly.
-const UNUSED_AUX_FADER: FaderSettings = FaderSettings {
-    ramp_time_ms: 0.0,
-    limit: 50.0,
-};
-
-/// Collect the settings of every fader, and describe the first conflict if two
-/// Volume filters on the same fader disagree. The first filter wins.
-fn collect_fader_settings(
-    conf: &config::Configuration,
-) -> ([FaderSettings; NUM_FADERS], Option<String>) {
-    let mut settings = [UNUSED_AUX_FADER; NUM_FADERS];
-    settings[0] = FaderSettings {
-        ramp_time_ms: conf.devices.volume_ramp_time_ms(),
-        limit: conf.devices.volume_limit(),
-    };
-    let mut set_by: [Option<&str>; NUM_FADERS] = [None; NUM_FADERS];
-    let mut conflict = None;
-    let (Some(pipeline), Some(filters)) = (&conf.pipeline, &conf.filters) else {
-        return (settings, conflict);
-    };
-    for step in pipeline {
-        let config::PipelineStep::Filter(step) = step else {
-            continue;
-        };
-        if step.is_bypassed() || step.channels.as_ref().is_some_and(|ch| ch.is_empty()) {
-            continue;
-        }
-        for name in &step.names {
-            let Some(config::Filter::Volume { parameters, .. }) = filters.get(name) else {
-                continue;
-            };
-            let fader = parameters.fader as usize;
-            let these = FaderSettings {
-                ramp_time_ms: parameters.ramp_time_ms(),
-                limit: parameters.limit(),
-            };
-            match set_by[fader] {
-                None => {
-                    settings[fader] = these;
-                    set_by[fader] = Some(name);
-                }
-                Some(first) if conflict.is_none() && settings[fader] != these => {
-                    conflict = Some(format!(
-                        "Volume filters '{first}' and '{name}' use the same fader {:?}, \
-                        but have different ramp_time_ms or limit",
-                        parameters.fader
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-    }
-    (settings, conflict)
-}
-
-/// The ramp time and limit of every fader in `conf`. Fader 0 takes them from
-/// the devices section, the aux faders from the Volume filters that use them.
-pub fn fader_settings(conf: &config::Configuration) -> [FaderSettings; NUM_FADERS] {
-    collect_fader_settings(conf).0
-}
-
-/// Check that all Volume filters sharing a fader agree on its settings.
-pub fn validate_fader_settings(conf: &config::Configuration) -> Result<(), config::ConfigError> {
-    match collect_fader_settings(conf).1 {
-        Some(msg) => Err(config::ConfigError::new(&msg)),
-        None => Ok(()),
     }
 }
 

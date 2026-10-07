@@ -26,11 +26,15 @@ use crate::filters::Filter;
 use crate::filters::biquad::{Biquad, BiquadCoefficients};
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::ToCamillaFloat;
 use crate::fader::{FaderGain, FaderLevels};
+
 use crate::utils::decibels::{db_to_linear, gain_from_value};
 use crate::utils::time::delay_to_samples;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::basicfilters::{
+    validate_delay_config, validate_gain_config, validate_volume_config,
+};
 
 #[derive(Clone, Debug)]
 pub struct Gain {
@@ -315,38 +319,6 @@ impl Filter for Delay {
             unreachable!("Invalid config change!");
         }
     }
-}
-
-/// Validate a Loudness config.
-pub fn validate_delay_config(conf: &config::DelayParameters) -> Res<()> {
-    if conf.delay < 0.0 {
-        return Err(config::ConfigError::new("Delay cannot be negative").into());
-    }
-    Ok(())
-}
-
-/// Validate a Volume config.
-pub fn validate_volume_config(conf: &config::VolumeParameters) -> Res<()> {
-    if conf.ramp_time_ms() < 0.0 {
-        return Err(config::ConfigError::new("Ramp time cannot be negative").into());
-    }
-    Ok(())
-}
-
-/// Validate a Gain config.
-pub fn validate_gain_config(conf: &config::GainParameters) -> Res<()> {
-    if conf.scale() == config::GainScale::Decibel {
-        if conf.gain < -150.0 {
-            return Err(config::ConfigError::new("Gain must be larger than -150 dB").into());
-        } else if conf.gain > 150.0 {
-            return Err(config::ConfigError::new("Gain must be less than +150 dB").into());
-        }
-    } else if conf.gain < -10.0 {
-        return Err(config::ConfigError::new("Linear gain must be larger than -10.0").into());
-    } else if conf.gain > 10.0 {
-        return Err(config::ConfigError::new("Linear gain must be less than +10.0").into());
-    }
-    Ok(())
 }
 
 #[cfg(test)]

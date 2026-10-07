@@ -77,15 +77,15 @@ def test_the_dummy_devices_are_absent_from_a_stock_build(standby):
 @pytest.mark.parametrize(
     "block", [DUMMY_CAPTURE, DUMMY_PLAYBACK], ids=["capture", "playback"]
 )
-def test_a_dummy_config_is_rejected_with_the_variant_named(
+def test_a_dummy_config_is_rejected_as_unsupported(
     standby, config_file, tmp_path, block
 ):
-    """A config asking for a device this build lacks says which one, and what it does have.
+    """A config asking for a device this build lacks says which one, and that the build is why.
 
-    `deny_unknown_fields` and serde's untagged variant list do the work, so the error
-    names the device and lists the alternatives. Asserted over the websocket rather than
-    from the process exit code because that is where the message is readable: a GUI
-    sending a config gets this string, and "unknown variant" is what tells its user the
+    Every device type parses on every build, so the config is read and then rejected by
+    validation, with the device named. Asserted over the websocket rather than from the
+    process exit code because that is where the message is readable: a GUI sending a
+    config gets this string, and "not supported by this build" is what tells its user the
     build is wrong rather than the config.
     """
     side = "capture" if block is DUMMY_CAPTURE else "playback"
@@ -95,18 +95,20 @@ def test_a_dummy_config_is_rejected_with_the_variant_named(
         text = conf.read()
 
     reply = standby.send_raw("ValidateConfig", text)
-    assert reply["result"] == "ConfigReadError"
-    assert "unknown variant `Dummy`" in reply["value"]
-    assert "RawFile" in reply["value"] or "File" in reply["value"]
+    assert reply["result"] == "ConfigValidationError"
+    assert (
+        f"devices.{side}.type: The Dummy {side} device type is not supported by this build"
+        in reply["value"]
+    )
 
 
-def test_a_device_type_that_exists_nowhere_is_rejected_the_same_way(
+def test_a_device_type_that_exists_nowhere_is_a_read_error(
     standby, config_file, tmp_path
 ):
-    """And a plain typo gets the same treatment, which is what makes the check above useful.
+    """A plain typo is not a device some other build has, so the config does not even parse.
 
-    Otherwise the Dummy rejection could be a special case rather than the general one,
-    and a future build that happened to accept the name would still pass it.
+    This is what tells the two apart: Dummy above is a known type this build lacks, a
+    name no build knows is a mistake in the config.
     """
     unknown = "  capture:\n    type: Nonexistent\n    channels: 2"
     with open(

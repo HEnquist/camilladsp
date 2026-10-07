@@ -15,13 +15,15 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::CamillaFloat;
-use crate::Res;
 use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::noisegate::validate_noise_gate;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {
@@ -202,38 +204,4 @@ impl Processor for NoiseGate {
             panic!("Invalid config change!");
         }
     }
-}
-
-/// Validate the noise gate config, to give a helpful message intead of a panic.
-pub fn validate_noise_gate(config: &config::NoiseGateParameters) -> Res<()> {
-    let channels = config.channels;
-    if config.attack <= 0.0 {
-        let msg = "Attack value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.release <= 0.0 {
-        let msg = "Release value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    Ok(())
 }

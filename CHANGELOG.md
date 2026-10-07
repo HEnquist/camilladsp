@@ -15,6 +15,7 @@ New features:
 - PipeWire: request the config sample rate as the graph rate, for multi-rate DACs.
 
 Changes:
+- Config errors list every problem found, each with its location in the config.
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.
 - Applying a config with large FIR filters no longer stalls the audio.

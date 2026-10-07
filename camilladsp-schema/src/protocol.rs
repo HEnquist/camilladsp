@@ -1,15 +1,185 @@
-use serde::{Deserialize, Serialize};
-use serde_json;
+// CamillaDSP - A flexible tool for processing audio
+// Copyright (C) 2026 Henrik Enquist
+//
+// This file is part of CamillaDSP.
+//
+// CamillaDSP is free software; you can redistribute it and/or modify it
+// under the terms of either:
+//
+// a) the GNU General Public License version 3,
+//    or
+// b) the Mozilla Public License Version 2.0.
+//
+// You should have received copies of the GNU General Public License and the
+// Mozilla Public License along with this program. If not, see
+// <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::spectrum::SpectrumData;
-use crate::{AudioDeviceDescriptor, ProcessingState, StopReason};
+//! The messages of the CamillaDSP websocket protocol.
+//!
+//! The server deserializes [`WsCommand`] and serializes [`WsReply`], and a client does the
+//! opposite with the same types. All messages are UTF-8 text frames containing a JSON value.
+//!
+//! ## Command syntax
+//!
+//! Every command is a JSON object with a `"command"` field naming the command:
+//! ```json
+//! {"command": "GetVersion"}
+//! ```
+//!
+//! Commands with arguments carry them in additional named fields:
+//! ```json
+//! {"command": "SetUpdateInterval", "value": 500}
+//! ```
+//!
+//! ## Response format
+//!
+//! Every reply is a JSON object with a `"reply"` field naming the reply. Replies that do not
+//! return a value carry only the `"result"` status:
+//! ```json
+//! {"reply": "SetUpdateInterval", "result": "Ok"}
+//! ```
+//!
+//! Replies that return a value add a `"value"` field:
+//! ```json
+//! {"reply": "GetUpdateInterval", "result": "Ok", "value": 500}
+//! ```
+//!
+//! If a command fails the `"result"` field holds the error name instead of `"Ok"`, and there is
+//! no `"value"` field. Errors that carry a description add a top-level `"message"` field:
+//! ```json
+//! {"reply": "SetConfig", "result": "ConfigValidationError", "message": "details..."}
+//! ```
+//! Errors without a message have just the name: `{"reply": "SetFaderVolume", "result": "InvalidFaderError"}`.
+//!
+//! Unrecognised commands get a `{"reply": "Invalid", "error": "..."}` response.
+
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::Arc;
+
+// ── State and device types that replies carry ──────────────────────────────
+
+/// The state of the processing, as reported by [`WsCommand::GetState`].
+#[derive(Clone, Debug, Copy, Deserialize, Serialize, Eq, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ProcessingState {
+    /// Processing is running normally.
+    Running,
+    /// Processing is paused because the input signal is silent.
+    Paused,
+    /// Processing is off and devices are closed, waiting for a new configuration.
+    Inactive,
+    /// Opening devices and starting up processing with a new configuration.
+    Starting,
+    /// Capture device is not providing data; processing is stalled.
+    Stalled,
+}
+
+impl fmt::Display for ProcessingState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let desc = match self {
+            ProcessingState::Running => "RUNNING",
+            ProcessingState::Paused => "PAUSED",
+            ProcessingState::Inactive => "INACTIVE",
+            ProcessingState::Starting => "STARTING",
+            ProcessingState::Stalled => "STALLED",
+        };
+        write!(f, "{desc}")
+    }
+}
+
+/// Reason a processing run ended.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum StopReason {
+    /// Processing is still running; not yet stopped.
+    None,
+    /// Processing completed normally (e.g. end of file input).
+    Done,
+    /// Capture device reported an error.
+    CaptureError(String),
+    /// Playback device reported an error.
+    PlaybackError(String),
+    /// An unexpected internal error occurred.
+    UnknownError(String),
+    /// Capture device sample rate changed to the given value.
+    CaptureFormatChange(usize),
+    /// Playback device sample rate changed to the given value.
+    PlaybackFormatChange(usize),
+}
+
+/// The sample formats supported by a device at a specific sample rate.
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SamplerateCapability {
+    /// Sample rate in Hz.
+    pub samplerate: usize,
+    /// Names of the supported sample formats at this rate.
+    pub formats: Vec<String>,
+}
+
+/// The sample rates (and their formats) supported by a device at a specific channel count.
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ChannelCapability {
+    /// Number of channels.
+    pub channels: usize,
+    /// Supported sample rates for this channel count.
+    pub samplerates: Vec<SamplerateCapability>,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum CapabilityMode {
+    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
+    Unified,
+    /// WASAPI shared-mode capabilities (derived from the mix format).
+    Shared,
+    /// WASAPI exclusive-mode capabilities (probed independently).
+    Exclusive,
+}
+
+/// A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DeviceCapabilitySet {
+    /// The access mode these capabilities were probed under.
+    pub mode: CapabilityMode,
+    /// Per-channel-count capability entries.
+    pub capabilities: Vec<ChannelCapability>,
+}
+
+/// Full capability descriptor for a named audio device.
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AudioDeviceDescriptor {
+    /// Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
+    pub name: String,
+    /// Human-readable device name.
+    pub description: String,
+    /// Capability sets, one per access mode supported by the backend.
+    pub capability_sets: Vec<DeviceCapabilitySet>,
+}
+
+/// Log-spaced spectrum, as returned by [`WsCommand::GetSpectrum`].
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SpectrumData {
+    /// Center frequency of each output bin in Hz.
+    #[cfg_attr(feature = "utoipa", schema(value_type = Vec<f32>))]
+    pub frequencies: Arc<[f32]>,
+    /// Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
+    pub magnitudes: Vec<f32>,
+}
+
+// ── Commands and replies ───────────────────────────────────────────────────
 
 /// Side selector for [`WsCommand::SubscribeSignalLevels`] subscriptions.
 ///
 /// Serialised as a lowercase string: `"playback"`, `"capture"`, or `"both"`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum WsSignalLevelSide {
+pub enum WsSignalLevelSide {
     /// Playback side only.
     Playback,
     /// Capture side only.
@@ -21,9 +191,10 @@ pub(crate) enum WsSignalLevelSide {
 /// Side selector for spectrum analysis commands.
 ///
 /// Serialised as a lowercase string: `"playback"` or `"capture"`.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum SpectrumSide {
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum SpectrumSide {
     /// Playback side.
     Playback,
     /// Capture side.
@@ -35,8 +206,8 @@ pub(crate) enum SpectrumSide {
 /// The spectrum is computed from a Hann-windowed FFT.
 /// Output bins are logarithmically spaced between `min_freq` and `max_freq`.
 /// Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
-#[derive(Debug, PartialEq, Deserialize)]
-pub(crate) struct SpectrumRequest {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct SpectrumRequest {
     /// Which side to analyze: `"capture"` or `"playback"`.
     pub side: SpectrumSide,
     /// Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
@@ -52,9 +223,12 @@ pub(crate) struct SpectrumRequest {
 /// Parameters for a streaming spectrum subscription ([`WsCommand::SubscribeSpectrum`]).
 ///
 /// Same fields as [`SpectrumRequest`] plus an optional `max_rate` cap.
-#[derive(Debug, PartialEq, Deserialize)]
-pub(crate) struct SpectrumSubscription {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema, utoipa::IntoParams))]
+pub struct SpectrumSubscription {
     /// Which side to analyze: `"capture"` or `"playback"`.
+    // As a query parameter it is inlined, since a parameter's $ref is not added to the spec.
+    #[cfg_attr(feature = "utoipa", param(inline))]
     pub side: SpectrumSide,
     /// Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
     pub channel: Option<usize>,
@@ -71,22 +245,22 @@ pub(crate) struct SpectrumSubscription {
 /// Parameters for a VU-meter subscription ([`WsCommand::SubscribeVuLevels`]).
 ///
 /// Controls smoothing and rate-limiting of pushed level events.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-pub(crate) struct VuSubscription {
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub struct VuSubscription {
     /// Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
     ///
     /// If set higher than the natural update rate, events are sent at the natural rate.
-    pub(crate) max_rate: f32,
+    pub max_rate: f32,
     /// Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing.
     ///
     /// A smaller value gives a faster, more responsive meter on rising signals.
     /// For peak values, upward changes are always applied immediately regardless of this setting.
-    pub(crate) attack: f32,
+    pub attack: f32,
     /// Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing.
     ///
     /// A smaller value makes the meter drop faster; a larger value gives a slower decay.
     /// A good starting point for an analog-feel meter is around 300 ms.
-    pub(crate) release: f32,
+    pub release: f32,
 }
 
 /// All commands accepted by the websocket server.
@@ -96,9 +270,9 @@ pub(crate) struct VuSubscription {
 /// `{"command": "SetUpdateInterval", "value": 500}`.
 ///
 /// See the [module-level documentation](self) for the general message format.
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "command")]
-pub(crate) enum WsCommand {
+pub enum WsCommand {
     // ── Config management ──────────────────────────────────────────────────
     /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
     ///
@@ -481,9 +655,9 @@ pub(crate) enum WsCommand {
 /// Flattened into each [`WsReply`] variant, so its tag becomes the reply's `"result"` field
 /// (always a plain string) and any message rides alongside as a top-level `"message"` field.
 /// See the [module-level documentation](self) for the full response format.
-#[derive(Debug, Eq, PartialEq, Serialize)]
+#[derive(Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "result")]
-pub(crate) enum WsResult {
+pub enum WsResult {
     /// The command succeeded.
     Ok,
     /// CamillaDSP is shutting down and cannot handle the request.
@@ -531,79 +705,85 @@ pub(crate) enum WsResult {
 }
 
 /// Channel display labels returned by [`WsCommand::GetChannelLabels`].
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct ChannelLabels {
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ChannelLabels {
     /// Labels for playback channels. `null` if no labels are configured. Each entry is a label
     /// string, or `null` if that specific channel has no label.
-    pub(crate) playback: Option<Vec<Option<String>>>,
+    #[cfg_attr(feature = "utoipa", schema(required))]
+    pub playback: Option<Vec<Option<String>>>,
     /// Labels for capture channels. Same structure as `playback`.
-    pub(crate) capture: Option<Vec<Option<String>>>,
+    #[cfg_attr(feature = "utoipa", schema(required))]
+    pub capture: Option<Vec<Option<String>>>,
 }
 
 /// Combined RMS and peak levels for both sides, returned by the `GetSignalLevels*` commands.
 ///
 /// All values are in dB (0 dB = full level), one entry per channel.
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct AllLevels {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct AllLevels {
     /// RMS level per playback channel in dB.
-    pub(crate) playback_rms: Vec<f32>,
+    pub playback_rms: Vec<f32>,
     /// Peak level per playback channel in dB.
-    pub(crate) playback_peak: Vec<f32>,
+    pub playback_peak: Vec<f32>,
     /// RMS level per capture channel in dB.
-    pub(crate) capture_rms: Vec<f32>,
+    pub capture_rms: Vec<f32>,
     /// Peak level per capture channel in dB.
-    pub(crate) capture_peak: Vec<f32>,
+    pub capture_peak: Vec<f32>,
 }
 
 /// Peak levels for playback and capture sides, returned by [`WsCommand::GetSignalPeaksSinceStart`].
 ///
 /// All values are in dB, one entry per channel.
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct PbCapLevels {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct PbCapLevels {
     /// Peak level per playback channel in dB, measured since processing started.
-    pub(crate) playback: Vec<f32>,
+    pub playback: Vec<f32>,
     /// Peak level per capture channel in dB, measured since processing started.
-    pub(crate) capture: Vec<f32>,
+    pub capture: Vec<f32>,
 }
 
 /// Volume and mute state for one fader, as returned by [`WsCommand::GetFaders`].
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct Fader {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct Fader {
     /// Current volume in dB.
-    pub(crate) volume: f32,
+    pub volume: f32,
     /// Whether the fader is muted.
-    pub(crate) mute: bool,
+    pub mute: bool,
 }
 
 /// Payload of a [`WsReply::SignalLevelsEvent`] pushed by [`WsCommand::SubscribeSignalLevels`].
 ///
 /// All dB values are per-channel, 0 dB = full level.
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct StreamLevels {
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct StreamLevels {
     /// Which side these levels belong to.
-    pub(crate) side: WsSignalLevelSide,
-    pub(crate) rms: Vec<f32>,
-    pub(crate) peak: Vec<f32>,
+    pub side: WsSignalLevelSide,
+    pub rms: Vec<f32>,
+    pub peak: Vec<f32>,
 }
 
 /// Payload of a [`WsReply::VuLevelsEvent`] pushed by [`WsCommand::SubscribeVuLevels`].
 ///
 /// All values are smoothed dB levels, per channel.
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct VuLevels {
-    pub(crate) playback_rms: Vec<f32>,
-    pub(crate) playback_peak: Vec<f32>,
-    pub(crate) capture_rms: Vec<f32>,
-    pub(crate) capture_peak: Vec<f32>,
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct VuLevels {
+    pub playback_rms: Vec<f32>,
+    pub playback_peak: Vec<f32>,
+    pub capture_rms: Vec<f32>,
+    pub capture_peak: Vec<f32>,
 }
 
 /// Payload of a [`WsReply::StateEvent`] pushed by [`WsCommand::SubscribeState`].
-#[derive(Debug, PartialEq, Serialize)]
-pub(crate) struct StateUpdate {
-    pub(crate) state: ProcessingState,
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct StateUpdate {
+    pub state: ProcessingState,
     /// Present only when `state` is `Inactive`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) stop_reason: Option<StopReason>,
+    pub stop_reason: Option<StopReason>,
 }
 
 /// All possible reply messages sent by the websocket server.
@@ -611,9 +791,9 @@ pub(crate) struct StateUpdate {
 /// Each variant mirrors the corresponding [`WsCommand`]. Every reply is a JSON object with a
 /// `"reply"` field holding the reply name, e.g. `{"reply": "GetVersion", "result": "Ok",
 /// "value": "2.0.0"}`.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "reply")]
-pub(crate) enum WsReply {
+pub enum WsReply {
     SetConfigFilePath {
         #[serde(flatten)]
         result: WsResult,
@@ -1072,4 +1252,156 @@ pub(crate) enum WsReply {
     },
     /// Sent when the server cannot parse or dispatch the incoming command.
     Invalid { error: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip_command(command: WsCommand) {
+        let json = serde_json::to_string(&command).unwrap();
+        let parsed: WsCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, command, "{json}");
+    }
+
+    fn round_trip_reply(reply: WsReply) {
+        let json = serde_json::to_string(&reply).unwrap();
+        let parsed: WsReply = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, reply, "{json}");
+    }
+
+    #[test]
+    fn commands_round_trip() {
+        round_trip_command(WsCommand::GetVersion);
+        round_trip_command(WsCommand::SetUpdateInterval { value: 500 });
+        round_trip_command(WsCommand::SetFaderVolume {
+            fader: 2,
+            value: -12.5,
+        });
+        round_trip_command(WsCommand::SetConfigValue {
+            pointer: "/devices/samplerate".to_string(),
+            value: serde_json::json!(48000),
+        });
+        round_trip_command(WsCommand::SubscribeSignalLevels {
+            value: WsSignalLevelSide::Both,
+        });
+        round_trip_command(WsCommand::SubscribeVuLevels {
+            value: VuSubscription {
+                max_rate: 10.0,
+                attack: 10.0,
+                release: 300.0,
+            },
+        });
+        round_trip_command(WsCommand::GetSpectrum {
+            value: SpectrumRequest {
+                side: SpectrumSide::Capture,
+                channel: None,
+                min_freq: 20.0,
+                max_freq: 20000.0,
+                n_bins: 100,
+            },
+        });
+        round_trip_command(WsCommand::GetCaptureDeviceCapabilities {
+            backend: "Alsa".to_string(),
+            device: "hw:0".to_string(),
+        });
+    }
+
+    #[test]
+    fn replies_round_trip() {
+        round_trip_reply(WsReply::SetConfig {
+            result: WsResult::Ok,
+        });
+        round_trip_reply(WsReply::SetConfig {
+            result: WsResult::ConfigValidationError {
+                message: "filters.lp.parameters.freq: Frequency must be > 0".to_string(),
+            },
+        });
+        round_trip_reply(WsReply::GetConfigFilePath {
+            result: WsResult::Ok,
+            value: None,
+        });
+        round_trip_reply(WsReply::GetState {
+            result: WsResult::Ok,
+            value: ProcessingState::Running,
+        });
+        round_trip_reply(WsReply::StateEvent {
+            result: WsResult::Ok,
+            value: StateUpdate {
+                state: ProcessingState::Inactive,
+                stop_reason: Some(StopReason::CaptureError("gone".to_string())),
+            },
+        });
+        round_trip_reply(WsReply::StateEvent {
+            result: WsResult::Ok,
+            value: StateUpdate {
+                state: ProcessingState::Running,
+                stop_reason: None,
+            },
+        });
+        round_trip_reply(WsReply::GetFaders {
+            result: WsResult::Ok,
+            value: vec![Fader {
+                volume: -10.0,
+                mute: false,
+            }],
+        });
+        round_trip_reply(WsReply::GetSupportedDeviceTypes {
+            result: WsResult::Ok,
+            value: (vec!["File".to_string()], vec!["RawFile".to_string()]),
+        });
+        round_trip_reply(WsReply::GetCaptureDeviceCapabilities {
+            result: WsResult::Ok,
+            value: AudioDeviceDescriptor {
+                name: "hw:0".to_string(),
+                description: "Card".to_string(),
+                capability_sets: vec![DeviceCapabilitySet {
+                    mode: CapabilityMode::Unified,
+                    capabilities: vec![ChannelCapability {
+                        channels: 2,
+                        samplerates: vec![SamplerateCapability {
+                            samplerate: 48000,
+                            formats: vec!["S32_LE".to_string()],
+                        }],
+                    }],
+                }],
+            },
+        });
+        round_trip_reply(WsReply::GetSpectrum {
+            result: WsResult::Ok,
+            value: Some(SpectrumData {
+                frequencies: Arc::from(vec![100.0, 1000.0]),
+                magnitudes: vec![-20.0, -30.0],
+            }),
+        });
+        round_trip_reply(WsReply::SpectrumEvent {
+            result: WsResult::ProcessingStopped,
+            value: None,
+        });
+        round_trip_reply(WsReply::Invalid {
+            error: "bad".to_string(),
+        });
+    }
+
+    /// Deriving `Deserialize` must not change what goes over the wire.
+    #[test]
+    fn reply_format_is_unchanged() {
+        let reply = WsReply::SetConfig {
+            result: WsResult::ConfigReadError {
+                message: "x".to_string(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&reply).unwrap(),
+            r#"{"reply":"SetConfig","result":"ConfigReadError","message":"x"}"#
+        );
+        let reply = WsReply::GetUpdateInterval {
+            result: WsResult::Ok,
+            value: 500,
+        };
+        assert_eq!(
+            serde_json::to_string(&reply).unwrap(),
+            r#"{"reply":"GetUpdateInterval","result":"Ok","value":500}"#
+        );
+    }
 }
