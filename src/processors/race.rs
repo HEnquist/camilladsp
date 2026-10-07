@@ -27,8 +27,8 @@ use crate::filters::basicfilters::Delay;
 use crate::filters::basicfilters::Gain;
 use crate::processors::Processor;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::processors::race::validate_race;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::race::validate_race;
 
 //#[derive(Debug)]
 pub struct RACE {

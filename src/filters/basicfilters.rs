@@ -31,8 +31,8 @@ use crate::fader::{FaderGain, FaderLevels};
 
 use crate::utils::decibels::{db_to_linear, gain_from_value};
 use crate::utils::time::delay_to_samples;
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::basicfilters::{
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::basicfilters::{
     validate_delay_config, validate_gain_config, validate_volume_config,
 };
 

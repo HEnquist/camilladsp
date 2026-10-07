@@ -23,4 +23,4 @@ pub mod resampling;
 pub mod ringbuffer;
 pub mod rt_priority;
 pub mod stash;
-pub use camilladsp_config::utils::{time, wavtools};
+pub use camilladsp_schema::utils::{time, wavtools};

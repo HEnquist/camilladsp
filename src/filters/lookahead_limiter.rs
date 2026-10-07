@@ -22,8 +22,8 @@ use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::lookahead_limiter::{validate_config, validate_times};
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::lookahead_limiter::{validate_config, validate_times};
 use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;

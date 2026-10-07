@@ -37,8 +37,8 @@ use crate::config;
 
 use crate::CamillaFloat;
 
-/// Coefficient file reading and parameter validation live in `camilladsp-config`.
-pub use camilladsp_config::filters::{read_coeff_file, read_wav, validate_filter};
+/// Coefficient file reading and parameter validation live in `camilladsp-schema`.
+pub use camilladsp_schema::filters::{read_coeff_file, read_wav, validate_filter};
 
 /// Trait implemented by all single-channel audio filters.
 pub trait Filter {

@@ -31,8 +31,8 @@ use crate::ToCamillaFloat;
 use crate::config;
 use crate::utils::decibels::db_to_linear;
 
-/// Collecting the fader settings from a config, and checking them, lives in `camilladsp-config`.
-pub use camilladsp_config::fader::{
+/// Collecting the fader settings from a config, and checking them, lives in `camilladsp-schema`.
+pub use camilladsp_schema::fader::{
     FaderSettings, UNUSED_AUX_FADER, fader_settings, validate_fader_settings,
 };
 

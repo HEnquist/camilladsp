@@ -23,8 +23,8 @@ use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::processors::compressor::validate_compressor;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::compressor::validate_compressor;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {

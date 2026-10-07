@@ -21,8 +21,8 @@ use crate::config;
 use crate::utils::decibels::gain_from_value;
 use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 
-/// Mixer validation lives in `camilladsp-config`.
-pub use camilladsp_config::mixer::{used_input_channels, validate_mixer};
+/// Mixer validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::mixer::{used_input_channels, validate_mixer};
 
 /// A runtime mixer that combines and routes channels with per-source gain.
 #[derive(Clone)]

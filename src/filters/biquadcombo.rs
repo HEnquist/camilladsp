@@ -23,8 +23,8 @@ use crate::filters::biquad;
 use crate::CamillaFloat;
 use crate::config::finite;
 
-/// The NPointPeq expansion and parameter validation live in `camilladsp-config`.
-pub use camilladsp_config::filters::biquadcombo::{npeq_sections, validate_config};
+/// The NPointPeq expansion and parameter validation live in `camilladsp-schema`.
+pub use camilladsp_schema::filters::biquadcombo::{npeq_sections, validate_config};
 
 /// A biquad combo is a cascade, so it has no runtime form of its own. It is
 /// expanded into stages at build time and compiled into the cascade of the

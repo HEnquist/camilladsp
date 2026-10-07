@@ -17,7 +17,7 @@ use super::{LocalData, SharedData};
 use crate::ProcessingState;
 use crate::Res;
 use crate::utils::decibels::linear_to_db_inplace;
-use camilladsp_config::protocol::{
+use camilladsp_schema::protocol::{
     StateUpdate, StreamLevels, VuSubscription, WsCommand, WsReply, WsResult, WsSignalLevelSide,
 };
 

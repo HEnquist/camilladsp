@@ -162,7 +162,7 @@ fn get_hann_window(n: usize) -> Arc<[f32]> {
 
 /// Log-spaced spectrum result returned by [`compute_spectrum`] and related functions.
 /// Defined with the websocket protocol, which carries it.
-pub use camilladsp_config::protocol::SpectrumData;
+pub use camilladsp_schema::protocol::SpectrumData;
 
 type FreqCacheMap = Mutex<HashMap<(u64, u64, usize), Arc<[f32]>>>;
 static FREQ_CACHE: LazyLock<FreqCacheMap> = LazyLock::new(|| Mutex::new(HashMap::new()));

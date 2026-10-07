@@ -22,8 +22,8 @@ use crate::filters::basicfilters::Delay;
 use crate::filters::lookahead_limiter::{LookaheadGain, limiter_parameters};
 use crate::processors::Processor;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::processors::lookahead_limiter::validate_lookahead_limiter;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::lookahead_limiter::validate_lookahead_limiter;
 
 /// Multichannel lookahead limiter.
 ///

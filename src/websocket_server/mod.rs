@@ -17,7 +17,7 @@
 //! Websocket server for controlling CamillaDSP.
 //!
 //! Connect to the server at `ws://127.0.0.1:<port>` (or a custom address set with `-a`).
-//! The messages and their format are in the `protocol` module of the `camilladsp-config` crate.
+//! The messages and their format are in the `protocol` module of the `camilladsp-schema` crate.
 //!
 //! ## Subscription commands
 //!
@@ -73,7 +73,7 @@ use crate::{
     list_supported_devices,
 };
 use crate::{ControllerMessage, config};
-use camilladsp_config::protocol::{
+use camilladsp_schema::protocol::{
     AllLevels, ChannelLabels, Fader, PbCapLevels, SpectrumRequest, SpectrumSide,
     SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
     WsSignalLevelSide,
@@ -2041,7 +2041,7 @@ mod tests {
     use super::VuSubscriptionState;
     use super::utils::{parse_command, validate_vu_subscription};
     use crate::signal_monitor::SignalLevelSide as MonitorSignalLevelSide;
-    use camilladsp_config::protocol::{VuSubscription, WsCommand, WsResult, WsSignalLevelSide};
+    use camilladsp_schema::protocol::{VuSubscription, WsCommand, WsResult, WsSignalLevelSide};
     use std::time::{Duration, Instant};
     use tungstenite::Message;
 
@@ -2194,7 +2194,7 @@ mod tests {
 
     #[test]
     fn adjust_volume_serde_format() {
-        use camilladsp_config::protocol::WsCommand;
+        use camilladsp_schema::protocol::WsCommand;
         let plain: WsCommand =
             serde_json::from_str("{\"command\": \"AdjustVolume\", \"value\": -3.0}").unwrap();
         assert_eq!(

@@ -22,8 +22,8 @@ use crate::filters::Filter;
 use crate::CamillaFloat;
 use crate::ToCamillaFloat;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::diffeq::validate_config;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::diffeq::validate_config;
 
 #[derive(Clone, Debug)]
 pub struct DiffEq {

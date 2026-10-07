@@ -28,8 +28,8 @@ use crate::CamillaFloat;
 use crate::ToCamillaFloat;
 use crate::ToF64;
 
-/// Coefficient design and parameter validation live in `camilladsp-config`.
-pub use camilladsp_config::filters::biquad::{BiquadCoefficients, validate_config};
+/// Coefficient design and parameter validation live in `camilladsp-schema`.
+pub use camilladsp_schema::filters::biquad::{BiquadCoefficients, validate_config};
 
 /// Coefficients converted to the processing precision.
 ///

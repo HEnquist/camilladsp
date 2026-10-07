@@ -25,8 +25,8 @@ use crate::CamillaFloat;
 use crate::ToF32;
 use crate::config::finite;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::loudness::validate_config;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::loudness::validate_config;
 
 pub struct Loudness {
     pub name: String,

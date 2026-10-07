@@ -24,8 +24,8 @@ use ringbuf::traits::*;
 
 use crate::{CamillaFloat, ToCamillaFloat, config, filters::Filter};
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::dither::validate_config;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::dither::validate_config;
 
 // lifetime `'a` to guarantee that `ditherer` and `shaper`
 // will live as long as this `Dither`.

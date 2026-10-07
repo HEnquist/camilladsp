@@ -26,8 +26,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use crate::CamillaFloat;
 use crate::Res;
 
-/// Reading impulse responses and parameter validation live in `camilladsp-config`.
-pub use camilladsp_config::filters::fftconv::{ImpulseCache, coeffs_from_config, validate_config};
+/// Reading impulse responses and parameter validation live in `camilladsp-schema`.
+pub use camilladsp_schema::filters::fftconv::{ImpulseCache, coeffs_from_config, validate_config};
 
 #[cfg(target_arch = "aarch64")]
 #[path = "fftconv_neon.rs"]

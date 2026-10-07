@@ -78,11 +78,11 @@ macro_rules! xerror { ($($x:tt)*) => (
 
 // The sample precision, the conversions into and out of it, and the result type
 // are defined next to the config types, which need them for reading coefficients.
-pub use camilladsp_config::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
+pub use camilladsp_schema::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
 
 // The types that websocket replies carry are part of the protocol, which is
-// defined in the config crate so that clients can use it too.
-pub use camilladsp_config::protocol::{
+// defined in camilladsp-schema so that clients can use it too.
+pub use camilladsp_schema::protocol::{
     AudioDeviceDescriptor, CapabilityMode, ChannelCapability, DeviceCapabilitySet, ProcessingState,
     SamplerateCapability, StopReason,
 };
@@ -361,7 +361,7 @@ pub struct ProcessingParameters {
 
 impl ProcessingParameters {
     /// Number of independent volume faders.
-    pub const NUM_FADERS: usize = camilladsp_config::fader::NUM_FADERS;
+    pub const NUM_FADERS: usize = camilladsp_schema::fader::NUM_FADERS;
 
     /// Default volume level in dB (0 dB = unity gain).
     pub const DEFAULT_VOLUME: f32 = 0.0;

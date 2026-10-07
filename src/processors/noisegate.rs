@@ -22,8 +22,8 @@ use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::processors::noisegate::validate_noise_gate;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::noisegate::validate_noise_gate;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {

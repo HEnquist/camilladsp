@@ -1,9 +1,9 @@
 [package]
-name = "camilladsp-config"
+name = "camilladsp-schema"
 version = "5.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
-description = "Configuration types, validation and coefficient file reading for CamillaDSP"
+description = "Config and websocket protocol types, config validation and coefficient file reading for CamillaDSP"
 rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
 repository = "https://github.com/HEnquist/camilladsp"

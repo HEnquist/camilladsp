@@ -14,8 +14,8 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-//! The config types, loading and validation live in the `camilladsp-config` crate.
-pub use camilladsp_config::config::*;
+//! The config types, loading and validation live in the `camilladsp-schema` crate.
+pub use camilladsp_schema::config::*;
 
 /// Shorthand for [`FiniteF64::expect_finite`], for building config values in tests and in the
 /// filter builders that generate sections from constants.

@@ -20,8 +20,8 @@ use crate::config;
 use crate::filters::Filter;
 use crate::utils::decibels::db_to_linear;
 
-/// Parameter validation lives in `camilladsp-config`.
-pub use camilladsp_config::filters::clipper::validate_config;
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::clipper::validate_config;
 
 const CUBEFACTOR: CamillaFloat = 1.0 / 6.75; // = 1 / (2 * 1.5^3)
 
