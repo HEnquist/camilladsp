@@ -6,8 +6,10 @@ use crate::config::MonitorMode;
 
 /// Reduce selected monitor entries into an existing scratch buffer.
 ///
-/// `channels` must be nonempty, indices valid, and selected waveforms must have
-/// the configured chunk length. These are the existing processor preconditions.
+/// `channels` must be nonempty and indices valid. Nonempty waveforms must have
+/// the configured chunk length. Sum also requires its first waveform to be full
+/// length. Rms treats empty waveforms from capture masking as silence, retaining
+/// their entries in the normalization count.
 /// Entries are neither sorted nor deduplicated. Sum deliberately stays signed:
 /// both level estimators and LookaheadGain already rectify their input.
 ///
@@ -51,7 +53,11 @@ pub(crate) fn aggregate_monitor_channels(
                 // them. A second channel pass needs no extra scratch allocation.
                 let mut scale: CamillaFloat = 0.0;
                 for &ch in channels {
-                    let magnitude = input.waveforms[ch][frame].abs();
+                    let waveform = &input.waveforms[ch];
+                    if waveform.is_empty() {
+                        continue;
+                    }
+                    let magnitude = waveform[frame].abs();
                     if magnitude.is_nan() {
                         scale = CamillaFloat::NAN;
                         break;
@@ -64,7 +70,11 @@ pub(crate) fn aggregate_monitor_channels(
                 }
                 let mut sum: CamillaFloat = 0.0;
                 for &ch in channels {
-                    let normalized = input.waveforms[ch][frame] / scale;
+                    let waveform = &input.waveforms[ch];
+                    if waveform.is_empty() {
+                        continue;
+                    }
+                    let normalized = waveform[frame] / scale;
                     sum += normalized * normalized;
                 }
                 // The exact mean is <= 1. Bound rounding error before the
