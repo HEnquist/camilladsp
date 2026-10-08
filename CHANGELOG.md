@@ -1,3 +1,60 @@
+# 5.0.0
+This is the short version. See [CHANGELOG_5.0_details.md](CHANGELOG_5.0_details.md) for the full
+list of changes, with background and measurements.
+
+New features:
+- Add lookahead limiter, as a filter and as a multichannel processor.
+- Add `Slip` resampler for cheap rate adjust between clocks at the same nominal rate.
+- Websocket commands for streaming signal levels and state change events.
+- Websocket commands for reading spectrum data, single read and streaming.
+- Websocket command for getting device capabilities.
+- RF64 support for reading and writing wav files larger than 4 GB.
+- Adjustable corner frequencies and Q for the `Loudness` shelves.
+- ASIO: capture and playback can use two different devices.
+- PipeWire: `loopback` option for capturing from the output of a sink.
+- PipeWire: request the config sample rate as the graph rate, for multi-rate DACs.
+
+Changes:
+- Config errors list every problem found, each with its location in the config.
+- Several times faster biquad filtering.
+- Faster convolution setup and processing, with lower memory use.
+- Applying a config with large FIR filters no longer stalls the audio.
+- ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
+  The separate ASIO download is gone.
+- ASIO: the ASIO4ALL driver is refused, use the Wasapi backend instead.
+- Pre-built Linux binaries need glibc 2.34 or newer (Raspberry Pi OS Bookworm or similar).
+- No more pre-built armv6 binary for Raspberry Pi 1 and Zero.
+- Log module names start with `camilladsp::` instead of `camillalib::`.
+
+Bugfixes:
+- PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.
+- File playback writes correct wav header sizes.
+- Various smaller fixes, see the [detailed changelog](CHANGELOG_5.0_details.md#bugfixes).
+
+Config changes (breaking):
+- `FivePointPeq` is replaced by `NPointPeq`, which takes a list of any number of `bands`.
+- The `Limiter` filter is renamed to `Clipper`.
+- `Volume` filters that use the same fader must have the same `ramp_time_ms` and `limit`.
+- Time values must state their unit, either in a required unit field (`delay_unit`,
+  `attack_unit`, `release_unit`) or in the parameter name (`adjust_interval_s`,
+  `silence_timeout_s`, `ramp_time_ms` and so on). See the
+  [detailed changelog](CHANGELOG_5.0_details.md#config-changes-breaking) for the full list.
+
+Websocket protocol changes (breaking):
+- Messages use a uniform tagged object shape. For example `{"SetUpdateInterval": 500}` becomes
+  `{"command": "SetUpdateInterval", "value": 500}`, and replies carry the name in a `reply` field.
+  See the details for the full description. Users of pycamilladsp won't notice this,
+  as long as they update to pycamilladsp 5.0.
+
+Build changes (breaking):
+- The `websocket` feature is gone, the websocket server is always included.
+- The `asio-backend` feature is gone, ASIO is always included on Windows.
+- The `32bit` feature is replaced by `RUSTFLAGS="--cfg camillafloat_f32"`.
+
+Removed:
+- Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or
+  PipeWire's Pulse/JACK compatibility layers. PipeWire can also bridge Bluetooth A2DP directly.
+
 # 4.1.3
 Bugfixes:
 - Increased capture ringbuffer sizes in CoreAudio, WASAPI, ASIO, and threaded ALSA
@@ -16,6 +73,7 @@ New features:
 - Experimental optional multi-threaded Alsa backend.
 - Added SIMD acceleration for FFT convolution,
   using NEON on aarch64 and AVX/FMA on amd64.
+
 Bugfixes:
 - Linux: fix stuttering on PipeWire playback.
 
@@ -32,6 +90,7 @@ New features:
 - Support polling mode for WASAPI.
 - Websocket commands for reading and writing partial configs.
 - Websocket command for reading resampler load.
+
 Changes:
 - New sample format names on all backends.
 - Removed sample format selection for Pulse backend.
@@ -40,6 +99,7 @@ Changes:
 - Change mixer config rules to not allow duplicated channels.
 - Improved accuracy of subsample delay.
 - Windows: Optional automatic sample format selection.
+
 Bugfixes:
 - Windows: Fix Wasapi exclusive mode for padded 24-bit samples.
 - Windows & macOS: Fix audio data loss in playback when using
@@ -67,10 +127,12 @@ New features:
 - Add noise gate.
 - Add optional channel labels for capture devices and mixers.
 - Optional log file rotation.
+
 Changes:
 - Remove the optional use of FFTW instead of RustFFT.
 - Rename `File` capture device to `RawFile`.
 - Filter pipeline steps take a list of channels to filter instead of a single one.
+
 Bugfixes:
 - Windows: Fix compatibility issues for some WASAPI devices.
 - MacOS: Support devices appearing as separate capture and playback devices.

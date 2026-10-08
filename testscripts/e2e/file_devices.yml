@@ -1,0 +1,29 @@
+---
+# Raw file in, raw file out, for the tests about how the devices are paced and whether
+# the audio survives the trip. The dummy devices are paced and the file devices are not,
+# so swapping one block for the other is what gives all four combinations of a
+# free-running and a paced end. See test_file_devices.py for the blocks that go in.
+#
+# The two filenames are placeholders, replaced by the tests with paths under tmp_path.
+# The dummy blocks need a build with the dummy-backend feature; the file blocks do not.
+#
+# It is also the base for the software backend suite, which runs against a stock build
+# and swaps in the wav, stdin, stdout and generator blocks from swdevices.py. That suite
+# needs a config per device type, sample format and byte option, so its blocks are built
+# there rather than checked in as a file each.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  queuelimit: 4
+  capture:
+    type: RawFile
+    channels: 2
+    filename: CAPTURE_FILE
+    format: F64_LE
+  playback:
+    type: File
+    channels: 2
+    filename: PLAYBACK_FILE
+    format: F64_LE
+
+pipeline: []

@@ -1,0 +1,150 @@
+# Maps WsCommand variants to named groups for the generated websocket documentation.
+# Order here controls the order in the output.
+# Run scripts/gen_ws_docs.py to regenerate websocket_reference.md.
+
+groups:
+  - name: General
+    description: >
+      Basic commands for querying the CamillaDSP version and the list of supported
+      device types, and for stopping or exiting the process.
+    commands:
+      - GetVersion
+      - GetSupportedDeviceTypes
+      - Stop
+      - Exit
+
+  - name: Websocket server settings
+    description: >
+      Controls the polling interval used for background status sampling.
+      The update interval determines how often the capture rate and signal range
+      snapshots are refreshed internally.
+    commands:
+      - GetUpdateInterval
+      - SetUpdateInterval
+
+  - name: Processing status
+    description: >
+      Commands for monitoring the running pipeline: processing state, capture rate,
+      signal range, async-resampler adjustment, playback buffer level, clipped
+      samples, and CPU load. Also covers the optional state file and
+      a push subscription for state-change events.
+    commands:
+      - GetState
+      - GetStopReason
+      - SubscribeState
+      - StopSubscription
+      - GetCaptureRate
+      - GetSignalRange
+      - GetRateAdjust
+      - GetBufferLevel
+      - GetClippedSamples
+      - ResetClippedSamples
+      - GetProcessingLoad
+      - GetResamplerLoad
+      - GetStateFilePath
+      - GetStateFileUpdated
+
+  - name: Signal levels
+    description: >
+      Read RMS and peak levels for capture and playback channels.
+      Levels are available as an instantaneous snapshot, averaged over a time window,
+      accumulated since the last call, or pushed continuously via a subscription.
+      Also includes peak-since-start tracking, per-channel display labels,
+      and a smoothed VU-meter subscription.
+    commands:
+      - GetCaptureSignalRms
+      - GetCaptureSignalRmsSince
+      - GetCaptureSignalRmsSinceLast
+      - GetCaptureSignalPeak
+      - GetCaptureSignalPeakSince
+      - GetCaptureSignalPeakSinceLast
+      - GetPlaybackSignalRms
+      - GetPlaybackSignalRmsSince
+      - GetPlaybackSignalRmsSinceLast
+      - GetPlaybackSignalPeak
+      - GetPlaybackSignalPeakSince
+      - GetPlaybackSignalPeakSinceLast
+      - GetSignalLevels
+      - GetSignalLevelsSince
+      - GetSignalLevelsSinceLast
+      - SubscribeSignalLevels
+      - SubscribeVuLevels
+      - GetSignalPeaksSinceStart
+      - ResetSignalPeaksSinceStart
+      - GetChannelLabels
+
+  - name: Spectrum analysis
+    description: >
+      Compute an FFT-based frequency spectrum from the audio passing through
+      the pipeline. Available as a one-shot request or a continuous push
+      subscription.
+    commands:
+      - GetSpectrum
+      - SubscribeSpectrum
+
+  - name: Volume control
+    description: >
+      Read and adjust the volume and mute state of the faders.
+      The Main fader (index 0) maps to fader index 0; Aux1–Aux4 map to indices 1–4.
+      Volume adjustments can optionally specify a clamping range so that the
+      result stays within caller-defined limits.
+    commands:
+      - GetVolume
+      - SetVolume
+      - AdjustVolume
+      - GetMute
+      - SetMute
+      - ToggleMute
+      - GetFaders
+      - GetFaderVolume
+      - SetFaderVolume
+      - SetFaderExternalVolume
+      - AdjustFaderVolume
+      - GetFaderMute
+      - SetFaderMute
+      - ToggleFaderMute
+
+  - name: Config management
+    description: >
+      Read and modify the active configuration.
+      Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
+      effect immediately. Changes via `SetConfigFilePath` require a subsequent
+      `Reload` to be applied.
+    commands:
+      - GetConfig
+      - GetConfigJson
+      - GetConfigTitle
+      - GetConfigDescription
+      - GetConfigFilePath
+      - GetPreviousConfig
+      - SetConfigFilePath
+      - SetConfig
+      - SetConfigJson
+      - PatchConfig
+      - GetConfigValue
+      - SetConfigValue
+      - Reload
+
+  - name: Config reading and checking
+    description: >
+      Parse and validate a configuration string or file without affecting the
+      running pipeline. Useful for checking a config before applying it.
+      The `Validate` variants perform more thorough cross-field checks than
+      the `Read` variants.
+    commands:
+      - ReadConfig
+      - ReadConfigJson
+      - ReadConfigFile
+      - ValidateConfig
+      - ValidateConfigJson
+
+  - name: Audio device listing
+    description: >
+      Enumerate available audio devices for a given backend and query their
+      supported sample rates, formats, and channel counts.
+      See the section below for the response format.
+    commands:
+      - GetAvailableCaptureDevices
+      - GetAvailablePlaybackDevices
+      - GetCaptureDeviceCapabilities
+      - GetPlaybackDeviceCapabilities

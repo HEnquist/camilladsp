@@ -14,53 +14,34 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-#[cfg(target_os = "linux")]
-extern crate alsa;
-#[cfg(target_os = "linux")]
-extern crate alsa_sys;
-extern crate clap;
-#[cfg(target_os = "macos")]
-extern crate coreaudio;
-#[cfg(feature = "cpal-backend")]
-extern crate cpal;
-extern crate crossbeam_channel;
-#[cfg(target_os = "macos")]
-extern crate dispatch;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_binding as pulse;
-#[cfg(feature = "pulse-backend")]
-extern crate libpulse_simple_binding as psimple;
-#[cfg(feature = "secure-websocket")]
-extern crate native_tls;
-#[cfg(target_os = "linux")]
-extern crate nix;
-extern crate num_complex;
-extern crate num_traits;
-#[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
-extern crate pipewire;
-extern crate rand;
-extern crate rand_distr;
-extern crate realfft;
-extern crate rubato;
-extern crate serde;
-extern crate serde_with;
-extern crate signal_hook;
-#[cfg(feature = "websocket")]
-extern crate tungstenite;
-//#[cfg(target_os = "windows")]
-//extern crate winapi;
+#![doc = include_str!("../README.crates.md")]
+//!
+//! # API cross-references
+//!
+//! Key modules: [`filters`], [`mixer`], [`processors`], [`pipeline`],
+//! [`config`], [`engine`], [`processing`].
+//!
+//! Key types in this crate root: [`StatusMessage`], [`CommandMessage`],
+//! [`CaptureStatus`], [`PlaybackStatus`], [`CamillaFloat`].
+
+// Full-precision `f64` literals, correct for the default build, hold more digits
+// than an `f32` build can represent. Silence that only in the f32 build.
+// Conversions go through `ToCamillaFloat`, `ToF32` and `ToF64` rather than `as`
+// casts, so
+// no cast lint needs suppressing.
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
 
 #[macro_use]
 extern crate log;
 
 use parking_lot::{Mutex, RwLock};
-use serde::Serialize;
-use std::error;
-use std::fmt;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
+
+/// Global flag set to `true` when a graceful shutdown has been requested (e.g. by SIGTERM).
+pub static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 // Logging macros to give extra logs
 // when the "debug" feature is enabled.
@@ -95,118 +76,177 @@ macro_rules! xerror { ($($x:tt)*) => (
     }
 ) }
 
-// Sample format
-#[cfg(feature = "32bit")]
-pub type PrcFmt = f32;
-#[cfg(not(feature = "32bit"))]
-pub type PrcFmt = f64;
+// The sample precision, the conversions into and out of it, and the result type
+// are defined next to the config types, which need them for reading coefficients.
+pub use camilladsp_schema::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
 
-pub trait NewValue<T> {
-    fn coerce(val: T) -> Self;
-}
+// The types that websocket replies carry are part of the protocol, which is
+// defined in camilladsp-schema so that clients can use it too.
+pub use camilladsp_schema::protocol::{
+    AudioDeviceDescriptor, CapabilityMode, ChannelCapability, DeviceCapabilitySet, ProcessingState,
+    SamplerateCapability, StopReason,
+};
 
-impl<PrcFmt> NewValue<PrcFmt> for PrcFmt {
-    fn coerce(val: PrcFmt) -> PrcFmt {
-        val
-    }
-}
-
-pub type Res<T> = Result<T, Box<dyn error::Error>>;
-
+/// ALSA audio backend (Linux only).
 #[cfg(target_os = "linux")]
 pub mod alsa_backend;
-#[cfg(all(target_os = "windows", feature = "asio-backend"))]
+/// ASIO audio backend (Windows only).
+#[cfg(target_os = "windows")]
 pub mod asio_backend;
+/// Audio chunk types and per-chunk statistics.
 pub mod audiochunk;
+/// Audio device abstraction and cross-backend message types.
 pub mod audiodevice;
+/// Configuration parsing, validation, and type definitions.
 pub mod config;
+/// CoreAudio backend (macOS only).
 #[cfg(target_os = "macos")]
 pub mod coreaudio_backend;
-#[cfg(feature = "cpal-backend")]
-pub mod cpal_backend;
+
+#[cfg(feature = "dummy-backend")]
+pub mod dummy_backend;
+/// Top-level engine: device startup, supervisor loop, and restart logic.
+pub mod engine;
+/// Structural wrapper for pipeline signals and channels.
+pub mod engine_pipeline;
+/// The thread that watches for process signals.
+pub mod engine_process_signals;
+/// Fader ramps, advanced once per chunk and read by the Volume and Loudness filters.
+pub mod fader;
+/// File, stdin/stdout, and WAV audio backends.
 pub mod file_backend;
+/// Audio filter implementations and the [`filters::Filter`] trait.
 pub mod filters;
+/// Signal-generator capture device.
 pub mod generatordevice;
+/// Mixer: channel routing and gain with the [`mixer::Mixer`] runtime type.
 pub mod mixer;
+/// Processing pipeline: ordered mixer, filter, and processor steps.
 pub mod pipeline;
+/// PipeWire audio backend (Linux only, requires `pipewire-backend` feature).
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 pub mod pipewire_backend;
+/// Processing thread: pipeline loop and config-update handling.
 pub mod processing;
+/// Audio processor implementations and the [`processors::Processor`] trait.
 pub mod processors;
-#[cfg(all(target_os = "linux", feature = "pulse-backend"))]
-pub mod pulse_backend;
-#[cfg(feature = "websocket")]
-pub mod socketserver;
+/// Signal-level event notifications for WebSocket subscribers.
+pub mod signal_monitor;
+/// FFT-based spectrum analysis and the audio ring buffer.
+pub mod spectrum;
+/// Persistent state file (volume, mute, config path).
 pub mod statefile;
+/// Shared utilities: resampling, conversions, timing, dB helpers, and buffer stash.
 pub mod utils;
+/// WASAPI audio backend (Windows only).
 #[cfg(target_os = "windows")]
 pub mod wasapi_backend;
+/// WebSocket control server.
+pub mod websocket_server;
 
+/// Messages sent from audio device threads to the processing supervisor.
 pub enum StatusMessage {
+    /// Playback device is open and ready.
     PlaybackReady,
+    /// Capture device is open and ready.
     CaptureReady,
+    /// Playback device encountered an unrecoverable error.
     PlaybackError(String),
+    /// Capture device encountered an unrecoverable error.
     CaptureError(String),
+    /// Playback device detected a sample-rate change to the given value.
     PlaybackFormatChange(usize),
+    /// Capture device detected a sample-rate change to the given value.
     CaptureFormatChange(usize),
+    /// Playback device thread has finished normally.
     PlaybackDone,
+    /// Capture device thread has finished normally.
     CaptureDone,
+    /// Request to change the resampling speed ratio (async resampling).
     SetSpeed(f64),
+    /// Request to set the master volume (dB).
     SetVolume(f32),
+    /// Request to set the master mute state.
     SetMute(bool),
 }
 
+/// Commands sent from the supervisor to an audio device thread.
 pub enum CommandMessage {
+    /// Change the resampling speed ratio (async resampling only).
     SetSpeed { speed: f64 },
+    /// Tell the device thread to stop gracefully.
     Exit,
 }
 
+/// Outcome returned by the engine after the processing loop ends.
 #[derive(Debug)]
 pub enum ExitState {
+    /// The engine should restart with a (potentially new) configuration.
     Restart,
+    /// The engine should shut down completely.
     Exit,
 }
 
+/// Messages sent to the engine controller (WebSocket server or external caller).
 pub enum ControllerMessage {
+    /// A new configuration has been loaded and should replace the active one.
+    ///
+    /// The [`ImpulseCache`](filters::fftconv::ImpulseCache) is what validating
+    /// the configuration read, carried along so that applying it does not have
+    /// to read the same coefficient files a second time.
     // Config must be boxed, to prevent "large size difference between variants" warning
-    ConfigChanged(Box<config::Configuration>),
+    ConfigChanged(Box<config::Configuration>, filters::fftconv::ImpulseCache),
+    /// Stop processing but remain ready for a new configuration.
     Stop,
+    /// Shut down the engine entirely.
     Exit,
 }
 
-#[derive(Clone, Debug, Copy, Serialize, Eq, PartialEq)]
-pub enum ProcessingState {
-    // Processing is running normally.
-    Running,
-    // Processing is paused because input is silent.
-    Paused,
-    // Processing is off and devices are closed, waiting for a new config.
-    Inactive,
-    // Opening devices and starting up processing.
-    Starting,
-    // Capture device isnt providing data, processing is stalled.
-    Stalled,
-}
-
+/// Live status of the capture device, updated each processing chunk.
 #[derive(Clone, Debug)]
 pub struct CaptureStatus {
+    /// How often (in milliseconds) the WebSocket server pushes status updates.
     pub update_interval: usize,
+    /// Most recently measured capture sample rate in Hz.
     pub measured_samplerate: usize,
+    /// Peak amplitude of the most recent capture chunk (linear, 0..1).
     pub signal_range: f32,
+    /// Rolling history of per-channel RMS levels (squared values).
     pub signal_rms: utils::countertimer::ValueHistory,
+    /// Rolling history of per-channel peak levels.
     pub signal_peak: utils::countertimer::ValueHistory,
+    /// Current processing state (running, paused, stalled, …).
     pub state: ProcessingState,
+    /// Current sample-rate adjustment ratio applied by the async resampler.
     pub rate_adjust: f32,
-    pub used_channels: Vec<bool>,
+    /// Which input channels are active (non-empty waveform).
+    ///
+    /// Replaced with a new mask when the devices start, and updated in place
+    /// after that. Capture threads keep a clone of the `Arc`, so they can read
+    /// it without taking the status lock.
+    pub used_channels: Arc<ChannelMask>,
+    /// Ring buffer holding recent capture audio for spectrum analysis.
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
+/// Live status of the playback device, updated each processing chunk.
 #[derive(Clone, Debug)]
 pub struct PlaybackStatus {
+    /// How often (in milliseconds) the WebSocket server pushes status updates.
     pub update_interval: usize,
-    pub clipped_samples: usize,
+    /// Cumulative number of clipped samples since the counter was last reset.
+    ///
+    /// Kept outside the lock, so that a playback thread never has to drop a
+    /// count when the lock is busy. Playback threads keep a clone of the `Arc`.
+    pub clipped_samples: Arc<AtomicUsize>,
+    /// Current playback device buffer fill level in frames.
     pub buffer_level: usize,
+    /// Rolling history of per-channel RMS levels (squared values).
     pub signal_rms: utils::countertimer::ValueHistory,
+    /// Rolling history of per-channel peak levels.
     pub signal_peak: utils::countertimer::ValueHistory,
+    /// Ring buffer holding recent playback audio for spectrum analysis.
+    pub audio_buffer: spectrum::AudioRingBuffer,
 }
 
 pub(crate) fn update_capture_signal_status(
@@ -220,31 +260,92 @@ pub(crate) fn update_capture_signal_status(
     if let Some(mut capture_status) = capture_status.try_write() {
         capture_status.signal_rms.add_record_squared(rms_values);
         capture_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_capture_updated();
     } else {
         xtrace!("capture status blocked, skip update");
     }
 }
 
+pub(crate) fn push_capture_audio_buffer(
+    capture_status: &Arc<RwLock<CaptureStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
+    if let Some(mut status) = capture_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
+    }
+}
+
+pub(crate) fn push_playback_audio_buffer(
+    playback_status: &Arc<RwLock<PlaybackStatus>>,
+    chunk: &audiochunk::AudioChunk,
+) {
+    if !spectrum::spectrum_data_requested() {
+        return;
+    }
+    if let Some(mut status) = playback_status.try_write() {
+        status.audio_buffer.push_chunk(chunk);
+    }
+}
+
+/// Update `capture_status.state` and notify signal monitors if the state changed.
+pub fn update_capture_state(capture_status: &mut CaptureStatus, state: ProcessingState) {
+    if capture_status.state != state {
+        capture_status.state = state;
+        signal_monitor::mark_state_updated();
+    }
+}
+
+/// Acquire the write lock on `capture_status` and call [`update_capture_state`].
+pub fn set_capture_state(capture_status: &Arc<RwLock<CaptureStatus>>, state: ProcessingState) {
+    let mut capture_status = capture_status.write();
+    update_capture_state(&mut capture_status, state);
+}
+
+/// Update `processing_status.stop_reason` if it has changed.
+pub fn update_stop_reason(processing_status: &mut ProcessingStatus, stop_reason: StopReason) {
+    if processing_status.stop_reason != stop_reason {
+        processing_status.stop_reason = stop_reason;
+    }
+}
+
+/// Acquire the write lock on `processing_status` and call [`update_stop_reason`].
+pub fn set_stop_reason(processing_status: &Arc<RwLock<ProcessingStatus>>, stop_reason: StopReason) {
+    let mut processing_status = processing_status.write();
+    update_stop_reason(&mut processing_status, stop_reason);
+}
+
+/// Record the levels of a played chunk, and add its clipped samples to
+/// `clipped_counter`, the [`PlaybackStatus::clipped_samples`] counter.
+///
+/// The levels are skipped when the status lock is busy, since one missing
+/// record is invisible. The clip count is a running total that must not lose
+/// anything, so it is added outside the lock.
 pub(crate) fn update_playback_signal_status(
     playback_status: &Arc<RwLock<PlaybackStatus>>,
     chunk_stats: &audiochunk::ChunkStats,
     rms_values: &mut Vec<f32>,
     peak_values: &mut Vec<f32>,
     clipped_samples: usize,
+    clipped_counter: &AtomicUsize,
 ) {
+    if clipped_samples > 0 {
+        clipped_counter.fetch_add(clipped_samples, Ordering::Relaxed);
+    }
     chunk_stats.rms_linear(rms_values);
     chunk_stats.peak_linear(peak_values);
     if let Some(mut playback_status) = playback_status.try_write() {
-        if clipped_samples > 0 {
-            playback_status.clipped_samples += clipped_samples;
-        }
         playback_status.signal_rms.add_record_squared(rms_values);
         playback_status.signal_peak.add_record(peak_values);
+        signal_monitor::mark_playback_updated();
     } else {
         xtrace!("playback status blocked, skip update");
     }
 }
 
+/// Lock-free shared state for volume, mute, and load metrics, accessible from any thread.
 #[derive(Debug)]
 pub struct ProcessingParameters {
     // Optimization: volumes are actually `f32`s, but by representing their
@@ -255,14 +356,19 @@ pub struct ProcessingParameters {
     mute: [AtomicBool; Self::NUM_FADERS],
     processing_load: AtomicU32,
     resampler_load: AtomicU32,
+    pause_count: AtomicU64,
 }
 
 impl ProcessingParameters {
-    pub const NUM_FADERS: usize = 5;
+    /// Number of independent volume faders.
+    pub const NUM_FADERS: usize = camilladsp_schema::fader::NUM_FADERS;
 
+    /// Default volume level in dB (0 dB = unity gain).
     pub const DEFAULT_VOLUME: f32 = 0.0;
+    /// Default mute state (`false` = unmuted).
     pub const DEFAULT_MUTE: bool = false;
 
+    /// Create a new instance with the given initial volumes (dB) and mute states.
     pub fn new(initial_volumes: &[f32; 5], initial_mutes: &[bool; 5]) -> Self {
         Self {
             target_volume: [
@@ -288,37 +394,68 @@ impl ProcessingParameters {
             ],
             processing_load: AtomicU32::new(0.0f32.to_bits()),
             resampler_load: AtomicU32::new(0.0f32.to_bits()),
+            pause_count: AtomicU64::new(0),
         }
     }
 
+    /// Return the requested target volume (dB) for `fader`.
     pub fn target_volume(&self, fader: usize) -> f32 {
         f32::from_bits(self.target_volume[fader].load(Ordering::Relaxed))
     }
 
+    /// Set the target volume (dB) for `fader`.
     pub fn set_target_volume(&self, fader: usize, target: f32) {
-        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed)
+        self.target_volume[fader].store(target.to_bits(), Ordering::Relaxed);
     }
 
+    /// Record that audio flow was interrupted, because capture is paused or stalled.
+    ///
+    /// Volume filters compare this counter against the value seen when they last ran, to tell
+    /// whether a volume change was made while audio was flowing (ramp it) or during a pause
+    /// (apply it directly, since ramping from a stale level would fade in at the wrong volume).
+    pub fn bump_pause_count(&self) {
+        self.pause_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return the number of audio flow interruptions recorded so far.
+    pub fn pause_count(&self) -> u64 {
+        self.pause_count.load(Ordering::Relaxed)
+    }
+
+    /// Return the currently applied volume (dB) for `fader` (may lag behind the target during a ramp).
     pub fn current_volume(&self, fader: usize) -> f32 {
         f32::from_bits(self.current_volume[fader].load(Ordering::Relaxed))
     }
 
+    /// Immediately snap all current volumes to their targets, bypassing any ramp.
+    pub fn sync_volumes_to_target(&self) {
+        for fader in 0..Self::NUM_FADERS {
+            let target = self.target_volume(fader);
+            self.set_current_volume(fader, target);
+        }
+    }
+
+    /// Set the currently applied volume (dB) for `fader`.
     pub fn set_current_volume(&self, fader: usize, current: f32) {
         self.current_volume[fader].store(current.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the mute state for `fader`.
     pub fn is_mute(&self, fader: usize) -> bool {
         self.mute[fader].load(Ordering::Relaxed)
     }
 
+    /// Set the mute state for `fader`.
     pub fn set_mute(&self, fader: usize, mute: bool) {
         self.mute[fader].store(mute, Ordering::Relaxed)
     }
 
+    /// Toggle the mute state for `fader`; returns the previous state.
     pub fn toggle_mute(&self, fader: usize) -> bool {
         self.mute[fader].fetch_xor(true, Ordering::Relaxed)
     }
 
+    /// Return a snapshot of target volumes (dB) for all faders.
     pub fn volumes(&self) -> [f32; Self::NUM_FADERS] {
         [
             f32::from_bits(self.target_volume[0].load(Ordering::Relaxed)),
@@ -329,6 +466,7 @@ impl ProcessingParameters {
         ]
     }
 
+    /// Return a snapshot of mute states for all faders.
     pub fn mutes(&self) -> [bool; Self::NUM_FADERS] {
         [
             self.mute[0].load(Ordering::Relaxed),
@@ -339,19 +477,23 @@ impl ProcessingParameters {
         ]
     }
 
+    /// Store the pipeline processing load as a percentage (100 % = one chunk duration).
     pub fn set_processing_load(&self, load: f32) {
         self.processing_load
             .store(load.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the last recorded pipeline processing load percentage.
     pub fn processing_load(&self) -> f32 {
         f32::from_bits(self.processing_load.load(Ordering::Relaxed))
     }
 
+    /// Store the resampler processing load as a percentage.
     pub fn set_resampler_load(&self, load: f32) {
         self.resampler_load.store(load.to_bits(), Ordering::Relaxed)
     }
 
+    /// Return the last recorded resampler processing load percentage.
     pub fn resampler_load(&self) -> f32 {
         f32::from_bits(self.resampler_load.load(Ordering::Relaxed))
     }
@@ -378,48 +520,118 @@ impl Default for ProcessingParameters {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ProcessingStatus {
-    pub stop_reason: StopReason,
+/// Lock-free record of which capture channels the pipeline uses.
+///
+/// The engine updates it when a new config is applied, and the capture thread
+/// copies it once per chunk, so that unused channels can be skipped when
+/// converting. The size is the number of capture channels, which only changes
+/// with a restart of the devices.
+#[derive(Debug, Default)]
+pub struct ChannelMask {
+    used: Box<[AtomicBool]>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub enum StopReason {
-    None,
-    Done,
-    CaptureError(String),
-    PlaybackError(String),
-    UnknownError(String),
-    CaptureFormatChange(usize),
-    PlaybackFormatChange(usize),
-}
+impl ChannelMask {
+    /// Create a mask from `used`, with one entry per capture channel.
+    pub fn new(used: &[bool]) -> Self {
+        Self {
+            used: used.iter().map(|u| AtomicBool::new(*u)).collect(),
+        }
+    }
 
-#[derive(Clone)]
-pub struct StatusStructs {
-    pub capture: Arc<RwLock<CaptureStatus>>,
-    pub playback: Arc<RwLock<PlaybackStatus>>,
-    pub processing: Arc<ProcessingParameters>,
-    pub status: Arc<RwLock<ProcessingStatus>>,
-}
+    /// Update the mask. Entries beyond the size of the mask are ignored.
+    pub fn set(&self, used: &[bool]) {
+        for (slot, value) in self.used.iter().zip(used) {
+            slot.store(*value, Ordering::Relaxed);
+        }
+    }
 
-pub struct SharedConfigs {
-    pub active: Arc<Mutex<Option<config::Configuration>>>,
-    pub previous: Arc<Mutex<Option<config::Configuration>>>,
-}
-
-impl fmt::Display for ProcessingState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let desc = match self {
-            ProcessingState::Running => "RUNNING",
-            ProcessingState::Paused => "PAUSED",
-            ProcessingState::Inactive => "INACTIVE",
-            ProcessingState::Starting => "STARTING",
-            ProcessingState::Stalled => "STALLED",
-        };
-        write!(f, "{desc}")
+    /// Copy the mask into `used`, resizing it to match. Only allocates when the
+    /// size changes, which does not happen while a capture thread runs.
+    ///
+    /// The entries are read one by one, so a copy made while the engine
+    /// updates the mask can mix old and new values for one chunk. The
+    /// pipeline tolerates that, since it already sees chunks captured with the
+    /// old mask for as long as they take to pass through the queue.
+    pub fn copy_to(&self, used: &mut Vec<bool>) {
+        used.resize(self.used.len(), false);
+        for (value, slot) in used.iter_mut().zip(self.used.iter()) {
+            *value = slot.load(Ordering::Relaxed);
+        }
     }
 }
 
+/// Shared status of the current processing run, primarily recording why it stopped.
+#[derive(Clone, Debug)]
+pub struct ProcessingStatus {
+    /// The reason the last processing run ended (or `None` while still running).
+    pub stop_reason: StopReason,
+}
+
+/// Bundle of `Arc`-wrapped status objects passed between the engine, device threads, and WebSocket server.
+#[derive(Clone)]
+pub struct StatusStructs {
+    /// Shared capture status (sample rate, signal levels, processing state).
+    pub capture: Arc<RwLock<CaptureStatus>>,
+    /// Shared playback status (buffer level, signal levels, clipped samples).
+    pub playback: Arc<RwLock<PlaybackStatus>>,
+    /// Lock-free volume, mute, and load parameters.
+    pub processing: Arc<ProcessingParameters>,
+    /// Stop reason and other run-level status.
+    pub status: Arc<RwLock<ProcessingStatus>>,
+}
+
+impl Default for CaptureStatus {
+    fn default() -> Self {
+        Self {
+            measured_samplerate: 0,
+            update_interval: 1000,
+            signal_range: 0.0,
+            rate_adjust: 0.0,
+            state: ProcessingState::Inactive,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            used_channels: Arc::new(ChannelMask::default()),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for PlaybackStatus {
+    fn default() -> Self {
+        Self {
+            buffer_level: 0,
+            clipped_samples: Arc::new(AtomicUsize::new(0)),
+            update_interval: 1000,
+            signal_rms: utils::countertimer::ValueHistory::new(1024, 2),
+            signal_peak: utils::countertimer::ValueHistory::new(1024, 2),
+            audio_buffer: Default::default(),
+        }
+    }
+}
+
+impl Default for StatusStructs {
+    fn default() -> Self {
+        Self {
+            capture: Arc::new(RwLock::new(CaptureStatus::default())),
+            playback: Arc::new(RwLock::new(PlaybackStatus::default())),
+            processing: Arc::new(ProcessingParameters::default()),
+            status: Arc::new(RwLock::new(ProcessingStatus {
+                stop_reason: StopReason::None,
+            })),
+        }
+    }
+}
+
+/// Shared access to the active and previous configurations, used when hot-reloading.
+pub struct SharedConfigs {
+    /// The configuration currently driving the running pipeline, if any.
+    pub active: Arc<Mutex<Option<config::Configuration>>>,
+    /// The configuration that was active before the last reload, for diffing.
+    pub previous: Arc<Mutex<Option<config::Configuration>>>,
+}
+
+/// Return `(playback_types, capture_types)`: the device type names supported by this build.
 pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
     let mut playbacktypes = vec!["File".to_owned(), "Stdout".to_owned()];
     let mut capturetypes = vec![
@@ -433,20 +645,9 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Alsa".to_owned());
         capturetypes.push("Alsa".to_owned());
     }
-    if cfg!(all(target_os = "linux", feature = "pulse-backend")) {
-        playbacktypes.push("Pulse".to_owned());
-        capturetypes.push("Pulse".to_owned());
-    }
     if cfg!(all(target_os = "linux", feature = "pipewire-backend")) {
         playbacktypes.push("PipeWire".to_owned());
         capturetypes.push("PipeWire".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "bluez-backend")) {
-        capturetypes.push("Bluez".to_owned());
-    }
-    if cfg!(all(target_os = "linux", feature = "jack-backend")) {
-        playbacktypes.push("Jack".to_owned());
-        capturetypes.push("Jack".to_owned());
     }
     if cfg!(target_os = "macos") {
         playbacktypes.push("CoreAudio".to_owned());
@@ -456,16 +657,29 @@ pub fn list_supported_devices() -> (Vec<String>, Vec<String>) {
         playbacktypes.push("Wasapi".to_owned());
         capturetypes.push("Wasapi".to_owned());
     }
-    if cfg!(all(target_os = "windows", feature = "asio-backend")) {
+    if cfg!(target_os = "windows") {
         playbacktypes.push("Asio".to_owned());
         capturetypes.push("Asio".to_owned());
+    }
+    if cfg!(feature = "dummy-backend") {
+        playbacktypes.push("Dummy".to_owned());
+        capturetypes.push("Dummy".to_owned());
     }
     (playbacktypes, capturetypes)
 }
 
-// Return a list of supported devices.
-// Returns two strings per device, the device name and a readable name.
-// Some backends do not make a diference between these, and return the same name twice.
+/// Curated list of standard audio sample rates used across all backends
+/// for capability probing. Backends should use this instead of defining
+/// their own local rate tables.
+pub const STANDARD_RATES: &[u32] = &[
+    5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 64000, 88200, 96000, 176400, 192000,
+    352800, 384000, 705600, 768000,
+];
+
+/// Return available device names for `backend` (`"alsa"`, `"coreaudio"`, `"wasapi"`, `"asio"`).
+///
+/// Each entry is `(device_id, human_readable_name)`. Some backends return the same string twice.
+/// Pass `input = true` for capture devices, `false` for playback.
 pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String)> {
     match backend.to_lowercase().as_str() {
         #[cfg(target_os = "linux")]
@@ -473,9 +687,66 @@ pub fn list_available_devices(backend: &str, input: bool) -> Vec<(String, String
         #[cfg(target_os = "macos")]
         "coreaudio" => coreaudio_backend::device::list_available_devices(input),
         #[cfg(target_os = "windows")]
-        "wasapi" => wasapi_backend::device::list_device_names(input),
-        #[cfg(all(target_os = "windows", feature = "asio-backend"))]
+        "wasapi" => wasapi_backend::capabilities::list_device_names(input),
+        #[cfg(target_os = "windows")]
         "asio" => asio_backend::device::list_available_devices(),
         _ => Vec::new(),
+    }
+}
+
+/// Error returned by [`get_device_capabilities`] when probing a device fails.
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub enum DeviceError {
+    /// No device with the given name was found.
+    DeviceNotFound(String),
+    /// The device exists but could not be opened (e.g. already in use).
+    DeviceBusy(String),
+    /// Any other backend-specific error.
+    Other(String),
+}
+
+/// Probe and return the full capability descriptor for `device_name` on `backend`.
+///
+/// Pass `input = true` for capture devices, `false` for playback.
+pub fn get_device_capabilities(
+    backend: &str,
+    device_name: &str,
+    input: bool,
+) -> Result<AudioDeviceDescriptor, DeviceError> {
+    match backend.to_lowercase().as_str() {
+        #[cfg(target_os = "linux")]
+        "alsa" => alsa_backend::utils::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "macos")]
+        "coreaudio" => coreaudio_backend::device::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "windows")]
+        "wasapi" => wasapi_backend::capabilities::get_device_capabilities(device_name, input),
+        #[cfg(target_os = "windows")]
+        "asio" => asio_backend::device::get_device_capabilities(device_name, input),
+        _ => Err(DeviceError::Other("Unsupported backend".to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A websocket reader holding the status lock makes the level records get
+    /// skipped, but must not lose any clipped samples.
+    #[test]
+    fn clipped_samples_counted_while_status_is_locked() {
+        let status = Arc::new(RwLock::new(PlaybackStatus::default()));
+        let counter = status.read().clipped_samples.clone();
+        let chunk = audiochunk::AudioChunk::new(vec![vec![1.0; 4]; 2], 1.0, -1.0, 4, 4);
+        let stats = chunk.stats();
+        let mut rms = Vec::new();
+        let mut peak = Vec::new();
+
+        update_playback_signal_status(&status, &stats, &mut rms, &mut peak, 3, &counter);
+        {
+            let _reader = status.read();
+            update_playback_signal_status(&status, &stats, &mut rms, &mut peak, 5, &counter);
+        }
+
+        assert_eq!(status.read().clipped_samples.load(Ordering::Relaxed), 8);
     }
 }

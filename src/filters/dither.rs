@@ -1,3 +1,5 @@
+#![cfg_attr(camillafloat_f32, allow(clippy::excessive_precision))]
+
 // CamillaDSP - A flexible tool for processing audio
 // Copyright (C) 2026 Henrik Enquist
 //
@@ -20,13 +22,16 @@ use ringbuf::LocalRb;
 use ringbuf::storage::Heap;
 use ringbuf::traits::*;
 
-use crate::{NewValue, PrcFmt, Res, config, filters::Filter};
+use crate::{CamillaFloat, ToCamillaFloat, config, filters::Filter};
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::dither::validate_config;
 
 // lifetime `'a` to guarantee that `ditherer` and `shaper`
 // will live as long as this `Dither`.
 pub struct Dither<'a> {
     pub name: String,
-    pub scalefact: PrcFmt,
+    pub scalefact: CamillaFloat,
     // have to `Box` because `dyn Ditherer` is not `Sized`.
     ditherer: Box<dyn Ditherer + Send + 'a>,
     shaper: Option<NoiseShaper<'a>>,
@@ -35,12 +40,12 @@ pub struct Dither<'a> {
 pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
-    filter: &'a [PrcFmt],
-    buffer: LocalRb<Heap<PrcFmt>>,
+    filter: &'a [CamillaFloat],
+    buffer: LocalRb<Heap<CamillaFloat>>,
 }
 
 impl<'a> NoiseShaper<'a> {
-    pub fn new(filter: &'a [PrcFmt]) -> Self {
+    pub fn new(filter: &'a [CamillaFloat]) -> Self {
         let buffer = LocalRb::new(filter.len());
         Self { filter, buffer }
     }
@@ -453,7 +458,7 @@ impl<'a> NoiseShaper<'a> {
         ])
     }
 
-    pub fn process(&mut self, scaled: PrcFmt, dither: PrcFmt) -> PrcFmt {
+    pub fn process(&mut self, scaled: CamillaFloat, dither: CamillaFloat) -> CamillaFloat {
         let mut filt_buf = 0.0;
         for (item, coeff) in self.buffer.iter().zip(self.filter.iter().rev()) {
             filt_buf += coeff * item;
@@ -477,7 +482,7 @@ impl<'a> Dither<'a> {
         shaper: Option<NoiseShaper<'a>>,
     ) -> Self {
         let name = name.to_string();
-        let scalefact = PrcFmt::coerce(2.0).powi((bits - 1) as i32);
+        let scalefact = 2.0f64.powi((bits - 1) as i32).to_camilla_float();
         let ditherer = Box::new(ditherer);
         Self {
             name,
@@ -553,7 +558,7 @@ impl<'a> Dither<'a> {
                 Self::new(name, bits, noop, shaper)
             }
             config::DitherParameters::Flat { amplitude, .. } => {
-                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude);
+                let tpdf = <TriangularDitherer as Ditherer>::new(amplitude.to_camilla_float());
                 Self::new(name, bits, tpdf, shaper)
             }
             config::DitherParameters::Highpass { .. } => {
@@ -573,7 +578,7 @@ impl Filter for Dither<'_> {
         &self.name
     }
 
-    fn process_waveform(&mut self, waveform: &mut [PrcFmt]) -> Res<()> {
+    fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         for item in waveform.iter_mut() {
             let scaled = *item * self.scalefact;
             let dither = self.ditherer.sample();
@@ -587,8 +592,6 @@ impl Filter for Dither<'_> {
 
             *item = result_r / self.scalefact;
         }
-
-        Ok(())
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -601,57 +604,15 @@ impl Filter for Dither<'_> {
     }
 }
 
-/// Validate a Dither config.
-pub fn validate_config(conf: &config::DitherParameters) -> Res<()> {
-    let bits = match conf {
-        config::DitherParameters::None { bits }
-        | config::DitherParameters::Flat { bits, .. }
-        | config::DitherParameters::Highpass { bits }
-        | config::DitherParameters::Fweighted441 { bits }
-        | config::DitherParameters::FweightedLong441 { bits }
-        | config::DitherParameters::FweightedShort441 { bits }
-        | config::DitherParameters::Gesemann441 { bits }
-        | config::DitherParameters::Gesemann48 { bits }
-        | config::DitherParameters::Lipshitz441 { bits }
-        | config::DitherParameters::LipshitzLong441 { bits }
-        | config::DitherParameters::Shibata441 { bits }
-        | config::DitherParameters::ShibataHigh441 { bits }
-        | config::DitherParameters::ShibataLow441 { bits }
-        | config::DitherParameters::Shibata48 { bits }
-        | config::DitherParameters::ShibataHigh48 { bits }
-        | config::DitherParameters::ShibataLow48 { bits }
-        | config::DitherParameters::Shibata882 { bits }
-        | config::DitherParameters::ShibataLow882 { bits }
-        | config::DitherParameters::Shibata96 { bits }
-        | config::DitherParameters::ShibataLow96 { bits }
-        | config::DitherParameters::Shibata192 { bits }
-        | config::DitherParameters::ShibataLow192 { bits } => bits,
-    };
-    if *bits <= 1 {
-        return Err(config::ConfigError::new("Dither bit depth must be at least 2").into());
-    }
-
-    if let config::DitherParameters::Flat { amplitude, .. } = conf {
-        if *amplitude < 0.0 {
-            return Err(config::ConfigError::new("Dither amplitude cannot be negative").into());
-        }
-        if *amplitude > 100.0 {
-            return Err(config::ConfigError::new("Dither amplitude must be less than 100").into());
-        }
-    }
-
-    Ok(())
-}
-
 // Ditherer, TriangularDitherer, HighpassDitherer adopted from librespot,
 // which is licensed under MIT. Used with permission.
 pub trait Ditherer {
     // `amplitude` in bits
-    fn new(amplitude: PrcFmt) -> Self
+    fn new(amplitude: CamillaFloat) -> Self
     where
         Self: Sized;
 
-    fn sample(&mut self) -> PrcFmt;
+    fn sample(&mut self) -> CamillaFloat;
 }
 
 // Deterministic and not cryptographically secure, but fast and with excellent
@@ -669,11 +630,11 @@ fn create_rng() -> SmallRng {
 #[derive(Clone, Debug)]
 pub struct TriangularDitherer {
     cached_rng: SmallRng,
-    distribution: Triangular<PrcFmt>,
+    distribution: Triangular<CamillaFloat>,
 }
 
 impl Ditherer for TriangularDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
+    fn new(amplitude: CamillaFloat) -> Self {
         let amplitude = amplitude / 2.0; // negative to positive peak
         Self {
             cached_rng: create_rng(),
@@ -681,7 +642,7 @@ impl Ditherer for TriangularDitherer {
         }
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         self.distribution.sample(&mut self.cached_rng)
     }
 }
@@ -705,15 +666,15 @@ impl Default for TriangularDitherer {
 #[derive(Clone, Debug)]
 pub struct HighpassDitherer {
     cached_rng: SmallRng,
-    previous_sample: PrcFmt,
+    previous_sample: CamillaFloat,
 
     // optimization: makes sampling of multiple values faster
     // and with less bias than frequently calling `Rnd::gen()`.
-    distribution: Uniform<PrcFmt>,
+    distribution: Uniform<CamillaFloat>,
 }
 
 impl Ditherer for HighpassDitherer {
-    fn new(amplitude: PrcFmt) -> Self {
+    fn new(amplitude: CamillaFloat) -> Self {
         // 2x RDPF (current - previous) makes 1x TDPF
         let amplitude = amplitude / 2.0;
         Self {
@@ -723,7 +684,7 @@ impl Ditherer for HighpassDitherer {
         }
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         let new_sample = self.distribution.sample(&mut self.cached_rng);
         let high_passed_sample = new_sample - self.previous_sample;
         self.previous_sample = new_sample;
@@ -745,11 +706,11 @@ impl Default for HighpassDitherer {
 pub struct NoopDitherer;
 
 impl Ditherer for NoopDitherer {
-    fn new(_amplitude: PrcFmt) -> Self {
+    fn new(_amplitude: CamillaFloat) -> Self {
         Self {}
     }
 
-    fn sample(&mut self) -> PrcFmt {
+    fn sample(&mut self) -> CamillaFloat {
         0.0
     }
 }
@@ -762,14 +723,19 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{PrcFmt, config::DitherParameters, filters::Filter, filters::dither::Dither};
+    use crate::config::finite;
+    use crate::{CamillaFloat, config::DitherParameters, filters::Filter, filters::dither::Dither};
 
-    fn is_close(left: PrcFmt, right: PrcFmt, maxdiff: PrcFmt) -> bool {
+    fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
         (left - right).abs() < maxdiff
     }
 
-    fn compare_waveforms(left: Vec<PrcFmt>, right: Vec<PrcFmt>, maxdiff: PrcFmt) -> bool {
+    fn compare_waveforms(
+        left: Vec<CamillaFloat>,
+        right: Vec<CamillaFloat>,
+        maxdiff: CamillaFloat,
+    ) -> bool {
         for (val_l, val_r) in left.iter().zip(right.iter()) {
             if !is_close(*val_l, *val_r, maxdiff) {
                 return false;
@@ -784,7 +750,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::None { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 128.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -799,10 +765,10 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Flat {
             bits: 8,
-            amplitude: 2.0,
+            amplitude: finite!(2.0),
         };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 64.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -817,7 +783,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Highpass { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 32.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),
@@ -832,7 +798,7 @@ mod tests {
         let waveform2 = waveform.clone();
         let conf = DitherParameters::Lipshitz441 { bits: 8 };
         let mut dith = Dither::from_config("test", conf);
-        dith.process_waveform(&mut waveform).unwrap();
+        dith.process_waveform(&mut waveform);
         assert!(compare_waveforms(waveform.clone(), waveform2, 1.0 / 16.0));
         assert!(is_close(
             (128.0 * waveform[2]).round(),

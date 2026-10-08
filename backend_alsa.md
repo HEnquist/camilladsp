@@ -176,8 +176,9 @@ The first application that opens either side of a Loopback decides the sample ra
 If `aplay` is started first in this example, this means that `arecord` must use the same sample rate and format. 
 To change format or rate, both sides of the loopback must first be closed.
 
-When using the ALSA Loopback approach, see the separate repository [camilladsp-config](#camilladsp-config). 
-This contains example configuration files for setting up the entire system, and to have it start automatically after boot.
+To load the loopback module automatically at boot, create the file `/etc/modules-load.d/aloop.conf`
+containing the single line `snd-aloop`.
+To also start CamillaDSP automatically, run it as a systemd service, see [Using systemd](#using-systemd).
 
 ### ALSA CamillaDSP "I/O" plugin
 
@@ -282,6 +283,107 @@ For the gadget, the control can also indicate that the sample rate changed.
 When this happens, the capture can no longer continue and CamillaDSP will stop.
 The new sample rate can then be read by the `GetStopReason` websocket command.
 
+## Real-time priority
+CamillaDSP promotes its processing and audio threads to real-time priority (`SCHED_FIFO`), which helps
+avoid buffer underruns and dropouts under load. The default priority is 10, and it can be changed with
+the `CAMILLADSP_RT_PRIORITY` environment variable, see [Changing the priority](#changing-the-priority).
+
+The rest of this section applies to the plain ALSA-only build.
+There, priority is requested by calling `pthread_setschedparam` directly, without needing D-Bus or any
+running service, so it works on a minimal headless system.
+A build that includes the PipeWire backend instead uses `rtkit` over D-Bus to request the priority,
+which is the normal mechanism on a desktop system, and the setup below does not apply.
+An ALSA-only build can also be switched to `rtkit` by enabling the `rtkit` feature at build time.
+
+A process is only allowed to request real-time scheduling if it has permission to do so.
+Running as `root` works but is not recommended.
+The better option is to run CamillaDSP as a normal user and grant that user a real-time priority limit
+(`RLIMIT_RTPRIO`) that is at least as high as the priority CamillaDSP requests (10 by default).
+If the permission is missing, CamillaDSP still runs, but logs a warning that it could not get real-time
+priority.
+
+### Using systemd
+If CamillaDSP runs as a systemd service, set the limit directly in the unit file and run as a normal user.
+A complete unit file can look like this:
+
+```ini
+# /etc/systemd/system/camilladsp.service
+[Unit]
+Description=CamillaDSP
+After=sound.target
+
+[Service]
+Type=simple
+User=camilladsp
+ExecStart=/usr/local/bin/camilladsp /path/to/config.yml
+Restart=always
+RestartSec=1
+LimitRTPRIO=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+This is the most self-contained option, as the limit is part of the unit file.
+The user also needs access to the audio devices, which on most distributions means being a member of
+the `audio` group.
+Enable and start the service with `sudo systemctl daemon-reload` followed by
+`sudo systemctl enable --now camilladsp`.
+
+### Using PAM limits
+For a login session, or when not using systemd, grant the limit through PAM.
+Create a drop-in file:
+
+```
+# /etc/security/limits.d/95-camilladsp.conf
+@audio   -   rtprio   10
+```
+
+The limit must be at least the priority CamillaDSP requests, so raise it to match if you increase the
+priority (see below).
+
+Then add the user to the `audio` group and log in again:
+
+```sh
+sudo usermod -aG audio camilladsp
+```
+
+This is the same setup used by JACK and PipeWire for pro-audio.
+Note that PAM limits only apply to processes started through a login session, not to plain system
+services started by init. For those, use the systemd option above.
+
+### Using a file capability
+As an alternative, the binary itself can be granted the capability to raise scheduling priority:
+
+```sh
+sudo setcap 'cap_sys_nice=ep' /usr/local/bin/camilladsp
+```
+
+This works regardless of user and launcher, but has to be reapplied whenever the binary is replaced,
+and lets anyone who can run the binary request real-time priority.
+
+### Changing the priority
+The default priority of 10 is deliberately conservative. On a busy system a higher value can help,
+since it lets the audio threads preempt more other work. Set the `CAMILLADSP_RT_PRIORITY` environment
+variable to a value between 1 and 99 to change it, for example in a systemd unit:
+
+```ini
+[Service]
+Environment=CAMILLADSP_RT_PRIORITY=40
+LimitRTPRIO=40
+```
+
+Remember to raise the `RLIMIT_RTPRIO` limit to match, otherwise the higher priority is not permitted.
+
+Keep the priority below the priority of the audio interface's interrupt (IRQ) thread, which is
+typically around 50. A priority higher than the IRQ thread starves the very threads that deliver audio
+to and from the device, which causes dropouts instead of preventing them.
+
+### Verifying
+Once running, `chrt -p <thread id>` should report `SCHED_FIFO` with the configured priority (10 by
+default) for the processing and audio threads.
+The current limit can be checked with `ulimit -r`, which must be at least that priority.
+
 ## Links
 ### ALSA Documentation
 https://www.alsa-project.org/wiki/Documentation
@@ -289,8 +391,6 @@ https://www.alsa-project.org/wiki/Documentation
 https://www.volkerschatz.com/noise/alsa.html
 ### ALSA Plugin Documentation
 https://www.alsa-project.org/alsa-doc/alsa-lib/pcm_plugins.html
-### camilladsp-config
-https://github.com/HEnquist/camilladsp-config
 ### ALSA CamillaDSP plugin
 https://github.com/scripple/alsa_cdsp/
 

@@ -14,19 +14,32 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 
+/// Dynamic range compressor processor.
 pub mod compressor;
+/// Multichannel lookahead limiter processor.
+pub mod lookahead_limiter;
+/// Noise gate processor.
 pub mod noisegate;
+/// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
 pub mod race;
 
+/// Trait implemented by all multi-channel audio processors.
 pub trait Processor {
-    // Process a chunk containing several channels.
-    fn process_chunk(&mut self, chunk: &mut AudioChunk) -> Res<()>;
+    /// Apply the processor to all channels of `chunk` in place.
+    ///
+    /// Infallible, as [`Filter::process_waveform`](crate::filters::Filter::process_waveform)
+    /// is and for the same reason. A processor that was accepted at
+    /// construction cannot start failing on a later chunk, and nothing could
+    /// be done about it part way through a chunk in the processing thread if
+    /// it did.
+    fn process_chunk(&mut self, chunk: &mut AudioChunk);
 
+    /// Hot-reload processor parameters from a new configuration without rebuilding.
     fn update_parameters(&mut self, config: config::Processor);
 
+    /// Return the processor's name as given in the configuration.
     fn name(&self) -> &str;
 }

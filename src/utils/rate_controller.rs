@@ -14,7 +14,12 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-// A simple PI controller for rate adjustments
+use parking_lot::RwLock;
+
+use crate::PlaybackStatus;
+use crate::utils::countertimer::{Averager, Stopwatch};
+
+/// PI controller that adjusts the resampling ratio to keep the capture buffer at a target level.
 pub struct PIRateController {
     target_level: f64,
     interval: f64,
@@ -46,6 +51,7 @@ impl PIRateController {
         )
     }
 
+    /// Create a controller with explicit proportional (`k_p`) and integral (`k_i`) gains.
     pub fn new(
         fs: usize,
         interval: f64,
@@ -110,5 +116,64 @@ impl PIRateController {
         trace!("Rate controller, error: {err}, output: {output}, P: {proportional}, I: {integral}");
         output = output.clamp(-0.005, 0.005);
         1.0 - output
+    }
+}
+
+/// The playback side of rate adjust.
+///
+/// Fed the playback buffer level once per chunk. At the end of every adjust period it publishes
+/// the average level as the playback buffer level, and returns the capture speed the
+/// [`PIRateController`] asks for. When rate adjust is disabled it does nothing, and no buffer
+/// level is published.
+pub struct RateAdjustReporter {
+    controller: PIRateController,
+    averager: Averager,
+    timer: Stopwatch,
+    period_millis: u64,
+    enabled: bool,
+}
+
+impl RateAdjustReporter {
+    pub fn new(samplerate: usize, adjust_period: f32, target_level: usize, enabled: bool) -> Self {
+        RateAdjustReporter {
+            controller: PIRateController::new_with_default_gains(
+                samplerate,
+                adjust_period as f64,
+                target_level,
+            ),
+            averager: Averager::new(),
+            timer: Stopwatch::new(),
+            period_millis: (1000.0 * adjust_period) as u64,
+            enabled: enabled && adjust_period > 0.0,
+        }
+    }
+
+    /// Add a buffer level, in frames. Returns the new capture speed once per adjust period.
+    pub fn update(
+        &mut self,
+        buffer_level: f64,
+        playback_status: &RwLock<PlaybackStatus>,
+    ) -> Option<f64> {
+        if !self.enabled {
+            return None;
+        }
+        self.averager.add_value(buffer_level);
+        if !self.timer.larger_than_millis(self.period_millis) {
+            return None;
+        }
+        let average_level = self.averager.average()?;
+        let speed = self.controller.next(average_level);
+        self.timer.restart();
+        self.averager.restart();
+        debug!(
+            "Playback buffer level {average_level:.1}, set capture rate to {:.4}%.",
+            100.0 * speed
+        );
+        if let Some(mut status) = playback_status.try_write() {
+            status.buffer_level = average_level as usize;
+        } else {
+            xtrace!("Playback status blocked, skip buffer level update.");
+        }
+        Some(speed)
     }
 }

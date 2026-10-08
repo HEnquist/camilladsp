@@ -18,6 +18,7 @@ filters:
     type: Delay
     parameters:
       delay: 500
+      delay_unit: ms
 
 mixers:
   mono:

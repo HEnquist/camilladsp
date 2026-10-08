@@ -102,7 +102,7 @@ Signed 32-bit int, stored as four bytes in little-endian byte order.
 
 ## Floating point formats
 Floating point formats are often used when exchanging data between an application
-and an audio API such as CoreAudio, Wasapi (in shared mode) or PulseAudio.
+and an audio API such as CoreAudio, Wasapi (in shared mode) or PipeWire.
 The convention is that audio data is scaled the value range of -1.0 to +1.0.
 Very few audio devices, if any, support these formats in hardware.
 

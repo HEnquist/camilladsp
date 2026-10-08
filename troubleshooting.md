@@ -1,4 +1,13 @@
 ## Description of error messages
+A config is checked completely before it is used, and every problem found is listed,
+one per line. Each line starts with where in the config the problem is, for example:
+```
+filters.lowpass.parameters.freq: Frequency must be < samplerate/2
+pipeline[2].names[0]: Use of missing filter 'highpass'
+```
+Here `pipeline[2]` is the third step of the pipeline, since the counting starts at zero.
+The messages below are what follows the location.
+
 ### Config files
 - Could not open config file 'examplefile.yml'. Error: *description from OS*
 
@@ -8,9 +17,11 @@
 
   The specified file could be opened but not read. The description from the OS may give more info.
 
-- Invalid config file! *error description from Yaml parser*
+- *error description from Yaml parser*
 
-  The config file is invalid Yaml. The error from the Yaml parser is printed in the next line.
+  The config file is invalid Yaml, or a value has the wrong type or an unknown name.
+  The parser stops at the first such error, so only that one is listed.
+  Inside a filter, mixer or processor the location only reaches the name of the item.
 
 ### Config options
 - target_level cannot be larger than *1234*,
@@ -49,9 +60,8 @@
 
 ### Filters
 
-- Invalid filter '*filtername*'. Reason: *description from parser*
-
-  The definition of the mixer is somehow wrong. The "Reason" should give more info.
+A problem with the parameters of a filter is located at the parameter itself,
+like `filters.filtername.parameters.freq`.
 
   conv filter:
 - Conv coefficients are empty
