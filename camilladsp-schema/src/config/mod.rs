@@ -1631,6 +1631,19 @@ pub enum Processor {
     },
 }
 
+/// How simultaneous samples on selected monitor channels are combined.
+///
+/// Defaults are processor-specific: Sum for Compressor/NoiseGate and Max for
+/// LookaheadLimiter. Rms is across channels, not a time-windowed RMS detector.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum MonitorMode {
+    Sum,
+    Max,
+    Rms,
+}
+
 /// Parameters for the dynamic range compressor processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1639,6 +1652,8 @@ pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: FiniteF64,
@@ -1656,6 +1671,11 @@ pub struct CompressorParameters {
 }
 
 impl CompressorParameters {
+    /// Resolve the omitted/null mode without changing this processor's legacy default.
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Sum)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }
@@ -1681,6 +1701,8 @@ pub struct NoiseGateParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: FiniteF64,
@@ -1692,6 +1714,11 @@ pub struct NoiseGateParameters {
 }
 
 impl NoiseGateParameters {
+    /// Resolve the omitted/null mode without changing this processor's legacy default.
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Sum)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }
@@ -1709,6 +1736,8 @@ pub struct LookaheadLimiterProcessorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     #[serde(default)]
@@ -1722,6 +1751,11 @@ pub struct LookaheadLimiterProcessorParameters {
 }
 
 impl LookaheadLimiterProcessorParameters {
+    /// Resolve the omitted/null mode without changing this processor's legacy default.
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Max)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }

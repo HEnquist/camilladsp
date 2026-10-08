@@ -144,6 +144,10 @@ name = "pipeline_build"
 harness = false
 
 [[bench]]
+name = "monitor_modes"
+harness = false
+
+[[bench]]
 name = "biquad_canon"
 harness = false
 

@@ -1,3 +1,12 @@
+# Unreleased (release not assigned)
+New features:
+- Optional `monitor_mode: Sum | Max | Rms` for Compressor, NoiseGate and the
+  LookaheadLimiter processor. Omitted/null preserves Sum for Compressor/NoiseGate
+  and Max for LookaheadLimiter. Rms is across channels, not a temporal detector.
+  Sum/Rms limiter modes limit the aggregate, not necessarily individual peaks.
+- Mode-only monitor updates preserve envelope state and limiter detection history
+  and delayed audio. Already buffered history is not reaggregated.
+
 # 5.0.0
 This is the short version. See [CHANGELOG_5.0_details.md](CHANGELOG_5.0_details.md) for the full
 list of changes, with background and measurements.
