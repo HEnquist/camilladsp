@@ -329,10 +329,14 @@ problems. Keeping it in your own fork can be the right call.
 **Target the right branch.** `master` always matches the latest release and contains no unreleased
 work. Active development happens on a separate branch named after the upcoming version. This is
 usually, but not always, a major release named with just the major number such as `next6`, or a minor
-or patch release named with the full version such as `next5.2.0` or `next5.2.1`. Because `master` is
-usually behind the development branch, please ask which branch to target, or check which `next*`
-branch is currently active, before starting work. This avoids basing changes on code that has already
-been reworked.
+or patch release named with the full version such as `next5.2.0` or `next5.2.1`. The right target
+depends on the change, an urgent bug fix may go somewhere else than a new feature. Please ask which
+branch to target before starting work. This avoids basing changes on code that has already been
+reworked.
+
+**Using AI tools is fine, but steer them.** [AGENTS.md](AGENTS.md) describes the house style and the
+scope rules. Most coding agents read it automatically, otherwise point yours to it. Then challenge
+the result before opening a pull request: is this needed, can it be simpler?
 
 # Installing
 
