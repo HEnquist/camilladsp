@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp-schema"
-version = "5.0.0"
+version = "5.0.0-beta.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "Config and websocket protocol types, config validation and coefficient file reading for CamillaDSP"
