@@ -16,6 +16,8 @@ the file backend has a separate reader implementation there and on macOS anyway,
 `src/file_backend/mod.rs`.
 """
 
+import time
+
 import numpy as np
 import pytest
 
@@ -64,6 +66,40 @@ def test_stdin_to_a_file_is_byte_exact(spawn_cdsp, config_file, tmp_path, fmt):
     process.communicate(input=data, timeout=30)
     assert process.returncode == EXIT_OK
     assert open(destination, "rb").read() == data
+
+
+def test_stdin_paced_in_bursts_that_end_inside_a_frame_loses_nothing(
+    spawn_cdsp, config_file, tmp_path
+):
+    """A writer that pauses inside a frame, for longer than a read waits, loses nothing.
+
+    On Linux a read on stdin gives up after twice a chunk's duration and hands over the
+    frames it has. A writer that delivers bytes as they come rather than whole frames, such
+    as a program writing fixed size buffers or a network stream, sometimes pauses in the
+    middle of a frame. The bytes of that frame used to be dropped with the timed out chunk
+    and the rest of it began the next read, so every later frame was read shifted by part of
+    a frame, to the end of the stream. Now what comes out is what went in; any silence the
+    pauses bring is left out of the comparison.
+    """
+    frames = 2000
+    ramp = np.arange(1, frames + 1) / (2 * (frames + 1))
+    samples = np.column_stack([ramp, -ramp])
+    data = encode("F64_LE", samples.ravel())
+    destination = str(tmp_path / "out.raw")
+    config = build(config_file, stdin_capture(), file_playback(destination))
+    process, _ = spawn_cdsp(config=config, pipe_stdin=True)
+    # 1000 bytes is 62.5 frames of two float64 samples, so every pause falls in the middle
+    # of a frame, and each lasts longer than a read waits (2 * 1024 / 48000 s, about 43 ms)
+    for start in range(0, len(data), 1000):
+        process.stdin.write(data[start : start + 1000])
+        process.stdin.flush()
+        time.sleep(0.06)
+    process.stdin.close()
+    process.wait(timeout=30)
+    assert process.returncode == EXIT_OK
+    out = np.frombuffer(open(destination, "rb").read(), dtype="<f8").reshape(-1, 2)
+    heard = out[np.any(out != 0, axis=1)]
+    assert heard.tolist() == samples.tolist()
 
 
 @pytest.mark.parametrize("fmt", FORMATS)
