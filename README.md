@@ -599,9 +599,9 @@ The option `custom_log_spec` can be used to define custom filters for the logs.
 When provided, this option overrides what is given by `-v` and `--loglevel`.
 Using this option, the log level can be set to different values for different modules.
 Example, set the base log level to `info`, but increase it to `trace` for the
-Wasapi backend (which is the `camillalib::wasapidevice` module):
+Wasapi backend (which is the `camilladsp::wasapi_backend::device` module):
 ```
---custom_log_spec="info, camillalib::wasapidevice=trace
+--custom_log_spec="info, camilladsp::wasapi_backend::device=trace"
 ```
 Module names are shown in square brackets in the log messages.
 See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)

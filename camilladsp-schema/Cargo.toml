@@ -1,12 +1,20 @@
 [package]
 name = "camilladsp-schema"
-version = "5.0.0"
+version = "5.0.0-beta.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "Config and websocket protocol types, config validation and coefficient file reading for CamillaDSP"
 rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
+readme = "README.md"
 repository = "https://github.com/HEnquist/camilladsp"
+homepage = "https://camilladsp.com"
+keywords = ["audio", "dsp", "camilladsp", "config", "websocket"]
+categories = ["multimedia::audio", "config"]
+
+# The features only add device types and OpenAPI schemas, so document them all.
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 # These only decide which device types the config accepts. The camilladsp

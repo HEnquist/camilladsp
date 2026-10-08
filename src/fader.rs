@@ -16,11 +16,11 @@
 
 //! Fader levels, advanced once per chunk by the pipeline.
 //!
-//! [`Faders`] owns the ramp state of every fader. The pipeline calls
-//! [`Faders::prepare_chunk`] before any step runs, and that publishes the gain
-//! for the chunk to [`FaderLevels`]. The `Volume` and `Loudness` filters only
-//! read from there, so every channel sees the same level for the same chunk,
-//! whatever order the channels run in.
+//! [`Faders`](crate::fader::Faders) owns the ramp state of every fader. The pipeline calls
+//! [`Faders::prepare_chunk`](crate::fader::Faders::prepare_chunk) before any step runs, and that
+//! publishes the gain for the chunk to [`FaderLevels`](crate::fader::FaderLevels). The `Volume`
+//! and `Loudness` filters only read from there, so every channel sees the same level for the same
+//! chunk, whatever order the channels run in.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};

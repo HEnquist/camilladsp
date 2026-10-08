@@ -24,6 +24,7 @@ Changes:
 - ASIO: the ASIO4ALL driver is refused, use the Wasapi backend instead.
 - Pre-built Linux binaries need glibc 2.34 or newer (Raspberry Pi OS Bookworm or similar).
 - No more pre-built armv6 binary for Raspberry Pi 1 and Zero.
+- Log module names start with `camilladsp::` instead of `camillalib::`.
 
 Bugfixes:
 - PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.

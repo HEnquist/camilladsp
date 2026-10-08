@@ -6,16 +6,16 @@ use num_complex::Complex;
 use std::hint::black_box;
 use std::time::Duration;
 
-use camillalib::CamillaFloat;
+use camilladsp::CamillaFloat;
 #[cfg(target_arch = "x86_64")]
-use camillalib::filters::fftconv::{
+use camilladsp::filters::fftconv::{
     bench_has_avx_fma, bench_multiply_add_elements_avx_fma, bench_multiply_elements_avx_fma,
 };
 #[cfg(target_arch = "aarch64")]
-use camillalib::filters::fftconv::{
+use camilladsp::filters::fftconv::{
     bench_multiply_add_elements_neon, bench_multiply_elements_neon,
 };
-use camillalib::filters::fftconv::{
+use camilladsp::filters::fftconv::{
     bench_multiply_add_elements_scalar, bench_multiply_elements_scalar,
 };
 

@@ -1,6 +1,6 @@
 [package]
-name = "CamillaDSP"
-version = "5.0.0"
+name = "camilladsp"
+version = "5.0.0-beta.1"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "A flexible tool for processing audio"
@@ -8,6 +8,25 @@ rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
 readme = "README.crates.md"
 repository = "https://github.com/HEnquist/camilladsp"
+homepage = "https://camilladsp.com"
+keywords = ["audio", "dsp", "equalizer", "convolution", "crossover"]
+categories = ["multimedia::audio"]
+# An allow-list rather than exclude, so that notes and other untracked files in the
+# working tree can never end up in the published crate.
+include = [
+    "/src",
+    "/benches",
+    "/Cargo.toml",
+    "/README.crates.md",
+    "/LICENSE_GPLv3.txt",
+    "/LICENSE_MPL2.0.txt",
+    "/CHANGELOG.md",
+]
+
+# docs.rs only builds the default Linux target unless told otherwise, which would
+# leave out the CoreAudio, WASAPI and ASIO backends.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [workspace]
 members = ["camilladsp-schema"]
@@ -33,10 +52,6 @@ debug = []
 # instead, set with RUSTFLAGS="--cfg camillafloat_f32".
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(camillafloat_f32)'] }
-
-[lib]
-name = "camillalib"
-path = "src/lib.rs"
 
 [[bin]]
 name = "camilladsp"
@@ -67,7 +82,7 @@ windows = {version = "0.62.0", features = ["Win32_System_Threading", "Win32_Syst
 azo = "0.1.0"
 
 [dependencies]
-camilladsp-schema = { version = "5.0.0", path = "camilladsp-schema" }
+camilladsp-schema = { version = "=5.0.0-beta.1", path = "camilladsp-schema" }
 serde ={ version = "1.0", features = ["derive", "rc"] }
 yaml_serde = "0.10.3"
 serde_json = "1.0"
