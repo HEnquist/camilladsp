@@ -292,17 +292,34 @@ jobs:
 
   publish_crate:
     name: Publish to crates.io
-    if: github.event_name == 'release' && github.event.action == 'created'
+    # A dry run on every push, so this job is known to work before a release needs it.
+    # Publishes for real on final releases only. A prerelease tag like v5.0.0-beta.1
+    # always has a dash, and those are published by hand.
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'release' && github.event.action == 'created'
+      && !contains(github.event.release.tag_name, '-'))
     needs: [linux_amd64, linux_aarch64, linux_armv7, windows, macos, macos_arm]
     runs-on: ubuntu-latest
     steps:
       - name: Check tag is a plain release version
+        if: github.event_name == 'release'
         run: echo "${{ github.event.release.tag_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'
       - name: Checkout sources
         uses: actions/checkout@v5
+      - name: Update package list
+        run: sudo apt-get update
+      # cargo publish builds the packaged crate before uploading, and that needs the
+      # ALSA headers on Linux.
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Publish dry run
+        if: github.event_name == 'push'
+        run: cargo publish --workspace --dry-run
       - name: Publish
+        if: github.event_name == 'release'
         run: cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
