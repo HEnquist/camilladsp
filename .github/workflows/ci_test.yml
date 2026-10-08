@@ -51,20 +51,20 @@ jobs:
         run: cargo check
 
       - name: Run cargo test with all supported backends
-        run: cargo test --features pipewire-backend
+        run: cargo test --workspace --features pipewire-backend
 
       - name: Run cargo test with all optional features
-        run: cargo test --features debug,secure-websocket
+        run: cargo test --workspace --features debug,secure-websocket
 
       # The sample precision is a rustc cfg, not a Cargo feature, so it is not
       # covered by --features or --all-features and needs its own run.
       - name: Run cargo test with f32 sample precision
-        run: cargo test
+        run: cargo test --workspace
         env:
           RUSTFLAGS: --cfg camillafloat_f32
 
       - name: Run cargo clippy with f32 sample precision
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         env:
           RUSTFLAGS: --cfg camillafloat_f32
 
@@ -72,7 +72,14 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
+
+      # camilladsp never enables the utoipa feature, so the schema crate needs
+      # its own run with it.
+      - name: Run cargo test and clippy for the schema with OpenAPI schemas
+        run: |
+          cargo test -p camilladsp-schema --features utoipa
+          cargo clippy -p camilladsp-schema --all-targets --features utoipa -- -D warnings
 
   # Builds the crates the way crates.io would get them, from the files in the
   # include list only. Packaging the whole workspace also checks that the
@@ -125,17 +132,17 @@ jobs:
         run: cargo check
 
       - name: Run cargo test
-        run: cargo test
+        run: cargo test --workspace
 
       # The NEON kernels exist in both precisions, so this is the runner that
       # covers the f32 SIMD convolution path end to end.
       - name: Run cargo test with f32 sample precision
-        run: cargo test
+        run: cargo test --workspace
         env:
           RUSTFLAGS: --cfg camillafloat_f32
 
       - name: Run cargo clippy with f32 sample precision
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         env:
           RUSTFLAGS: --cfg camillafloat_f32
 
@@ -143,7 +150,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
   # Cross compiled in a Debian container rather than with the `cross` tool.
   # Debian serves armhf from the normal archive, so enabling the armhf
@@ -184,7 +191,7 @@ jobs:
         run: cargo check --target armv7-unknown-linux-gnueabihf
 
       - name: Run cargo test for arm
-        run: cargo test --target armv7-unknown-linux-gnueabihf
+        run: cargo test --workspace --target armv7-unknown-linux-gnueabihf
 
   check_test_and_lint_windows:
     name: Check and test Windows
@@ -204,13 +211,13 @@ jobs:
         run: cargo check
 
       - name: Run cargo test
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
   check_test_macos:
     name: Check and test macOS Intel
@@ -228,7 +235,7 @@ jobs:
         run: cargo check
 
       - name: Run cargo test
-        run: cargo test
+        run: cargo test --workspace
 
   check_test_and_lint_macos_arm:
     name: Check and test macOS Arm
@@ -248,13 +255,13 @@ jobs:
         run: cargo check
 
       - name: Run cargo test
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Run cargo fmt
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
 
 
