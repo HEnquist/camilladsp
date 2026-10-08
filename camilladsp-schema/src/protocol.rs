@@ -16,8 +16,8 @@
 
 //! The messages of the CamillaDSP websocket protocol.
 //!
-//! The server deserializes [`WsCommand`] and serializes [`WsReply`], and a client does the
-//! opposite with the same types. All messages are UTF-8 text frames containing a JSON value.
+//! The server deserializes [`WsCommand`](crate::protocol::WsCommand) and serializes
+//! [`WsReply`](crate::protocol::WsReply), and a client does the opposite with the same types. All messages are UTF-8 text frames containing a JSON value.
 //!
 //! ## Command syntax
 //!

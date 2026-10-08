@@ -8,6 +8,14 @@ rust-version = "1.90"
 license = "GPL-3.0-only OR MPL-2.0"
 readme = "README.crates.md"
 repository = "https://github.com/HEnquist/camilladsp"
+homepage = "https://camilladsp.com"
+keywords = ["audio", "dsp", "equalizer", "convolution", "crossover"]
+categories = ["multimedia::audio"]
+
+# docs.rs only builds the default Linux target unless told otherwise, which would
+# leave out the CoreAudio, WASAPI and ASIO backends.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [workspace]
 members = ["camilladsp-schema"]
