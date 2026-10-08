@@ -8,6 +8,7 @@ use camilladsp::filters::lookahead_limiter::{LookaheadGain, limiter_parameters};
 use camilladsp::pipeline::Pipeline;
 use camilladsp::processors::Processor;
 use camilladsp::processors::lookahead_limiter::LookaheadLimiter;
+use camilladsp::utils::conversions::buffer_to_chunk_rawbytes;
 use camilladsp::{CamillaFloat, ProcessingParameters};
 use std::sync::Arc;
 
@@ -187,6 +188,105 @@ fn equal_waveforms(actual: &[Vec<CamillaFloat>], expected: &[Vec<CamillaFloat>])
             close(a, b);
         }
     }
+}
+
+fn check_rms_masked_capture(kind: Kind) {
+    const FRAMES: usize = 256;
+    let parameters = match kind {
+        Kind::Compressor => "threshold: -10\n      factor: 2",
+        Kind::NoiseGate => "threshold: -10\n      attenuation: 40",
+        Kind::Limiter => "limit: -10",
+    };
+    // Cover either entry order, repeated masked entries, and an entirely masked
+    // monitor selection. Masked entries must still dilute the RMS reading.
+    for monitor in ["[0, 1]", "[1, 0]", "[0, 1, 1]", "[1]"] {
+        let yaml = format!(
+            "devices:
+  samplerate: 48000
+  chunksize: {FRAMES}
+  capture: {{type: Stdin, channels: 2, format: F64_LE}}
+  playback: {{type: Stdout, channels: 1, format: F64_LE}}
+processors:
+  p:
+    type: {kind}
+    parameters:
+      channels: 2
+      monitor_channels: {monitor}
+      process_channels: [0]
+      monitor_mode: Rms
+      attack: 1
+      attack_unit: samples
+      release: 1
+      release_unit: samples
+      {parameters}
+mixers:
+  mono:
+    channels: {{in: 2, out: 1}}
+    mapping:
+      - dest: 0
+        sources: [{{channel: 0, gain: 0}}]
+pipeline:
+  - {{type: Processor, name: p}}
+  - {{type: Mixer, name: mono}}
+",
+            kind = kind.name(),
+        );
+        let mut conf: Configuration = yaml_serde::from_str(&yaml).unwrap();
+        config::validate_config(&mut conf, None).unwrap();
+        let used_channels = config::used_capture_channels(&conf);
+        assert_eq!(used_channels, [true, false]);
+        let mut masked_pipeline = build(&conf);
+        let mut silent_pipeline = build(&conf);
+        for sample in [0.5_f64, 0.0, -0.5] {
+            let bytes: Vec<u8> = [sample, 0.0]
+                .into_iter()
+                .flat_map(f64::to_le_bytes)
+                .cycle()
+                .take(FRAMES * 2 * size_of::<f64>())
+                .collect();
+            let convert = |mask: &[bool]| {
+                buffer_to_chunk_rawbytes(
+                    &bytes,
+                    2,
+                    &config::BinarySampleFormat::F64_LE,
+                    bytes.len(),
+                    mask,
+                    false,
+                )
+            };
+            // Use the same masking and conversion as file/stdin capture.
+            let masked = convert(&used_channels);
+            assert_eq!(masked.waveforms[0].len(), FRAMES);
+            assert!(masked.waveforms[1].is_empty());
+            let silent = convert(&[true, true]);
+            assert_eq!(silent.waveforms[1], vec![0.0; FRAMES]);
+
+            let expected = silent_pipeline.process_chunk(silent);
+            let actual = masked_pipeline.process_chunk(masked);
+            // A processing-thread panic can leave the executable's exit status
+            // successful, so check that complete, correct audio is produced.
+            assert_eq!(actual.frames, FRAMES);
+            assert_eq!(actual.valid_frames, FRAMES);
+            assert_eq!(actual.channels, 1);
+            assert_eq!(actual.waveforms[0].len(), FRAMES);
+            equal_waveforms(&actual.waveforms, &expected.waveforms);
+        }
+    }
+}
+
+#[test]
+fn compressor_rms_masked_capture_matches_silence() {
+    check_rms_masked_capture(Kind::Compressor);
+}
+
+#[test]
+fn noise_gate_rms_masked_capture_matches_silence() {
+    check_rms_masked_capture(Kind::NoiseGate);
+}
+
+#[test]
+fn limiter_rms_masked_capture_matches_silence() {
+    check_rms_masked_capture(Kind::Limiter);
 }
 
 #[test]
