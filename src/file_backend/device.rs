@@ -731,12 +731,14 @@ impl CaptureDevice for FileCaptureDevice {
                             Box::new(NonBlockingReader::new(
                                 f,
                                 2 * 1000 * chunksize as u64 / samplerate as u64,
+                                channels * store_bytes_per_sample,
                             )) as Box<dyn Reader>
                         })
                         .map_err(|e| e.into()),
                     CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
                         stdin(),
                         2 * 1000 * chunksize as u64 / samplerate as u64,
+                        channels * store_bytes_per_sample,
                     ))),
                 };
                 match file_res {
