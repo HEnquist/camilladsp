@@ -1,6 +1,7 @@
 //! Channel reduction only; consumers retain their own rectification/envelope logic.
 
 use crate::CamillaFloat;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config::MonitorMode;
 
@@ -40,7 +41,7 @@ pub(crate) fn aggregate_monitor_channels(
                     *acc += val * val;
                 }
             }
-            let count = channels.len() as CamillaFloat;
+            let count = (channels.len() as f64).to_camilla_float();
             for val in scratch.iter_mut() {
                 *val = (*val / count).sqrt();
             }
