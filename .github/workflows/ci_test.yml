@@ -74,6 +74,30 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy -- -D warnings
 
+  # Builds the crates the way crates.io would get them, from the files in the
+  # include list only. Packaging the whole workspace also checks that the
+  # schema version requirement in the root Cargo.toml matches the schema crate.
+  package_crates:
+    name: Package crates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Update package list
+        run: sudo apt-get update
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
+
+      - name: Run cargo package
+        run: cargo package --workspace
+
   check_test_aarch64:
     name: Check and test Linux arm 64bit
     runs-on: ubuntu-24.04-arm
