@@ -128,8 +128,8 @@ impl LookaheadGain {
         }
     }
 
-    /// Update the parameters. The lookahead history is padded with silence,
-    /// so that an increased attack time does not pull in stale samples.
+    /// Update the parameters, padding history with silence only when the
+    /// lookahead length changes, so it does not pull in stale samples.
     pub fn set_parameters(
         &mut self,
         limit: CamillaFloat,
@@ -137,11 +137,13 @@ impl LookaheadGain {
         release_coeff: CamillaFloat,
     ) {
         self.limit = limit;
+        if attack_samples != self.attack_samples {
+            for _ in 0..attack_samples {
+                self.history.push_overwrite(0.0);
+            }
+        }
         self.attack_samples = attack_samples;
         self.release_coeff = release_coeff;
-        for _ in 0..self.attack_samples {
-            self.history.push_overwrite(0.0);
-        }
     }
 
     /// The gain envelope calculated for the most recent chunk.
@@ -501,6 +503,30 @@ mod tests {
         ];
         limiter.process_waveform(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
+    }
+
+    #[test]
+    fn test_set_parameters_preserves_history_and_release() {
+        let mut gain = LookaheadGain::new(1.0, 2, 0.5, 8, 2);
+        gain.process_detection(&[4.0, 4.0]);
+        let history: Vec<_> = gain.history.iter().copied().collect();
+        let release_gain = gain.release_gain;
+        assert!(release_gain < 1.0);
+
+        gain.set_parameters(0.5, 2, 0.75);
+        assert_eq!(gain.history.iter().copied().collect::<Vec<_>>(), history);
+        assert_eq!(gain.release_gain, release_gain);
+        assert_eq!(gain.limit, 0.5);
+        assert_eq!(gain.release_coeff, 0.75);
+        gain.process_detection(&[0.0, 0.0]);
+        assert_close(gain.envelope(), &[0.125, 0.125], 1e-6);
+
+        // Changing the lookahead length still initializes the new window.
+        gain.set_parameters(0.5, 3, 0.75);
+        let window = LookaheadWindow::new(&gain.history, 3, &[]);
+        for i in 0..3 {
+            assert_eq!(window.get(i), 0.0);
+        }
     }
 
     #[test]
