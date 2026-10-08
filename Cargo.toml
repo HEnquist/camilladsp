@@ -11,6 +11,17 @@ repository = "https://github.com/HEnquist/camilladsp"
 homepage = "https://camilladsp.com"
 keywords = ["audio", "dsp", "equalizer", "convolution", "crossover"]
 categories = ["multimedia::audio"]
+# An allow-list rather than exclude, so that notes and other untracked files in the
+# working tree can never end up in the published crate.
+include = [
+    "/src",
+    "/benches",
+    "/Cargo.toml",
+    "/README.crates.md",
+    "/LICENSE_GPLv3.txt",
+    "/LICENSE_MPL2.0.txt",
+    "/CHANGELOG.md",
+]
 
 # docs.rs only builds the default Linux target unless told otherwise, which would
 # leave out the CoreAudio, WASAPI and ASIO backends.
