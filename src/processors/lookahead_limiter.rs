@@ -21,6 +21,7 @@ use crate::filters::Filter;
 use crate::filters::basicfilters::Delay;
 use crate::filters::lookahead_limiter::{LookaheadGain, limiter_parameters};
 use crate::processors::Processor;
+use crate::processors::monitor::aggregate_monitor_channels;
 
 /// Parameter validation lives in `camilladsp-schema`.
 pub use camilladsp_schema::processors::lookahead_limiter::validate_lookahead_limiter;
@@ -35,6 +36,7 @@ pub struct LookaheadLimiter {
     pub name: String,
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
+    pub monitor_mode: config::MonitorMode,
     pub process_channels: Vec<usize>,
     pub delay_processed_only: bool,
     pub samplerate: usize,
@@ -107,25 +109,13 @@ impl LookaheadLimiter {
             name,
             channels,
             monitor_channels,
+            monitor_mode: config.monitor_mode(),
             process_channels,
             delay_processed_only: config.delay_processed_only(),
             samplerate,
             gain: LookaheadGain::new(limit, attack_samples, release_coeff, samplerate, chunksize),
             delays: make_delays(channels, attack_samples, samplerate),
             scratch: vec![0.0; chunksize],
-        }
-    }
-
-    /// Find the largest amplitude of all monitored channels, store result in self.scratch
-    fn detect_peaks(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        for (peak, val) in self.scratch.iter_mut().zip(input.waveforms[ch].iter()) {
-            *peak = val.abs();
-        }
-        for ch in self.monitor_channels.iter().skip(1) {
-            for (peak, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
-                *peak = peak.max(val.abs());
-            }
         }
     }
 
@@ -143,7 +133,12 @@ impl Processor for LookaheadLimiter {
 
     /// Apply a LookaheadLimiter to an AudioChunk, modifying it in-place.
     fn process_chunk(&mut self, input: &mut AudioChunk) {
-        self.detect_peaks(input);
+        aggregate_monitor_channels(
+            input,
+            &self.monitor_channels,
+            self.monitor_mode,
+            &mut self.scratch,
+        );
         self.gain.process_detection(&self.scratch);
         // Unless disabled, delay the unprocessed channels too, to keep all channels time aligned.
         for (ch, delay) in self.delays.iter_mut().enumerate() {
@@ -178,6 +173,7 @@ impl Processor for LookaheadLimiter {
             }
             self.channels = channels;
             self.monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
+            self.monitor_mode = config.monitor_mode();
             self.process_channels = all_channels_if_empty(config.process_channels(), channels);
             self.delay_processed_only = config.delay_processed_only();
             self.gain
@@ -216,6 +212,7 @@ mod tests {
         config::LookaheadLimiterProcessorParameters {
             channels: 2,
             monitor_channels,
+            monitor_mode: None,
             process_channels,
             limit: finite!(0.0),
             attack: finite!(attack),
@@ -241,6 +238,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_default_monitor_mode() {
+        for mode in ["", "monitor_mode: null"] {
+            let parameters = yaml_serde::from_str(&format!(
+                "channels: 2\nattack: 2\nattack_unit: samples\nrelease: 4\nrelease_unit: samples\n{mode}"
+            ))
+            .unwrap();
+            let limiter = LookaheadLimiter::from_config("test", parameters, 48000, 2);
+            assert_eq!(limiter.monitor_mode, config::MonitorMode::Max);
+        }
+    }
+
+    #[test]
+    fn test_mode_change_preserves_buffered_history() {
+        let mut parameters = params(None, None, 2.0, 1.0 / std::f64::consts::LN_2);
+        let mut limiter = LookaheadLimiter::from_config("test", parameters.clone(), 48000, 2);
+        let input = vec![vec![4.0; 2], vec![-4.0; 2]];
+        limiter.process_chunk(&mut chunk(input.clone()));
+
+        parameters.monitor_mode = Some(config::MonitorMode::Sum);
+        limiter.update_parameters(config::Processor::LookaheadLimiter {
+            description: None,
+            parameters,
+        });
+
+        // Buffered Max detection still limits the delayed audio, even though
+        // incoming opposite-polarity samples cancel with Sum.
+        let mut output = chunk(input.clone());
+        limiter.process_chunk(&mut output);
+        assert_close(&output.waveforms[0], &[1.0, 1.0], 1e-6);
+        assert_close(&output.waveforms[1], &[-1.0, -1.0], 1e-6);
+
+        // Once the old detection drains, only the release envelope remains.
+        let mut output = chunk(input);
+        limiter.process_chunk(&mut output);
+        let expected = [2.0, 4.0 * CamillaFloat::sqrt(0.5)];
+        assert_close(&output.waveforms[0], &expected, 1e-6);
+        assert_close(&output.waveforms[1], &expected.map(|value| -value), 1e-6);
+    }
+
     /// With a single channel the processor must match the filter exactly.
     #[test]
     fn test_matches_filter() {
@@ -256,6 +293,7 @@ mod tests {
             config::LookaheadLimiterProcessorParameters {
                 channels: 1,
                 monitor_channels: None,
+                monitor_mode: None,
                 process_channels: None,
                 limit: finite!(0.0),
                 attack: finite!(4.0),

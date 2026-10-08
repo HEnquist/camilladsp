@@ -2386,6 +2386,25 @@ These are special "filters" that work on several channels at the same time.
 Processors take an optional `description` property.
 This is intended for the user and is not used by CamillaDSP itself.
 
+### Monitor-channel aggregation
+
+Compressor, NoiseGate and the LookaheadLimiter processor accept optional
+`monitor_mode: Sum | Max | Rms`, combining the selected monitor channels before
+calculating gain. Omitted or `null` defaults to **Sum for Compressor and NoiseGate**
+and **Max for LookaheadLimiter**.
+
+| Mode | Detector amplitude at sample n |
+| --- | --- |
+| `Sum` | `abs(sum(x_i[n]))` |
+| `Max` | `max(abs(x_i[n]))` |
+| `Rms` | `sqrt(sum(x_i[n]^2) / N)` |
+
+Rms is across channels, not over time; `N` counts all selected monitor entries,
+including silent channels and repetitions. Sum can cancel opposite-polarity
+signals; Sum/Rms limiter modes limit the aggregate rather than individual peaks.
+Mode changes preserve envelope state and buffered limiter audio and detection
+history, applying the new mode to incoming samples.
+
 ### Compressor
 The "Compressor" processor implements a standard dynamic range compressor.
 It is configured using the most common parameters.
@@ -2429,6 +2448,8 @@ pipeline:
     Note that soft clipping introduces some harmonic distortion to the signal.
     This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Sum`;
+    see [monitor-channel aggregation](#monitor-channel-aggregation).
   * `process_channels`: a list of channels to be compressed. Optional, defaults to all channels.
 
 ### Noise Gate
@@ -2470,6 +2491,8 @@ pipeline:
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
     Must not be negative.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Sum`;
+    see [monitor-channel aggregation](#monitor-channel-aggregation).
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
 ### Lookahead Limiter (processor)
@@ -2507,13 +2530,14 @@ pipeline:
 
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the limiter is inserted.
-  * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
+  * `limit`: Detector limit in dB. Optional, defaults to 0.0 dB.
   * `attack`: Attack/lookahead/delay time, see the `LookaheadLimiter` filter.
   * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
   * `release`: Release time, see the `LookaheadLimiter` filter.
   * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
-  * `monitor_channels`: a list of channels to detect peaks on. The largest amplitude of these channels
-    at each instant determines the gain reduction. Optional, defaults to all channels.
+  * `monitor_channels`: a list of channels used for detection. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Max`;
+    see [monitor-channel aggregation](#monitor-channel-aggregation).
   * `process_channels`: a list of channels to apply the gain reduction to. Optional, defaults to all channels.
   * `delay_processed_only`: only delay the channels in `process_channels`, and pass the others through
     without any delay. Optional, defaults to `false`, meaning that all channels are delayed.

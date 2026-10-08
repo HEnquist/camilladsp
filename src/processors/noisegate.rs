@@ -19,6 +19,7 @@ use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
+use crate::processors::monitor::aggregate_monitor_channels;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
@@ -30,6 +31,7 @@ pub struct NoiseGate {
     pub name: String,
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
+    pub monitor_mode: config::MonitorMode,
     pub process_channels: Vec<usize>,
     pub attack: CamillaFloat,
     pub release: CamillaFloat,
@@ -87,6 +89,7 @@ impl NoiseGate {
             name,
             channels,
             monitor_channels,
+            monitor_mode: config.monitor_mode(),
             process_channels,
             attack: attack.to_camilla_float(),
             release: release.to_camilla_float(),
@@ -95,17 +98,6 @@ impl NoiseGate {
             samplerate,
             scratch,
             prev_loudness: 0.0,
-        }
-    }
-
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
-    fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        self.scratch.copy_from_slice(&input.waveforms[ch]);
-        for ch in self.monitor_channels.iter().skip(1) {
-            for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
-                *acc += *val;
-            }
         }
     }
 
@@ -148,7 +140,12 @@ impl Processor for NoiseGate {
 
     /// Apply a NoiseGate to an AudioChunk, modifying it in-place.
     fn process_chunk(&mut self, input: &mut AudioChunk) {
-        self.sum_monitor_channels(input);
+        aggregate_monitor_channels(
+            input,
+            &self.monitor_channels,
+            self.monitor_mode,
+            &mut self.scratch,
+        );
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
@@ -183,6 +180,7 @@ impl Processor for NoiseGate {
             let release = (-1.0 / release_samples).exp();
 
             self.monitor_channels = monitor_channels;
+            self.monitor_mode = config.monitor_mode();
             self.process_channels = process_channels;
             self.attack = attack.to_camilla_float();
             self.release = release.to_camilla_float();
@@ -202,6 +200,49 @@ impl Processor for NoiseGate {
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_and_mode_change_preserves_loudness() {
+        for mode in ["", "monitor_mode: null"] {
+            let mut parameters: config::NoiseGateParameters = yaml_serde::from_str(&format!(
+                "channels: 2
+attack: 3
+attack_unit: samples
+release: 19
+release_unit: samples
+threshold: -20
+attenuation: 40
+{mode}
+"
+            ))
+            .unwrap();
+            let mut processor = NoiseGate::from_config("test", parameters.clone(), 48000, 8);
+            assert_eq!(processor.monitor_mode, config::MonitorMode::Sum);
+            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.25; 8]], 1.0, -1.0, 8, 8);
+            processor.process_chunk(&mut input);
+            let mut unchanged = processor.clone();
+            assert!(processor.prev_loudness < 0.0);
+
+            parameters.monitor_mode = Some(config::MonitorMode::Rms);
+            processor.update_parameters(config::Processor::NoiseGate {
+                description: None,
+                parameters,
+            });
+            assert_eq!(processor.prev_loudness, unchanged.prev_loudness);
+            assert_eq!(processor.monitor_mode, config::MonitorMode::Rms);
+
+            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.5; 8]], 1.0, -1.0, 8, 8);
+            let mut reference = AudioChunk::from(&input, input.waveforms.clone());
+            unchanged.process_chunk(&mut reference);
+            processor.process_chunk(&mut input);
+            assert!(processor.prev_loudness > unchanged.prev_loudness);
         }
     }
 }
