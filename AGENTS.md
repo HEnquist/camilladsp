@@ -52,6 +52,10 @@ updating, and scripts and tools that use the websocket API or the crates stop wo
 - Read the surrounding code first and match it: structure, naming, comment density, idiom.
 - Do not allocate or lock in the per-chunk processing path of filters, processors and mixers.
   Allocate buffers in the constructor and on config updates.
+- Setup and coefficient math run in `f64`, processing runs in `CamillaFloat`, and values that are
+  only reported (levels, spectrum) are `f32`. Convert to `CamillaFloat` once, where a finished value
+  is stored for per-sample use. Use the `ToCamillaFloat` and `ToF32` traits, not `as` casts.
+  `src/filters/biquad.rs` is the reference.
 - Tests go in the existing `#[cfg(test)] mod tests` at the bottom of the file being changed. Test the
   new behaviour with realistic values, not unchanged behaviour or extreme edge cases.
 - Optional config fields are `Option<T>` with `#[serde(default)]`, without `skip_serializing_if`,
