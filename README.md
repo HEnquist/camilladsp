@@ -2386,6 +2386,61 @@ These are special "filters" that work on several channels at the same time.
 Processors take an optional `description` property.
 This is intended for the user and is not used by CamillaDSP itself.
 
+### Monitor-channel aggregation
+
+Compressor, NoiseGate and the LookaheadLimiter **processor** accept an optional
+`monitor_mode`. It combines the selected monitor-channel samples before each
+processor's existing envelope and gain calculations:
+
+| Mode | Detector amplitude at sample n |
+| --- | --- |
+| `Sum` | `abs(sum(x_i[n]))` |
+| `Max` | `max(abs(x_i[n]))` |
+| `Rms` | `sqrt(sum(x_i[n]^2) / N)` |
+
+`N` is the number of resolved monitor entries, including silent channels and
+repetitions. Omitted, null and empty channel lists still select all channels.
+Entries are not sorted or deduplicated.
+
+Omitting `monitor_mode` or setting it to `null` preserves the processor's existing
+behavior: **Sum for Compressor and NoiseGate, Max for LookaheadLimiter**.
+An unspecified mode remains omitted when serializing a configuration. Explicit
+modes remain explicit; older binaries without this property reject it, including
+explicit default values. Mode names are case-sensitive.
+
+Rms is instantaneous RMS **across channels**, not a new time-windowed RMS or
+perceptual-loudness detector. Compressor/NoiseGate retain their existing dB-domain
+attack/release smoothing; LookaheadLimiter retains its existing lookahead and
+gain calculation. The aggregation itself adds no signal delay.
+
+For `[0.5, -0.5]`, Sum gives zero amplitude, while Max and Rms both give 0.5.
+For `[0.5, 0.5]`, Sum gives 1.0 and the other modes give 0.5. For `[0.5, 0]`,
+Rms gives approximately 0.353553 and the other modes give 0.5. Adding a silent
+monitor entry therefore dilutes Rms, but not Max. Max/Rms are invariant to
+polarity reversal of any channel; arbitrary phase shifts need not give identical
+envelopes. There is no universal threshold offset when switching modes.
+
+**Limiter warning:** Sum and Rms limit the selected aggregate, not necessarily
+every channel's sample peaks. Sum can cancel; with one active of N entries, Rms
+can allow that channel to approach `sqrt(N)` times the aggregate limit. For the
+existing per-channel peak-limiting behavior, use Max and monitor every processed
+channel. An unmonitored processed channel has no such bound. This is not
+true-peak/intersample limiting or a hardware protection guarantee.
+
+A mode-only live update preserves the existing envelope state. The limiter also
+preserves delayed audio and detection history: the new mode applies to incoming
+samples; history already buffered under the old mode drains normally. It is not
+recomputed retroactively, and switching to Max does not retroactively protect
+samples buffered under a weaker mode. No inaudibility guarantee is made.
+
+The detector is not a PCM sanitizer. Sum and Max retain their existing
+exceptional-value behavior; Rms propagates NaN, otherwise infinity. Neither
+behavior implies recovery from invalid audio.
+
+A complete four-channel announcement/music routing example is provided in
+[`exampleconfigs/monitor_sidechain.yml`](exampleconfigs/monitor_sidechain.yml).
+The example's timing and threshold values are illustrative, not measured tuning.
+
 ### Compressor
 The "Compressor" processor implements a standard dynamic range compressor.
 It is configured using the most common parameters.
@@ -2429,6 +2484,7 @@ pipeline:
     Note that soft clipping introduces some harmonic distortion to the signal.
     This setting is ignored if `enable_clip = false`. Optional, defaults to `false`.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Sum`; see [monitor-channel aggregation](#monitor-channel-aggregation).
   * `process_channels`: a list of channels to be compressed. Optional, defaults to all channels.
 
 ### Noise Gate
@@ -2470,6 +2526,7 @@ pipeline:
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
     Must not be negative.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Sum`; see [monitor-channel aggregation](#monitor-channel-aggregation).
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
 ### Lookahead Limiter (processor)
@@ -2507,13 +2564,16 @@ pipeline:
 
   Parameters:
   * `channels`: number of channels, must match the number of channels of the pipeline where the limiter is inserted.
-  * `limit`: Maximum output level in dB. Optional, defaults to 0.0 dB.
+  * `limit`: Detector limit in dB. Optional, defaults to 0.0 dB. Sum/Rms do not generally
+    impose this ceiling on each individual processed channel; see the aggregation warning above.
   * `attack`: Attack/lookahead/delay time, see the `LookaheadLimiter` filter.
   * `attack_unit`: Unit for the attack time. Can be `s`, `ms`, `us` or `samples`.
   * `release`: Release time, see the `LookaheadLimiter` filter.
   * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
-  * `monitor_channels`: a list of channels to detect peaks on. The largest amplitude of these channels
-    at each instant determines the gain reduction. Optional, defaults to all channels.
+  * `monitor_channels`: a list of channels used for detection. Optional, defaults to all channels.
+  * `monitor_mode`: `Sum`, `Max` or `Rms`. Optional, defaults to `Max`, preserving the largest
+    individual channel magnitude. See [monitor-channel aggregation](#monitor-channel-aggregation)
+    for the different meanings of the limit in Sum/Rms mode.
   * `process_channels`: a list of channels to apply the gain reduction to. Optional, defaults to all channels.
   * `delay_processed_only`: only delay the channels in `process_channels`, and pass the others through
     without any delay. Optional, defaults to `false`, meaning that all channels are delayed.

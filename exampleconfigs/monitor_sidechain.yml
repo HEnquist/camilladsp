@@ -1,0 +1,63 @@
+# Four interleaved input channels: music L/R, announcement L/R.
+# Illustrative settings only; no hardware validation is implied.
+# Reads/writes raw floating-point audio through pipes, not a hardware device.
+devices:
+  samplerate: 48000
+  chunksize: 256
+  capture:
+    type: Stdin
+    channels: 4
+    format: F64_LE
+  playback:
+    type: Stdout
+    channels: 2
+    format: F64_LE
+
+processors:
+  announcement_sidechain:
+    type: Compressor
+    parameters:
+      channels: 4
+      monitor_channels: [2, 3]
+      process_channels: [0, 1]
+      monitor_mode: Max
+      attack: 10
+      attack_unit: ms
+      release: 200
+      release_unit: ms
+      threshold: -30
+      factor: 6
+      makeup_gain: 0
+  output_peak_limiter:
+    type: LookaheadLimiter
+    parameters:
+      channels: 2
+      monitor_channels: [0, 1]
+      process_channels: [0, 1]
+      monitor_mode: Max
+      limit: -3
+      attack: 2
+      attack_unit: ms
+      release: 100
+      release_unit: ms
+
+mixers:
+  mix_announcements:
+    channels:
+      in: 4
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - {channel: 0, gain: 0}
+          - {channel: 2, gain: 0}
+      - dest: 1
+        sources:
+          - {channel: 1, gain: 0}
+          - {channel: 3, gain: 0}
+
+pipeline:
+  - {type: Processor, name: announcement_sidechain}
+  - {type: Mixer, name: mix_announcements}
+  # This limiter adds its configured 2 ms lookahead delay. Aggregation adds none.
+  - {type: Processor, name: output_peak_limiter}

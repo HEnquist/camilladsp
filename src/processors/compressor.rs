@@ -20,6 +20,7 @@ use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::clipper::Clipper;
 use crate::processors::Processor;
+use crate::processors::monitor::aggregate_monitor_channels;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
@@ -31,6 +32,7 @@ pub struct Compressor {
     pub name: String,
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
+    pub monitor_mode: config::MonitorMode,
     pub process_channels: Vec<usize>,
     pub attack: CamillaFloat,
     pub release: CamillaFloat,
@@ -102,6 +104,7 @@ impl Compressor {
             name,
             channels,
             monitor_channels,
+            monitor_mode: config.monitor_mode(),
             process_channels,
             attack,
             release,
@@ -112,17 +115,6 @@ impl Compressor {
             samplerate,
             scratch,
             prev_loudness: -100.0,
-        }
-    }
-
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
-    /// A channel that was not captured is empty, and counts as silence.
-    fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        self.scratch.fill(0.0);
-        for ch in self.monitor_channels.iter() {
-            for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
-                *acc += *val;
-            }
         }
     }
 
@@ -173,7 +165,12 @@ impl Processor for Compressor {
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
     fn process_chunk(&mut self, input: &mut AudioChunk) {
-        self.sum_monitor_channels(input);
+        aggregate_monitor_channels(
+            input,
+            &self.monitor_channels,
+            self.monitor_mode,
+            &mut self.scratch,
+        );
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
@@ -220,6 +217,7 @@ impl Processor for Compressor {
             };
 
             self.monitor_channels = monitor_channels;
+            self.monitor_mode = config.monitor_mode();
             self.process_channels = process_channels;
             self.attack = attack.to_camilla_float();
             self.release = release.to_camilla_float();
@@ -258,6 +256,7 @@ mod tests {
         let config = config::CompressorParameters {
             channels: 2,
             monitor_channels: None,
+            monitor_mode: None,
             process_channels: Some(vec![1]),
             attack: finite!(1.0),
             attack_unit: TimeUnit::Samples,
@@ -285,3 +284,7 @@ mod tests {
         assert_ne!(empty.waveforms[1], waveform);
     }
 }
+
+#[cfg(test)]
+#[path = "compressor_monitor_tests.rs"]
+mod monitor_tests;
