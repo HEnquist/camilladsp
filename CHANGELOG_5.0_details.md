@@ -163,6 +163,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   new flag.
 - The sample type `PrcFmt` is renamed to `CamillaFloat`. The active precision is now shown as
   `Sample precision` in `camilladsp --help`.
+- The library is renamed from `camillalib` to `camilladsp`, matching the name of the crate on
+  crates.io. The module names in log messages change with it, so a `custom_log_spec` filter like
+  `camillalib::filters=debug` must be changed to `camilladsp::filters=debug`.
 - Configuration values and filter coefficient math are now always 64-bit, independent of the
   processing precision. An f32 build therefore parses configs, serialises them over the websocket,
   and computes filter coefficients exactly like a normal build, and rounds only once when the

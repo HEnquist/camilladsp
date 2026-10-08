@@ -1,5 +1,5 @@
 [package]
-name = "CamillaDSP"
+name = "camilladsp"
 version = "5.0.0"
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
@@ -41,10 +41,6 @@ debug = []
 # instead, set with RUSTFLAGS="--cfg camillafloat_f32".
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(camillafloat_f32)'] }
-
-[lib]
-name = "camillalib"
-path = "src/lib.rs"
 
 [[bin]]
 name = "camilladsp"

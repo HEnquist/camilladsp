@@ -1,13 +1,13 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::time::Duration;
 
-use camillalib::CamillaFloat;
-use camillalib::ProcessingParameters;
-use camillalib::audiochunk::AudioChunk;
-use camillalib::config;
-use camillalib::config::FiniteF64;
-use camillalib::filters::fftconv::ConvCoeffCache;
-use camillalib::pipeline::Pipeline;
+use camilladsp::CamillaFloat;
+use camilladsp::ProcessingParameters;
+use camilladsp::audiochunk::AudioChunk;
+use camilladsp::config;
+use camilladsp::config::FiniteF64;
+use camilladsp::filters::fftconv::ConvCoeffCache;
+use camilladsp::pipeline::Pipeline;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -240,7 +240,7 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
     };
 
     let processing_params = Arc::new(ProcessingParameters::new(&[0.0_f32; 5], &[false; 5]));
-    let filter_pool = camillalib::processing::build_processing_threadpool(
+    let filter_pool = camilladsp::processing::build_processing_threadpool(
         multithreaded,
         conf.devices.worker_threads(),
         conf.devices.chunksize(),
@@ -321,7 +321,7 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
     };
 
     let processing_params = Arc::new(ProcessingParameters::new(&[0.0_f32; 5], &[false; 5]));
-    let filter_pool = camillalib::processing::build_processing_threadpool(
+    let filter_pool = camilladsp::processing::build_processing_threadpool(
         multithreaded,
         conf.devices.worker_threads(),
         conf.devices.chunksize(),
