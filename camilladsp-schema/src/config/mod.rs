@@ -1652,7 +1652,7 @@ pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
@@ -1671,7 +1671,6 @@ pub struct CompressorParameters {
 }
 
 impl CompressorParameters {
-    /// Resolve the omitted/null mode without changing this processor's legacy default.
     pub fn monitor_mode(&self) -> MonitorMode {
         self.monitor_mode.unwrap_or(MonitorMode::Sum)
     }
@@ -1701,7 +1700,7 @@ pub struct NoiseGateParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
@@ -1714,7 +1713,6 @@ pub struct NoiseGateParameters {
 }
 
 impl NoiseGateParameters {
-    /// Resolve the omitted/null mode without changing this processor's legacy default.
     pub fn monitor_mode(&self) -> MonitorMode {
         self.monitor_mode.unwrap_or(MonitorMode::Sum)
     }
@@ -1736,7 +1734,7 @@ pub struct LookaheadLimiterProcessorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
@@ -1751,7 +1749,6 @@ pub struct LookaheadLimiterProcessorParameters {
 }
 
 impl LookaheadLimiterProcessorParameters {
-    /// Resolve the omitted/null mode without changing this processor's legacy default.
     pub fn monitor_mode(&self) -> MonitorMode {
         self.monitor_mode.unwrap_or(MonitorMode::Max)
     }

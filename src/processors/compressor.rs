@@ -247,5 +247,44 @@ impl Processor for Compressor {
 }
 
 #[cfg(test)]
-#[path = "compressor_monitor_tests.rs"]
-mod monitor_tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_and_mode_change_preserves_loudness() {
+        for mode in ["", "monitor_mode: null"] {
+            let mut parameters: config::CompressorParameters = yaml_serde::from_str(&format!(
+                "channels: 2
+attack: 3
+attack_unit: samples
+release: 19
+release_unit: samples
+threshold: -20
+factor: 2
+{mode}
+"
+            ))
+            .unwrap();
+            let mut processor = Compressor::from_config("test", parameters.clone(), 48000, 8);
+            assert_eq!(processor.monitor_mode, config::MonitorMode::Sum);
+            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.25; 8]], 1.0, -1.0, 8, 8);
+            processor.process_chunk(&mut input);
+            let mut unchanged = processor.clone();
+            assert!(processor.prev_loudness < 0.0);
+
+            parameters.monitor_mode = Some(config::MonitorMode::Rms);
+            processor.update_parameters(config::Processor::Compressor {
+                description: None,
+                parameters,
+            });
+            assert_eq!(processor.prev_loudness, unchanged.prev_loudness);
+            assert_eq!(processor.monitor_mode, config::MonitorMode::Rms);
+
+            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.5; 8]], 1.0, -1.0, 8, 8);
+            let mut reference = AudioChunk::from(&input, input.waveforms.clone());
+            unchanged.process_chunk(&mut reference);
+            processor.process_chunk(&mut input);
+            assert!(processor.prev_loudness > unchanged.prev_loudness);
+        }
+    }
+}

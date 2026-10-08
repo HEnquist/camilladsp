@@ -167,32 +167,17 @@ impl Processor for LookaheadLimiter {
                 samplerate,
             );
 
-            let monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
-            let process_channels = all_channels_if_empty(config.process_channels(), channels);
-            // The existing gain setter pads detection history with zeros. Do not
-            // call it for a mode-only change or an effective no-op: delayed audio
-            // still needs the detection history with which it entered the limiter.
-            let preserve_history = channels == self.channels
-                && monitor_channels == self.monitor_channels
-                && process_channels == self.process_channels
-                && config.delay_processed_only() == self.delay_processed_only
-                && limit == self.gain.limit
-                && attack_samples == self.gain.attack_samples
-                && release_coeff == self.gain.release_coeff;
-
             // Rebuilding the delays clears them, so only do it when the length changed.
             if attack_samples != self.gain.attack_samples || channels != self.channels {
                 self.delays = make_delays(channels, attack_samples, samplerate);
             }
             self.channels = channels;
-            self.monitor_channels = monitor_channels;
+            self.monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
             self.monitor_mode = config.monitor_mode();
-            self.process_channels = process_channels;
+            self.process_channels = all_channels_if_empty(config.process_channels(), channels);
             self.delay_processed_only = config.delay_processed_only();
-            if !preserve_history {
-                self.gain
-                    .set_parameters(limit, attack_samples, release_coeff);
-            }
+            self.gain
+                .set_parameters(limit, attack_samples, release_coeff);
 
             debug!(
                 "Updated lookahead limiter '{}', monitor_channels: {:?}, process_channels: {:?}, delay_processed_only: {}, limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
@@ -251,6 +236,46 @@ mod tests {
                 "Mismatch at index {i}: left={l}, right={r}\nleft:  {left:?}\nright: {right:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_default_monitor_mode() {
+        for mode in ["", "monitor_mode: null"] {
+            let parameters = yaml_serde::from_str(&format!(
+                "channels: 2\nattack: 2\nattack_unit: samples\nrelease: 4\nrelease_unit: samples\n{mode}"
+            ))
+            .unwrap();
+            let limiter = LookaheadLimiter::from_config("test", parameters, 48000, 2);
+            assert_eq!(limiter.monitor_mode, config::MonitorMode::Max);
+        }
+    }
+
+    #[test]
+    fn test_mode_change_preserves_buffered_history() {
+        let mut parameters = params(None, None, 2.0, 1.0 / std::f64::consts::LN_2);
+        let mut limiter = LookaheadLimiter::from_config("test", parameters.clone(), 48000, 2);
+        let input = vec![vec![4.0; 2], vec![-4.0; 2]];
+        limiter.process_chunk(&mut chunk(input.clone()));
+
+        parameters.monitor_mode = Some(config::MonitorMode::Sum);
+        limiter.update_parameters(config::Processor::LookaheadLimiter {
+            description: None,
+            parameters,
+        });
+
+        // Buffered Max detection still limits the delayed audio, even though
+        // incoming opposite-polarity samples cancel with Sum.
+        let mut output = chunk(input.clone());
+        limiter.process_chunk(&mut output);
+        assert_close(&output.waveforms[0], &[1.0, 1.0], 1e-6);
+        assert_close(&output.waveforms[1], &[-1.0, -1.0], 1e-6);
+
+        // Once the old detection drains, only the release envelope remains.
+        let mut output = chunk(input);
+        limiter.process_chunk(&mut output);
+        let expected = [2.0, 4.0 * CamillaFloat::sqrt(0.5)];
+        assert_close(&output.waveforms[0], &expected, 1e-6);
+        assert_close(&output.waveforms[1], &expected.map(|value| -value), 1e-6);
     }
 
     /// With a single channel the processor must match the filter exactly.
