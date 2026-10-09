@@ -40,4 +40,10 @@ audioadapter = "5.0.0"
 audioadapter-sample = "5.1.0"
 waveadapter = "0.3.0"
 serde_json = "1.0"
-utoipa = { version = "6.0.0", optional = true }
+# preserve_order keeps the properties in declaration order, which the generated
+# websocket.md relies on.
+utoipa = { version = "6.0.0", optional = true, features = ["preserve_order"] }
+
+[[example]]
+name = "ws_schema"
+required-features = ["utoipa"]
