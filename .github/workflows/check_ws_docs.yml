@@ -28,11 +28,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install ALSA development files
-        run: sudo apt-get update && sudo apt-get install libasound2-dev -y
+      # The generator only builds the camilladsp-schema crate, so no audio
+      # libraries are needed.
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install Python dependencies
         run: pip install jinja2 pyyaml

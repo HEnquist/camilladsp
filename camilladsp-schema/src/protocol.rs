@@ -60,18 +60,21 @@ use std::sync::Arc;
 // ── State and device types that replies carry ──────────────────────────────
 
 /// The state of the processing, as reported by [`WsCommand::GetState`].
+///
+/// - `Running`: processing is running normally.
+/// - `Paused`: processing is paused because the input signal is silent.
+/// - `Inactive`: processing is off and devices are closed, waiting for a new configuration.
+/// - `Starting`: opening devices and starting up processing with a new configuration.
+/// - `Stalled`: the capture device is not providing data, so processing is stalled.
+// The values are described on the enum rather than on each variant, since the OpenAPI schema
+// of a unit-only enum has no per-variant descriptions. The same goes for CapabilityMode.
 #[derive(Clone, Debug, Copy, Deserialize, Serialize, Eq, PartialEq)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ProcessingState {
-    /// Processing is running normally.
     Running,
-    /// Processing is paused because the input signal is silent.
     Paused,
-    /// Processing is off and devices are closed, waiting for a new configuration.
     Inactive,
-    /// Opening devices and starting up processing with a new configuration.
     Starting,
-    /// Capture device is not providing data; processing is stalled.
     Stalled,
 }
 
@@ -128,14 +131,16 @@ pub struct ChannelCapability {
     pub samplerates: Vec<SamplerateCapability>,
 }
 
+/// The access mode a [`DeviceCapabilitySet`] was probed under.
+///
+/// - `Unified`: the device uses a unified capability model (ALSA, CoreAudio, ASIO).
+/// - `Shared`: WASAPI shared-mode capabilities, derived from the mix format.
+/// - `Exclusive`: WASAPI exclusive-mode capabilities, probed independently.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CapabilityMode {
-    /// Device uses a unified capability model (ALSA, CoreAudio, ASIO).
     Unified,
-    /// WASAPI shared-mode capabilities (derived from the mix format).
     Shared,
-    /// WASAPI exclusive-mode capabilities (probed independently).
     Exclusive,
 }
 
@@ -179,6 +184,7 @@ pub struct SpectrumData {
 /// Serialised as a lowercase string: `"playback"`, `"capture"`, or `"both"`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WsSignalLevelSide {
     /// Playback side only.
     Playback,
@@ -207,6 +213,7 @@ pub enum SpectrumSide {
 /// Output bins are logarithmically spaced between `min_freq` and `max_freq`.
 /// Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SpectrumRequest {
     /// Which side to analyze: `"capture"` or `"playback"`.
     pub side: SpectrumSide,
@@ -246,6 +253,7 @@ pub struct SpectrumSubscription {
 ///
 /// Controls smoothing and rate-limiting of pushed level events.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VuSubscription {
     /// Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
     ///
@@ -272,37 +280,40 @@ pub struct VuSubscription {
 /// See the [module-level documentation](self) for the general message format.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "command")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WsCommand {
     // ── Config management ──────────────────────────────────────────────────
     /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
-    ///
-    /// Argument: file path as a string.
-    SetConfigFilePath { value: String },
+    SetConfigFilePath {
+        /// Path of the config file.
+        value: String,
+    },
 
     /// Upload and immediately apply a new configuration as a YAML string.
-    ///
-    /// Argument: config in YAML format as a string.
-    SetConfig { value: String },
+    SetConfig {
+        /// Config in YAML format.
+        value: String,
+    },
 
     /// Upload and immediately apply a new configuration as a JSON string.
-    ///
-    /// Argument: config in JSON format as a string.
-    SetConfigJson { value: String },
+    SetConfigJson {
+        /// Config in JSON format.
+        value: String,
+    },
 
     /// Apply a partial patch to the active configuration.
     ///
-    /// The patch is a partial config object containing only the fields to change.
     /// If the resulting config is valid it is applied immediately.
-    ///
-    /// Argument: partial config as a JSON value.
-    PatchConfig { value: serde_json::Value },
+    PatchConfig {
+        /// Partial config object containing only the fields to change.
+        value: serde_json::Value,
+    },
 
     /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
-    ///
-    /// Fields: `pointer` is a JSON Pointer string such as `"/devices/samplerate"`, and `value`
-    /// is the JSON value to store there.
     SetConfigValue {
+        /// JSON Pointer to the value, such as `"/devices/samplerate"`.
         pointer: String,
+        /// The value to store there.
         value: serde_json::Value,
     },
 
@@ -313,9 +324,10 @@ pub enum WsCommand {
     GetConfig,
 
     /// Read a single value from the active configuration using a JSON Pointer (RFC 6901).
-    ///
-    /// Argument: JSON Pointer string, e.g. `"/devices/samplerate"`.
-    GetConfigValue { value: String },
+    GetConfigValue {
+        /// JSON Pointer to the value, such as `"/devices/samplerate"`.
+        value: String,
+    },
 
     /// Read the `title` field from the active configuration.
     GetConfigTitle,
@@ -327,29 +339,34 @@ pub enum WsCommand {
     GetPreviousConfig,
 
     /// Parse and fill defaults for a YAML config string without changing the active config.
-    ///
-    /// Argument: config in YAML format as a string.
-    ReadConfig { value: String },
+    ReadConfig {
+        /// Config in YAML format.
+        value: String,
+    },
 
     /// Parse and fill defaults for a JSON config string without changing the active config.
-    ///
-    /// Argument: config in JSON format as a string.
-    ReadConfigJson { value: String },
+    ReadConfigJson {
+        /// Config in JSON format.
+        value: String,
+    },
 
     /// Parse and fill defaults for a config file without changing the active config.
-    ///
-    /// Argument: path to the config file as a string.
-    ReadConfigFile { value: String },
+    ReadConfigFile {
+        /// Path of the config file.
+        value: String,
+    },
 
     /// Like [`ReadConfig`](Self::ReadConfig) but performs more extensive validation checks.
-    ///
-    /// Argument: config in YAML format as a string.
-    ValidateConfig { value: String },
+    ValidateConfig {
+        /// Config in YAML format.
+        value: String,
+    },
 
     /// Like [`ReadConfigJson`](Self::ReadConfigJson) but performs more extensive validation checks.
-    ///
-    /// Argument: config in JSON format as a string.
-    ValidateConfigJson { value: String },
+    ValidateConfigJson {
+        /// Config in JSON format.
+        value: String,
+    },
 
     /// Read the active configuration as JSON.
     GetConfigJson,
@@ -373,10 +390,11 @@ pub enum WsCommand {
     /// Get the RMS level of the last chunk on the capture side, per channel.
     GetCaptureSignalRms,
 
-    /// Get the RMS level averaged over the last `n` seconds on the capture side, per channel.
-    ///
-    /// Argument: time window in seconds as a float.
-    GetCaptureSignalRmsSince { value: f32 },
+    /// Get the RMS level averaged over the last `value` seconds on the capture side, per channel.
+    GetCaptureSignalRmsSince {
+        /// Time window in seconds.
+        value: f32,
+    },
 
     /// Get the RMS level since the last call to this command from this client, per channel.
     ///
@@ -387,10 +405,11 @@ pub enum WsCommand {
     /// Get the peak level of the last chunk on the capture side, per channel.
     GetCaptureSignalPeak,
 
-    /// Get the peak level over the last `n` seconds on the capture side, per channel.
-    ///
-    /// Argument: time window in seconds as a float.
-    GetCaptureSignalPeakSince { value: f32 },
+    /// Get the peak level over the last `value` seconds on the capture side, per channel.
+    GetCaptureSignalPeakSince {
+        /// Time window in seconds.
+        value: f32,
+    },
 
     /// Get the peak level since the last call to this command from this client, per channel.
     GetCaptureSignalPeakSinceLast,
@@ -398,10 +417,11 @@ pub enum WsCommand {
     /// Get the RMS level of the last chunk on the playback side, per channel.
     GetPlaybackSignalRms,
 
-    /// Get the RMS level averaged over the last `n` seconds on the playback side, per channel.
-    ///
-    /// Argument: time window in seconds as a float.
-    GetPlaybackSignalRmsSince { value: f32 },
+    /// Get the RMS level averaged over the last `value` seconds on the playback side, per channel.
+    GetPlaybackSignalRmsSince {
+        /// Time window in seconds.
+        value: f32,
+    },
 
     /// Get the RMS level since the last call to this command from this client, per channel.
     GetPlaybackSignalRmsSinceLast,
@@ -409,10 +429,11 @@ pub enum WsCommand {
     /// Get the peak level of the last chunk on the playback side, per channel.
     GetPlaybackSignalPeak,
 
-    /// Get the peak level over the last `n` seconds on the playback side, per channel.
-    ///
-    /// Argument: time window in seconds as a float.
-    GetPlaybackSignalPeakSince { value: f32 },
+    /// Get the peak level over the last `value` seconds on the playback side, per channel.
+    GetPlaybackSignalPeakSince {
+        /// Time window in seconds.
+        value: f32,
+    },
 
     /// Get the peak level since the last call to this command from this client, per channel.
     GetPlaybackSignalPeakSinceLast,
@@ -420,22 +441,24 @@ pub enum WsCommand {
     /// Get RMS and peak levels for both sides in a single request.
     GetSignalLevels,
 
-    /// Get RMS and peak levels over the last `n` seconds for both sides.
-    ///
-    /// Argument: time window in seconds as a float.
-    GetSignalLevelsSince { value: f32 },
+    /// Get RMS and peak levels over the last `value` seconds for both sides.
+    GetSignalLevelsSince {
+        /// Time window in seconds.
+        value: f32,
+    },
 
     /// Get RMS and peak levels since the last call to this command from this client, for both sides.
     GetSignalLevelsSinceLast,
 
     /// Subscribe to pushed signal level events.
     ///
-    /// Argument: which side to receive events for — `"playback"`, `"capture"`, or `"both"`.
-    ///
     /// While subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a
     /// new chunk is analyzed. The event rate therefore depends on the configured chunk size and
     /// sample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeSignalLevels { value: WsSignalLevelSide },
+    SubscribeSignalLevels {
+        /// Which side to receive events for.
+        value: WsSignalLevelSide,
+    },
 
     /// Subscribe to smoothed, rate-capped VU-meter level events.
     ///
@@ -445,7 +468,10 @@ pub enum WsCommand {
     /// While subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing
     /// smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeVuLevels { value: VuSubscription },
+    SubscribeVuLevels {
+        /// Rate limit and smoothing settings.
+        value: VuSubscription,
+    },
 
     /// Stop an active subscription (signal levels, VU levels, state, or spectrum).
     ///
@@ -478,27 +504,29 @@ pub enum WsCommand {
     GetUpdateInterval,
 
     /// Set the update interval for capture rate and signal range polling.
-    ///
-    /// Argument: interval in milliseconds as an integer.
-    SetUpdateInterval { value: usize },
+    SetUpdateInterval {
+        /// Interval in milliseconds.
+        value: usize,
+    },
 
     // ── Volume control (Main fader) ───────────────────────────────────────
     /// Get the current volume of the Main fader.
     GetVolume,
 
     /// Set the volume of the Main fader. Clamped to −150 to +50 dB.
-    ///
-    /// Argument: volume in dB as a float.
-    SetVolume { value: f32 },
+    SetVolume {
+        /// Volume in dB.
+        value: f32,
+    },
 
     /// Adjust the volume of the Main fader by `value` dB.
-    ///
-    /// The optional `min` and `max` fields clamp the resulting volume; when omitted they default
-    /// to the global −150 to +50 dB range.
     AdjustVolume {
+        /// Volume change in dB.
         value: f32,
+        /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
         #[serde(default)]
         min: Option<f32>,
+        /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
         #[serde(default)]
         max: Option<f32>,
     },
@@ -507,9 +535,10 @@ pub enum WsCommand {
     GetMute,
 
     /// Set the mute state of the Main fader.
-    ///
-    /// Argument: `true` to mute, `false` to unmute.
-    SetMute { value: bool },
+    SetMute {
+        /// `true` to mute, `false` to unmute.
+        value: bool,
+    },
 
     /// Toggle the mute state of the Main fader.
     ToggleMute,
@@ -519,48 +548,61 @@ pub enum WsCommand {
     GetFaders,
 
     /// Get the volume of a specific fader.
-    ///
-    /// Field: `fader` index — 0 for Main, 1–4 for Aux1–Aux4.
-    GetFaderVolume { fader: usize },
+    GetFaderVolume {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+    },
 
     /// Set the volume of a specific fader. Clamped to −150 to +50 dB.
-    ///
-    /// Fields: `fader` index and `value` (volume in dB).
-    SetFaderVolume { fader: usize, value: f32 },
+    SetFaderVolume {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+        /// Volume in dB.
+        value: f32,
+    },
 
     /// Special volume setter for use with a Loudness filter and an external volume control
     /// (without a Volume filter). Clamped to −150 to +50 dB.
-    ///
-    /// Fields: `fader` index and `value` (volume in dB).
-    SetFaderExternalVolume { fader: usize, value: f32 },
+    SetFaderExternalVolume {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+        /// Volume in dB.
+        value: f32,
+    },
 
     /// Adjust the volume of a specific fader by `value` dB.
-    ///
-    /// Fields: `fader` index and `value` (delta in dB). The optional `min` and `max` fields clamp
-    /// the resulting volume; when omitted they default to the global −150 to +50 dB range.
     AdjustFaderVolume {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
         fader: usize,
+        /// Volume change in dB.
         value: f32,
+        /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
         #[serde(default)]
         min: Option<f32>,
+        /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
         #[serde(default)]
         max: Option<f32>,
     },
 
     /// Get the mute state of a specific fader.
-    ///
-    /// Field: `fader` index.
-    GetFaderMute { fader: usize },
+    GetFaderMute {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+    },
 
     /// Set the mute state of a specific fader.
-    ///
-    /// Fields: `fader` index and `value` (`true` to mute).
-    SetFaderMute { fader: usize, value: bool },
+    SetFaderMute {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+        /// `true` to mute, `false` to unmute.
+        value: bool,
+    },
 
     /// Toggle the mute state of a specific fader.
-    ///
-    /// Field: `fader` index.
-    ToggleFaderMute { fader: usize },
+    ToggleFaderMute {
+        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+        fader: usize,
+    },
 
     // ── General ───────────────────────────────────────────────────────────
     /// Get the CamillaDSP version string.
@@ -590,28 +632,38 @@ pub enum WsCommand {
 
     // ── Audio device listing ──────────────────────────────────────────────
     /// List available capture devices for a given backend.
-    ///
-    /// Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-    GetAvailableCaptureDevices { backend: String },
+    GetAvailableCaptureDevices {
+        /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+        backend: String,
+    },
 
     /// List available playback devices for a given backend.
-    ///
-    /// Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-    GetAvailablePlaybackDevices { backend: String },
+    GetAvailablePlaybackDevices {
+        /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+        backend: String,
+    },
 
     /// Get the capabilities of a specific capture device.
     ///
-    /// Fields: `backend` and `device` names.
-    ///
     /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetCaptureDeviceCapabilities { backend: String, device: String },
+    GetCaptureDeviceCapabilities {
+        /// Backend name.
+        backend: String,
+        /// Device identifier, as listed by
+        /// [`GetAvailableCaptureDevices`](Self::GetAvailableCaptureDevices).
+        device: String,
+    },
 
     /// Get the capabilities of a specific playback device.
     ///
-    /// Fields: `backend` and `device` names.
-    ///
     /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetPlaybackDeviceCapabilities { backend: String, device: String },
+    GetPlaybackDeviceCapabilities {
+        /// Backend name.
+        backend: String,
+        /// Device identifier, as listed by
+        /// [`GetAvailablePlaybackDevices`](Self::GetAvailablePlaybackDevices).
+        device: String,
+    },
 
     // ── Performance ───────────────────────────────────────────────────────
     /// Get the current pipeline processing load.
@@ -622,7 +674,10 @@ pub enum WsCommand {
 
     // ── Spectrum analysis ─────────────────────────────────────────────────
     /// Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
-    GetSpectrum { value: SpectrumRequest },
+    GetSpectrum {
+        /// The spectrum to compute.
+        value: SpectrumRequest,
+    },
 
     /// Subscribe to pushed spectrum events.
     ///
@@ -634,7 +689,10 @@ pub enum WsCommand {
     /// the subscription is cancelled. Resubscribe once processing has resumed.
     ///
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    SubscribeSpectrum { value: SpectrumSubscription },
+    SubscribeSpectrum {
+        /// The spectrum to compute, and the push rate.
+        value: SpectrumSubscription,
+    },
 
     // ── Shutdown ──────────────────────────────────────────────────────────
     /// Stop processing and exit CamillaDSP.
@@ -657,6 +715,7 @@ pub enum WsCommand {
 /// See the [module-level documentation](self) for the full response format.
 #[derive(Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "result")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WsResult {
     /// The command succeeded.
     Ok,
@@ -721,6 +780,7 @@ pub struct ChannelLabels {
 ///
 /// All values are in dB (0 dB = full level), one entry per channel.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AllLevels {
     /// RMS level per playback channel in dB.
     pub playback_rms: Vec<f32>,
@@ -736,6 +796,7 @@ pub struct AllLevels {
 ///
 /// All values are in dB, one entry per channel.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct PbCapLevels {
     /// Peak level per playback channel in dB, measured since processing started.
     pub playback: Vec<f32>,
@@ -757,10 +818,13 @@ pub struct Fader {
 ///
 /// All dB values are per-channel, 0 dB = full level.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct StreamLevels {
     /// Which side these levels belong to.
     pub side: WsSignalLevelSide,
+    /// RMS level per channel in dB.
     pub rms: Vec<f32>,
+    /// Peak level per channel in dB.
     pub peak: Vec<f32>,
 }
 
@@ -770,9 +834,13 @@ pub struct StreamLevels {
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VuLevels {
+    /// Smoothed RMS level per playback channel in dB.
     pub playback_rms: Vec<f32>,
+    /// Smoothed peak level per playback channel in dB.
     pub playback_peak: Vec<f32>,
+    /// Smoothed RMS level per capture channel in dB.
     pub capture_rms: Vec<f32>,
+    /// Smoothed peak level per capture channel in dB.
     pub capture_peak: Vec<f32>,
 }
 
@@ -780,6 +848,7 @@ pub struct VuLevels {
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct StateUpdate {
+    /// The new processing state.
     pub state: ProcessingState,
     /// Present only when `state` is `Inactive`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -793,6 +862,7 @@ pub struct StateUpdate {
 /// "value": "2.0.0"}`.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "reply")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum WsReply {
     SetConfigFilePath {
         #[serde(flatten)]
@@ -1190,13 +1260,13 @@ pub enum WsReply {
     GetAvailableCaptureDevices {
         #[serde(flatten)]
         result: WsResult,
-        /// List of `[identifier, name_or_null]` pairs.
+        /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
         value: Vec<(String, String)>,
     },
     GetAvailablePlaybackDevices {
         #[serde(flatten)]
         result: WsResult,
-        /// List of `[identifier, name_or_null]` pairs.
+        /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
         value: Vec<(String, String)>,
     },
     GetCaptureDeviceCapabilities {
