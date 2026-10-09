@@ -96,7 +96,14 @@ If you use Python, the pyCamillaDSP library handles all of this for you. See
 
 The available commands are listed below.
 All commands return a result, and for those that also return a value it is described here.
+The structured values that commands take and return are described under [Types](#types).
 
+{% macro field_list(fields) %}
+{% for f in fields %}
+- `{{ f.name }}` ({{ f.type }}{% if f.optional %}, optional{% endif %}){% if f.docs %}: {{ f.docs }}{% endif %}
+
+{% endfor %}
+{% endmacro %}
 {% for group in groups %}
 ### {{ group.name }}
 
@@ -107,27 +114,62 @@ All commands return a result, and for those that also return a value it is descr
 
 {{ cmd.docs }}
 
-{% for t in cmd.linked_types %}
-**`{{ t.name }}` {{ t.kind }}:**
+{% if cmd.args %}
+Arguments:
 
-{% for entry in t.entries %}
-- `{{ entry.name }}`{% if entry.type %}: `{{ entry.type }}`{% endif %} — {{ entry.docs }}
-{% endfor %}
+{{ field_list(cmd.args) }}
+{% endif %}
+{% if cmd.returns %}
+Returns {{ cmd.returns }}
 
-{% endfor %}
-{% if cmd.returns_line %}
-Returns: {{ cmd.returns_line }}
-
-{% for t in cmd.returns_types %}
-**`{{ t.name }}` {{ t.kind }}:**
-
-{% for entry in t.entries %}
-- `{{ entry.name }}`{% if entry.type %}: `{{ entry.type }}`{% endif %} — {{ entry.docs }}
-{% endfor %}
-
-{% endfor %}
 {% endif %}
 {% endfor %}
+{% endfor %}
+## Other replies
+
+These replies do not answer a command. The events are pushed to clients that have subscribed to
+them, and `Invalid` is the reply to a message that could not be parsed as a command.
+
+{% for reply in other_replies %}
+### `{{ reply.name }}`
+
+{{ reply.docs }}
+
+{% if reply.fields %}
+Fields:
+
+{{ field_list(reply.fields) }}
+{% endif %}
+{% endfor %}
+## Types
+
+The structured values used by the commands and replies.
+
+{% for t in types %}
+### `{{ t.name }}`
+
+{% if t.docs %}
+{{ t.docs }}
+
+{% endif %}
+{% if t.fields %}
+Fields:
+
+{{ field_list(t.fields) }}
+{% endif %}
+{% if t.plain_values %}
+One of {{ t.plain_values }}.
+
+{% endif %}
+{% if t.options %}
+One of:
+
+{% for v in t.options %}
+- `{{ v.name }}`{% if v.docs %}: {{ v.docs }}{% endif %}
+
+{% endfor %}
+
+{% endif %}
 {% endfor %}
 
 ## Audio device capability response format
@@ -200,11 +242,12 @@ Example device list entries for ALSA:
 ]
 ```
 
-Example device list entries for WASAPI (identifier is the display name; name field is `null`):
+Example device list entries for WASAPI. The identifier is the display name, and the name repeats
+it. CoreAudio and ASIO do the same.
 ```
 [
-  ["Microphone (USB Microphone)", null],
-  ["In 3-4 (MOTU M Series)", null]
+  ["Microphone (USB Microphone)", "Microphone (USB Microphone)"],
+  ["In 3-4 (MOTU M Series)", "In 3-4 (MOTU M Series)"]
 ]
 ```
 

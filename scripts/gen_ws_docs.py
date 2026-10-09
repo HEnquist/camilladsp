@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate websocket API documentation from rustdoc JSON.
+Generate websocket API documentation from the OpenAPI schemas of the protocol types.
+
+The schemas come from the ws_schema example of the camilladsp-schema crate, which utoipa
+derives from the Rust types and their serde attributes, so all names are the wire names.
 
 Writes the result directly to websocket.md in the repository root.
 
@@ -28,35 +31,33 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPT_DIR.parent
-# The protocol types live in the camilladsp-schema crate.
-JSON_PATH = REPO_ROOT / "target" / "doc" / "camilladsp_schema.json"
 GROUPS_CONFIG = SCRIPT_DIR / "ws_groups.yaml"
 TEMPLATE_FILE = "ws_template.md.j2"
 OUTPUT_PATH = REPO_ROOT / "websocket.md"
 
-# Types documented separately (error section, or the type itself is a command enum).
-SKIP_INLINE_TYPES = frozenset({
-    "WsResult",   # documented as the error-responses section
-    "WsCommand",  # is the command enum itself
-    "WsReply",    # push-event types; variant links appear in subscription docs
+# The message enums themselves, documented as commands, replies and errors rather than as types.
+MESSAGE_TYPES = frozenset({"WsCommand", "WsReply", "WsResult"})
+
+# Commands that exist in WsCommand but are not part of the protocol.
+INTERNAL_COMMANDS = frozenset({
+    "None",  # sentinel for non-text frames, #[doc(hidden)]
 })
 
 
-def run_rustdoc() -> None:
-    print("Running rustdoc...", file=sys.stderr)
+def load_schemas() -> dict:
+    print("Generating the protocol schemas...", file=sys.stderr)
     result = subprocess.run(
         [
-            "cargo", "+nightly", "rustdoc", "-p", "camilladsp-schema", "--lib", "--",
-            "-Z", "unstable-options",
-            "--output-format", "json",
-            "--document-private-items",
+            "cargo", "run", "-q", "-p", "camilladsp-schema",
+            "--features", "utoipa", "--example", "ws_schema",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        sys.exit(f"rustdoc failed:\n{result.stderr}")
+        sys.exit(f"ws_schema failed:\n{result.stderr}")
+    return json.loads(result.stdout)["components"]["schemas"]
 
 
 def clean_docs(text: str) -> str:
@@ -67,321 +68,192 @@ def clean_docs(text: str) -> str:
     text = re.sub(r'\[(`[^`]+`)\]\([^)]*\)', r'\1', text)
     # [`SomeType`] → `SomeType`
     text = re.sub(r'\[(`[^`]+`)\]', r'\1', text)
-    return text
+    return text.strip()
 
 
-# Map Rust primitive/stdlib names to JSON type names.
-_JSON_TYPES: dict[str, str] = {
-    "bool": "boolean",
-    "f32": "number",
-    "f64": "number",
-    "i8": "integer",
-    "i16": "integer",
-    "i32": "integer",
-    "i64": "integer",
-    "i128": "integer",
-    "isize": "integer",
-    "u8": "integer (≥ 0)",
-    "u16": "integer (≥ 0)",
-    "u32": "integer (≥ 0)",
-    "u64": "integer (≥ 0)",
-    "u128": "integer (≥ 0)",
-    "usize": "integer (≥ 0)",
-    "String": "string",
-    "str": "string",
-    "Value": "any",
-}
+def one_line(text: str) -> str:
+    """Join a multi-paragraph doc into one line, for use in a list entry."""
+    return re.sub(r"\s*\n\s*", " ", clean_docs(text))
 
 
-def format_type_node(type_node: dict) -> str:
-    """Convert a rustdoc JSON type node to a human-readable type string.
-
-    Handles primitives, resolved paths (including generics), and tuples.
-    Tuples are rendered with brackets since they serialise as JSON arrays.
-    Rust-specific numeric/string types are mapped to their JSON equivalents.
-    """
-    if not isinstance(type_node, dict):
-        return "?"
-    if "primitive" in type_node:
-        raw = type_node["primitive"]
-        return _JSON_TYPES.get(raw, raw)
-    if "resolved_path" in type_node:
-        rp = type_node["resolved_path"]
-        full_path = rp.get("path", rp.get("name", "?"))
-        name = full_path.rsplit("::", 1)[-1]
-        name = _JSON_TYPES.get(name, name)
-        args = rp.get("args") or {}
-        angle_args = args.get("angle_bracketed", {}).get("args", [])
-        if angle_args:
-            inner_types = [
-                format_type_node(arg["type"])
-                for arg in angle_args
-                if "type" in arg
-            ]
-            if inner_types:
-                if name == "Option":
-                    return f"{inner_types[0]} | null"
-                if name == "Vec":
-                    return f"{inner_types[0]}[]"
-                return f"{name}<{', '.join(inner_types)}>"
-        return name
-    if "tuple" in type_node:
-        parts = [format_type_node(t) for t in type_node["tuple"] if t is not None]
-        return f"[{', '.join(parts)}]"
-    return "?"
+def anchor(name: str) -> str:
+    """The GitHub heading anchor for a heading that is just the name in backticks."""
+    return name.lower()
 
 
-def command_arg_type_str(index: dict, variant_item: dict) -> str:
-    """Return a formatted argument type string for a WsCommand variant.
-
-    For single-field tuple variants returns the type name; for multi-field
-    variants returns a bracketed list (JSON array notation).
-    Returns an empty string for unit variants.
-    """
-    kind = variant_item.get("inner", {}).get("variant", {}).get("kind", {})
-    if not isinstance(kind, dict):
-        return ""
-
-    field_ids: list[int] = []
-    if "tuple" in kind:
-        field_ids = [fid for fid in kind["tuple"] if fid is not None]
-    elif "struct" in kind:
-        field_ids = kind["struct"].get("fields", [])
-
-    if not field_ids:
-        return ""
-
-    type_strings = []
-    for fid in field_ids:
-        field = index.get(str(fid), {})
-        sf = field.get("inner", {}).get("struct_field")
-        if isinstance(sf, dict):
-            type_strings.append(format_type_node(sf))
-
-    if not type_strings:
-        return ""
-    if len(type_strings) == 1:
-        return type_strings[0]
-    return f"[{', '.join(type_strings)}]"
+def ref_name(schema: dict) -> str | None:
+    ref = schema.get("$ref")
+    return ref.rsplit("/", 1)[-1] if ref else None
 
 
-def inject_arg_type(docs: str, arg_type: str) -> str:
-    """Inject a type annotation into 'Argument(s):' lines in a doc string.
-
-    Turns 'Argument: description' into 'Argument: `type` — description'.
-    Lines without an existing Argument(s) label are left unchanged.
-    """
-    if not arg_type or not docs:
-        return docs
-
-    def replace_match(m: re.Match) -> str:
-        return f"{m.group(1)}: `{arg_type}` — {m.group(2).strip()}"
-
-    return re.sub(r"(Arguments?):\s+(.+)", replace_match, docs)
-
-
-def get_type_entries(index: dict, item_id: int) -> tuple[str, list[dict]] | None:
-    """Return (kind, entries) for a struct (fields) or enum (variants), or None."""
-    item = index.get(str(item_id))
-    if not item:
-        return None
-    inner = item.get("inner", {})
-
-    if "struct" in inner:
-        kind = inner["struct"].get("kind", {})
-        field_ids = kind.get("plain", {}).get("fields", [])
-        entries = []
-        for fid in field_ids:
-            f = index.get(str(fid))
-            if not f or not f.get("docs"):
-                continue
-            docs = clean_docs(f["docs"])
-            sf = f.get("inner", {}).get("struct_field")
-            type_str = format_type_node(sf) if isinstance(sf, dict) else ""
-            entries.append({
-                "name": f["name"],
-                "docs": docs.split("\n\n")[0].strip(),
-                "type": type_str,
-            })
-        return ("fields", entries) if entries else None
-
-    if "enum" in inner:
-        entries = []
-        for vid in inner["enum"]["variants"]:
-            v = index.get(str(vid))
-            if not v or not v.get("docs"):
-                continue
-            docs = clean_docs(v["docs"])
-            entries.append({"name": v["name"], "docs": docs.split("\n\n")[0].strip(), "type": ""})
-        return ("values", entries) if entries else None
-
+def nullable_inner(schema: dict) -> dict | None:
+    """For a `oneOf: [X, {type: null}]` schema, return X."""
+    options = schema.get("oneOf")
+    if options and len(options) == 2 and {"type": "null"} in options:
+        return next(o for o in options if o != {"type": "null"})
     return None
 
 
-def linked_types(index: dict, variant_item: dict) -> list[dict]:
-    """Collect documented structs/enums for a variant's argument types.
-
-    Walks the actual Rust field types first (tuple or struct variant kinds),
-    then also checks intra-doc links in the doc comment (for types only
-    referenced in prose, not used directly as fields).
-    """
-    result = []
-    seen: set[str] = set()
-
-    def add_if_useful(item_id: int) -> None:
-        item = index.get(str(item_id))
-        if not item:
-            return
-        name = item.get("name", "")
-        if name in SKIP_INLINE_TYPES or name in seen:
-            return
-        seen.add(name)
-        info = get_type_entries(index, item_id)
-        if info:
-            kind, entries = info
-            result.append({"name": name, "kind": kind, "entries": entries})
-
-    # Walk actual Rust field types from the variant definition.
-    kind = variant_item.get("inner", {}).get("variant", {}).get("kind", {})
-    field_ids: list[int] = []
-    if isinstance(kind, dict):
-        if "tuple" in kind:
-            field_ids = [fid for fid in kind["tuple"] if fid is not None]
-        elif "struct" in kind:
-            field_ids = kind["struct"].get("fields", [])
-    for fid in field_ids:
-        field = index.get(str(fid), {})
-        sf = field.get("inner", {}).get("struct_field")
-        if isinstance(sf, dict):
-            rp = sf.get("resolved_path")
-            if isinstance(rp, dict) and "id" in rp:
-                add_if_useful(rp["id"])
-
-    # Also check intra-doc links for types only mentioned in prose.
-    for item_id in variant_item.get("links", {}).values():
-        add_if_useful(item_id)
-
-    return result
+def description_of(schema: dict) -> str:
+    """The description of a schema, also looking inside a nullable wrapper."""
+    if "description" in schema:
+        return schema["description"]
+    inner = nullable_inner(schema)
+    return inner.get("description", "") if inner else ""
 
 
-def _resolved_path_ids(sf: dict) -> list[int]:
-    """Return item IDs to try for type expansion from a struct_field type node.
-
-    Checks the top-level resolved_path, then the first generic type argument
-    (handles Vec<T>, Option<T>, etc. where T is the interesting type).
-    """
-    ids: list[int] = []
-    rp = sf.get("resolved_path")
-    if isinstance(rp, dict) and "id" in rp:
-        ids.append(rp["id"])
-        # Also look one level into generic args (e.g. Vec<Fader> → Fader).
-        args = rp.get("args") or {}
-        for arg in args.get("angle_bracketed", {}).get("args", []):
-            inner_rp = arg.get("type", {}).get("resolved_path")
-            if isinstance(inner_rp, dict) and "id" in inner_rp:
-                ids.append(inner_rp["id"])
-    return ids
+def primitive_md(type_name: str, schema: dict) -> str:
+    if type_name == "integer" and "minimum" in schema:
+        return f"`integer (≥ {schema['minimum']})`"
+    return f"`{type_name}`"
 
 
-def reply_value_info(index: dict, reply_variant: dict) -> dict:
-    """Extract the value field doc and any expandable return type from a WsReply variant."""
-    kind = reply_variant.get("inner", {}).get("variant", {}).get("kind", {})
-    if not isinstance(kind, dict) or "struct" not in kind:
-        return {}
-    for fid in kind["struct"].get("fields", []):
-        field = index.get(str(fid), {})
-        if field.get("name") != "value":
+def type_md(schema: dict) -> str:
+    """Render a schema as a Markdown type expression, linking named types to the Types section."""
+    name = ref_name(schema)
+    if name:
+        return f"[`{name}`](#{anchor(name)})"
+    inner = nullable_inner(schema)
+    if inner is not None:
+        return f"{type_md(inner)} or `null`"
+    type_field = schema.get("type")
+    if isinstance(type_field, list):
+        types = [t for t in type_field if t != "null"]
+        rendered = " or ".join(type_md({**schema, "type": t}) for t in types)
+        return f"{rendered} or `null`" if "null" in type_field else rendered
+    if type_field == "array":
+        if "prefixItems" in schema:
+            parts = ", ".join(type_md(item) for item in schema["prefixItems"])
+            return f"array \\[{parts}\\]"
+        items = type_md(schema.get("items", {}))
+        return f"array of ({items})" if " or " in items else f"array of {items}"
+    if type_field:
+        return primitive_md(type_field, schema)
+    if not set(schema) - {"description"}:
+        return "any JSON value"
+    print(f"Warning: unhandled schema shape {json.dumps(schema)}", file=sys.stderr)
+    return "`?`"
+
+
+def referenced_types(schema, found: list[str]) -> None:
+    """Collect the names of all named types a schema refers to, in order of appearance."""
+    if isinstance(schema, dict):
+        name = ref_name(schema)
+        if name and name not in found:
+            found.append(name)
+        for value in schema.values():
+            referenced_types(value, found)
+    elif isinstance(schema, list):
+        for value in schema:
+            referenced_types(value, found)
+
+
+def field_entries(schema: dict, skip: frozenset[str] = frozenset()) -> list[dict]:
+    """List the properties of an object schema, in declaration order."""
+    required = set(schema.get("required", []))
+    return [
+        {
+            "name": name,
+            "type": type_md(prop),
+            "optional": name not in required,
+            "docs": one_line(description_of(prop)),
+        }
+        for name, prop in schema.get("properties", {}).items()
+        if name not in skip
+    ]
+
+
+def tag_value(schema: dict, tag: str) -> str | None:
+    """The tag value of one variant of an internally tagged enum."""
+    parts = schema.get("allOf", [schema])
+    for part in parts:
+        prop = part.get("properties", {}).get(tag)
+        if prop and "enum" in prop:
+            return prop["enum"][0]
+    return None
+
+
+def variant_properties(schema: dict, tag: str) -> dict:
+    """Merge the properties of a variant of an internally tagged enum, leaving out the tag
+    and the flattened WsResult."""
+    merged = {"properties": {}, "required": []}
+    for part in schema.get("allOf", [schema]):
+        if ref_name(part):
             continue
-        doc = clean_docs(field.get("docs") or "")
-        types: list[dict] = []
-        returns_type_str = ""
-        sf = field.get("inner", {}).get("struct_field")
-        if isinstance(sf, dict):
-            returns_type_str = format_type_node(sf)
-            for item_id in _resolved_path_ids(sf):
-                type_item = index.get(str(item_id))
-                if not type_item:
-                    continue
-                tname = type_item.get("name", "")
-                if tname in SKIP_INLINE_TYPES:
-                    continue
-                info = get_type_entries(index, item_id)
-                if info:
-                    tkind, entries = info
-                    types.append({"name": tname, "kind": tkind, "entries": entries})
-                    break  # expand only the first documentable type
-        return {"returns_doc": doc, "returns_types": types, "returns_type_str": returns_type_str}
-    return {}
+        for name, prop in part.get("properties", {}).items():
+            if name != tag:
+                merged["properties"][name] = prop
+        merged["required"] += [r for r in part.get("required", []) if r != tag]
+    return merged
 
 
-def extract_reply_values(index: dict) -> dict[str, dict]:
-    """Map each WsReply variant name to its return value info."""
-    for item in index.values():
-        if item.get("name") == "WsReply" and "enum" in item.get("inner", {}):
-            result = {}
-            for vid in item["inner"]["enum"]["variants"]:
-                v = index[str(vid)]
-                info = reply_value_info(index, v)
-                if info:
-                    result[v["name"]] = info
-            return result
-    return {}
+def describe_type(name: str, schema: dict) -> dict:
+    """Describe one named type for the Types section."""
+    # "options" rather than "values", which in the template would be the dict method.
+    entry = {"name": name, "docs": clean_docs(schema.get("description", "")), "options": [],
+             "fields": [], "plain_values": ""}
+    if "enum" in schema:
+        # A plain enum has no per-value docs, so its values go on one line.
+        entry["plain_values"] = ", ".join(f"`{json.dumps(v)}`" for v in schema["enum"])
+    elif "oneOf" in schema:
+        for variant in schema["oneOf"]:
+            docs = one_line(variant.get("description", ""))
+            if "enum" in variant:
+                entry["options"].append({"name": json.dumps(variant["enum"][0]), "docs": docs})
+            else:
+                # An externally tagged variant with data, an object with a single key.
+                [(key, prop)] = variant["properties"].items()
+                plain_type = re.sub(r"[`\\]|\]\(#[^)]*\)|\[", "", type_md(prop))
+                entry["options"].append({"name": f'{{"{key}": {plain_type}}}', "docs": docs})
+    else:
+        entry["fields"] = field_entries(schema)
+    return entry
 
 
-def extract_enum_variants(index: dict, enum_name: str) -> list[dict]:
-    for item in index.values():
-        if item.get("name") == enum_name and "enum" in item.get("inner", {}):
-            variants = []
-            for vid in item["inner"]["enum"]["variants"]:
-                v = index[str(vid)]
-                variants.append({
-                    "name": v["name"],
-                    "docs": clean_docs(v.get("docs") or ""),
-                    "linked_types": linked_types(index, v),
-                    "_item": v,
-                })
-            return variants
-    sys.exit(f"Could not find enum '{enum_name}' in rustdoc JSON")
+def command_entry(schema: dict, replies: dict[str, dict]) -> dict:
+    name = tag_value(schema, "command")
+    docs = clean_docs(schema.get("description", ""))
+    args = field_entries(schema, skip=frozenset({"command"}))
+
+    returns = ""
+    reply = replies.get(name)
+    if reply is not None:
+        value = variant_properties(reply, "reply")["properties"].get("value")
+        if value is not None:
+            value_docs = one_line(description_of(value))
+            returns = f"({type_md(value)}): {value_docs}" if value_docs else type_md(value)
+    return {"name": name, "docs": docs, "args": args, "returns": returns}
+
+
+def other_reply_entry(name: str, schema: dict) -> dict:
+    return {
+        "name": name,
+        "docs": clean_docs(schema.get("description", "")),
+        "fields": field_entries(variant_properties(schema, "reply")),
+    }
 
 
 def main() -> None:
-    run_rustdoc()
-
-    data = json.loads(JSON_PATH.read_text())
+    schemas = load_schemas()
     config = yaml.safe_load(GROUPS_CONFIG.read_text())
-    index = data["index"]
 
-    # --- WsCommand variants + return info from matching WsReply variants ---
-    all_variants = extract_enum_variants(index, "WsCommand")
-    reply_values = extract_reply_values(index)
-    for v in all_variants:
-        info = reply_values.get(v["name"], {})
-        v["returns_doc"] = info.get("returns_doc", "")
-        v["returns_types"] = info.get("returns_types", [])
-        # Build returns_line: "`type` — doc" or just one of them if the other is absent.
-        rtype = info.get("returns_type_str", "")
-        rdoc = v["returns_doc"]
-        if rtype and rdoc:
-            v["returns_line"] = f"`{rtype}` — {rdoc}"
-        elif rtype:
-            v["returns_line"] = f"`{rtype}`"
-        else:
-            v["returns_line"] = rdoc
-        # Inject argument type into "Argument(s):" lines in the command docs.
-        arg_type = command_arg_type_str(index, v.pop("_item", {}))
-        if arg_type:
-            v["docs"] = inject_arg_type(v["docs"], arg_type)
-    variant_map = {v["name"]: v for v in all_variants}
+    replies = {tag_value(r, "reply"): r for r in schemas["WsReply"]["oneOf"]}
+    commands = [
+        command_entry(c, replies)
+        for c in schemas["WsCommand"]["oneOf"]
+        if tag_value(c, "command") not in INTERNAL_COMMANDS
+    ]
+    command_map = {c["name"]: c for c in commands}
 
     # Build groups, collecting all command names mentioned in config
     config_names: set[str] = set()
     groups = []
     ok = True
     for group in config["groups"]:
-        commands = []
+        group_commands = []
         for name in group["commands"]:
             config_names.add(name)
-            if name not in variant_map:
+            if name not in command_map:
                 print(
                     f"Warning: ws_groups.yaml references '{name}' "
                     "which does not exist in WsCommand",
@@ -389,15 +261,15 @@ def main() -> None:
                 )
                 ok = False
             else:
-                commands.append(variant_map[name])
+                group_commands.append(command_map[name])
         groups.append({
             "name": group["name"],
             "description": group.get("description", "").strip(),
-            "commands": commands,
+            "commands": group_commands,
         })
 
     # Warn about commands present in Rust but absent from config
-    for name in variant_map:
+    for name in command_map:
         if name not in config_names:
             print(
                 f"Warning: WsCommand::{name} is not listed in ws_groups.yaml",
@@ -411,9 +283,41 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    # --- WsResult error variants (skip Ok) ---
-    all_errors = extract_enum_variants(index, "WsResult")
-    errors = [e for e in all_errors if e["name"] != "Ok"]
+    # Replies that do not answer a command: pushed events, and the reply to an invalid message.
+    other_replies = [
+        other_reply_entry(name, schema)
+        for name, schema in replies.items()
+        if name not in command_map and name not in INTERNAL_COMMANDS
+    ]
+
+    # Errors are the WsResult variants other than Ok.
+    errors = [
+        {"name": tag_value(e, "result"), "docs": clean_docs(e.get("description", ""))}
+        for e in schemas["WsResult"]["oneOf"]
+        if tag_value(e, "result") != "Ok"
+    ]
+
+    # Every named type the messages use, in order of first appearance in the command groups.
+    command_schemas = {tag_value(c, "command"): c for c in schemas["WsCommand"]["oneOf"]}
+    type_names: list[str] = []
+    for group in groups:
+        for command in group["commands"]:
+            referenced_types(command_schemas[command["name"]], type_names)
+            if command["name"] in replies:
+                referenced_types(replies[command["name"]], type_names)
+    for reply in other_replies:
+        referenced_types(replies[reply["name"]], type_names)
+    # Follow the references inside the types themselves.
+    i = 0
+    while i < len(type_names):
+        referenced_types(schemas[type_names[i]], type_names)
+        i += 1
+    types = [describe_type(n, schemas[n]) for n in type_names if n not in MESSAGE_TYPES]
+
+    # The type headings and the command headings share one anchor namespace.
+    clashes = {t["name"].lower() for t in types} & {c.lower() for c in command_map}
+    if clashes:
+        sys.exit(f"Type names clash with command names: {', '.join(sorted(clashes))}")
 
     # --- Render ---
     env = jinja2.Environment(
@@ -423,7 +327,9 @@ def main() -> None:
         lstrip_blocks=True,
     )
     template = env.get_template(TEMPLATE_FILE)
-    OUTPUT_PATH.write_text(template.render(groups=groups, errors=errors))
+    OUTPUT_PATH.write_text(template.render(
+        groups=groups, other_replies=other_replies, types=types, errors=errors,
+    ))
     print(f"Written to {OUTPUT_PATH}", file=sys.stderr)
 
 

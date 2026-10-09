@@ -1,6 +1,6 @@
 # Maps WsCommand variants to named groups for the generated websocket documentation.
 # Order here controls the order in the output.
-# Run scripts/gen_ws_docs.py to regenerate websocket_reference.md.
+# Run scripts/gen_ws_docs.py to regenerate websocket.md.
 
 groups:
   - name: General

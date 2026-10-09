@@ -95,6 +95,7 @@ If you use Python, the pyCamillaDSP library handles all of this for you. See
 
 The available commands are listed below.
 All commands return a result, and for those that also return a value it is described here.
+The structured values that commands take and return are described under [Types](#types).
 
 ### General
 
@@ -104,13 +105,13 @@ Basic commands for querying the CamillaDSP version and the list of supported dev
 
 Get the CamillaDSP version string.
 
-Returns: `string` — Version string, e.g. `"2.0.0"`.
+Returns (`string`): Version string, e.g. `"2.0.0"`.
 
 #### `GetSupportedDeviceTypes`
 
 Get the list of supported playback and capture device types.
 
-Returns: `[string[], string[]]` — `[list_of_playback_types, list_of_capture_types]`.
+Returns (array \[array of `string`, array of `string`\]): `[list_of_playback_types, list_of_capture_types]`.
 
 #### `Stop`
 
@@ -130,13 +131,15 @@ Controls the polling interval used for background status sampling. The update in
 
 Get the update interval for capture rate and signal range polling.
 
-Returns: `integer (≥ 0)` — Update interval in milliseconds.
+Returns (`integer (≥ 0)`): Update interval in milliseconds.
 
 #### `SetUpdateInterval`
 
 Set the update interval for capture rate and signal range polling.
 
-Argument: `integer (≥ 0)` — interval in milliseconds as an integer.
+Arguments:
+
+- `value` (`integer (≥ 0)`): Interval in milliseconds.
 
 ### Processing status
 
@@ -146,31 +149,13 @@ Commands for monitoring the running pipeline: processing state, capture rate, si
 
 Get the current processing state.
 
-Returns: `ProcessingState` — Current processing state.
-
-**`ProcessingState` values:**
-
-- `Running` — Processing is running normally.
-- `Paused` — Processing is paused because the input signal is silent.
-- `Inactive` — Processing is off and devices are closed, waiting for a new configuration.
-- `Starting` — Opening devices and starting up processing with a new configuration.
-- `Stalled` — Capture device is not providing data; processing is stalled.
+Returns ([`ProcessingState`](#processingstate)): Current processing state.
 
 #### `GetStopReason`
 
 Get the reason processing last stopped.
 
-Returns: `StopReason` — Reason the processing last stopped.
-
-**`StopReason` values:**
-
-- `None` — Processing is still running; not yet stopped.
-- `Done` — Processing completed normally (e.g. end of file input).
-- `CaptureError` — Capture device reported an error.
-- `PlaybackError` — Playback device reported an error.
-- `UnknownError` — An unexpected internal error occurred.
-- `CaptureFormatChange` — Capture device sample rate changed to the given value.
-- `PlaybackFormatChange` — Playback device sample rate changed to the given value.
+Returns ([`StopReason`](#stopreason)): Reason the processing last stopped.
 
 #### `SubscribeState`
 
@@ -192,7 +177,7 @@ Returns `WsResult::InvalidRequestError` if no subscription is active.
 
 Get the measured sample rate of the capture device.
 
-Returns: `integer (≥ 0)` — Measured capture sample rate in Hz.
+Returns (`integer (≥ 0)`): Measured capture sample rate in Hz.
 
 #### `GetSignalRange`
 
@@ -200,26 +185,26 @@ Get the peak-to-peak signal range of the last processed chunk.
 
 A value of 2.0 means full level (signal swings from −1.0 to +1.0).
 
-Returns: `number` — Peak-to-peak amplitude range of the last chunk (2.0 = full level).
+Returns (`number`): Peak-to-peak amplitude range of the last chunk (2.0 = full level).
 
 #### `GetRateAdjust`
 
 Get the current adjustment factor applied to the asynchronous resampler.
 
-Returns: `number` — Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
+Returns (`number`): Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
 
 #### `GetBufferLevel`
 
 Get the current playback device buffer level when rate adjust is enabled.
 
-Returns: `integer (≥ 0)` — Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
+Returns (`integer (≥ 0)`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
 
 #### `GetClippedSamples`
 
 Get the number of samples that have been clipped since start, or since the
 counter was last reset. Loading a new config does not reset it.
 
-Returns: `integer (≥ 0)` — Number of clipped samples since start or the last reset.
+Returns (`integer (≥ 0)`): Number of clipped samples since start or the last reset.
 
 #### `ResetClippedSamples`
 
@@ -229,25 +214,25 @@ Reset the clipped-samples counter to zero.
 
 Get the current pipeline processing load.
 
-Returns: `number` — Pipeline processing load in percent.
+Returns (`number`): Pipeline processing load in percent.
 
 #### `GetResamplerLoad`
 
 Get the current resampler processing load.
 
-Returns: `number` — Resampler processing load in percent.
+Returns (`number`): Resampler processing load in percent.
 
 #### `GetStateFilePath`
 
 Get the path of the state file, if one is configured.
 
-Returns: `string | null` — File path of the state file, or `null` if no state file is used.
+Returns (`string` or `null`): File path of the state file, or `null` if no state file is used.
 
 #### `GetStateFileUpdated`
 
 Check whether all pending changes have been saved to the state file.
 
-Returns: `boolean` — `true` if all changes have been saved to the state file.
+Returns (`boolean`): `true` if all changes have been saved to the state file.
 
 ### Signal levels
 
@@ -257,15 +242,17 @@ Read RMS and peak levels for capture and playback channels. Levels are available
 
 Get the RMS level of the last chunk on the capture side, per channel.
 
-Returns: `number[]` — RMS level per capture channel in dB (0 dB = full level).
+Returns (array of `number`): RMS level per capture channel in dB (0 dB = full level).
 
 #### `GetCaptureSignalRmsSince`
 
-Get the RMS level averaged over the last `n` seconds on the capture side, per channel.
+Get the RMS level averaged over the last `value` seconds on the capture side, per channel.
 
-Argument: `number` — time window in seconds as a float.
+Arguments:
 
-Returns: `number[]` — RMS level per capture channel in dB, averaged over the requested window.
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): RMS level per capture channel in dB, averaged over the requested window.
 
 #### `GetCaptureSignalRmsSinceLast`
 
@@ -274,124 +261,107 @@ Get the RMS level since the last call to this command from this client, per chan
 On the first call, returns values since the client connected.
 If called again before new data is available, returns an empty list.
 
-Returns: `number[]` — RMS level per capture channel in dB since the last call; empty if no new data.
+Returns (array of `number`): RMS level per capture channel in dB since the last call; empty if no new data.
 
 #### `GetCaptureSignalPeak`
 
 Get the peak level of the last chunk on the capture side, per channel.
 
-Returns: `number[]` — Peak level per capture channel in dB (0 dB = full level).
+Returns (array of `number`): Peak level per capture channel in dB (0 dB = full level).
 
 #### `GetCaptureSignalPeakSince`
 
-Get the peak level over the last `n` seconds on the capture side, per channel.
+Get the peak level over the last `value` seconds on the capture side, per channel.
 
-Argument: `number` — time window in seconds as a float.
+Arguments:
 
-Returns: `number[]` — Peak level per capture channel in dB over the requested window.
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): Peak level per capture channel in dB over the requested window.
 
 #### `GetCaptureSignalPeakSinceLast`
 
 Get the peak level since the last call to this command from this client, per channel.
 
-Returns: `number[]` — Peak level per capture channel in dB since the last call; empty if no new data.
+Returns (array of `number`): Peak level per capture channel in dB since the last call; empty if no new data.
 
 #### `GetPlaybackSignalRms`
 
 Get the RMS level of the last chunk on the playback side, per channel.
 
-Returns: `number[]` — RMS level per playback channel in dB (0 dB = full level).
+Returns (array of `number`): RMS level per playback channel in dB (0 dB = full level).
 
 #### `GetPlaybackSignalRmsSince`
 
-Get the RMS level averaged over the last `n` seconds on the playback side, per channel.
+Get the RMS level averaged over the last `value` seconds on the playback side, per channel.
 
-Argument: `number` — time window in seconds as a float.
+Arguments:
 
-Returns: `number[]` — RMS level per playback channel in dB, averaged over the requested window.
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): RMS level per playback channel in dB, averaged over the requested window.
 
 #### `GetPlaybackSignalRmsSinceLast`
 
 Get the RMS level since the last call to this command from this client, per channel.
 
-Returns: `number[]` — RMS level per playback channel in dB since the last call; empty if no new data.
+Returns (array of `number`): RMS level per playback channel in dB since the last call; empty if no new data.
 
 #### `GetPlaybackSignalPeak`
 
 Get the peak level of the last chunk on the playback side, per channel.
 
-Returns: `number[]` — Peak level per playback channel in dB (0 dB = full level).
+Returns (array of `number`): Peak level per playback channel in dB (0 dB = full level).
 
 #### `GetPlaybackSignalPeakSince`
 
-Get the peak level over the last `n` seconds on the playback side, per channel.
+Get the peak level over the last `value` seconds on the playback side, per channel.
 
-Argument: `number` — time window in seconds as a float.
+Arguments:
 
-Returns: `number[]` — Peak level per playback channel in dB over the requested window.
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): Peak level per playback channel in dB over the requested window.
 
 #### `GetPlaybackSignalPeakSinceLast`
 
 Get the peak level since the last call to this command from this client, per channel.
 
-Returns: `number[]` — Peak level per playback channel in dB since the last call; empty if no new data.
+Returns (array of `number`): Peak level per playback channel in dB since the last call; empty if no new data.
 
 #### `GetSignalLevels`
 
 Get RMS and peak levels for both sides in a single request.
 
-Returns: `AllLevels` — RMS and peak levels for both sides.
-
-**`AllLevels` fields:**
-
-- `playback_rms`: `number[]` — RMS level per playback channel in dB.
-- `playback_peak`: `number[]` — Peak level per playback channel in dB.
-- `capture_rms`: `number[]` — RMS level per capture channel in dB.
-- `capture_peak`: `number[]` — Peak level per capture channel in dB.
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides.
 
 #### `GetSignalLevelsSince`
 
-Get RMS and peak levels over the last `n` seconds for both sides.
+Get RMS and peak levels over the last `value` seconds for both sides.
 
-Argument: `number` — time window in seconds as a float.
+Arguments:
 
-Returns: `AllLevels` — RMS and peak levels for both sides, averaged over the requested window.
+- `value` (`number`): Time window in seconds.
 
-**`AllLevels` fields:**
-
-- `playback_rms`: `number[]` — RMS level per playback channel in dB.
-- `playback_peak`: `number[]` — Peak level per playback channel in dB.
-- `capture_rms`: `number[]` — RMS level per capture channel in dB.
-- `capture_peak`: `number[]` — Peak level per capture channel in dB.
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides, averaged over the requested window.
 
 #### `GetSignalLevelsSinceLast`
 
 Get RMS and peak levels since the last call to this command from this client, for both sides.
 
-Returns: `AllLevels` — RMS and peak levels for both sides since the last call; empty if no new data.
-
-**`AllLevels` fields:**
-
-- `playback_rms`: `number[]` — RMS level per playback channel in dB.
-- `playback_peak`: `number[]` — Peak level per playback channel in dB.
-- `capture_rms`: `number[]` — RMS level per capture channel in dB.
-- `capture_peak`: `number[]` — Peak level per capture channel in dB.
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides since the last call; empty if no new data.
 
 #### `SubscribeSignalLevels`
 
 Subscribe to pushed signal level events.
 
-Argument: `WsSignalLevelSide` — which side to receive events for — `"playback"`, `"capture"`, or `"both"`.
-
 While subscribed, CamillaDSP sends a `WsReply::SignalLevelsEvent` message each time a
 new chunk is analyzed. The event rate therefore depends on the configured chunk size and
 sample rate. Send `StopSubscription` to end the stream.
 
-**`WsSignalLevelSide` values:**
+Arguments:
 
-- `Playback` — Playback side only.
-- `Capture` — Capture side only.
-- `Both` — Both playback and capture sides.
+- `value` ([`WsSignalLevelSide`](#wssignallevelside)): Which side to receive events for.
 
 #### `SubscribeVuLevels`
 
@@ -404,22 +374,15 @@ While subscribed, CamillaDSP sends `WsReply::VuLevelsEvent` messages containing
 smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
 Send `StopSubscription` to end the stream.
 
-**`VuSubscription` fields:**
+Arguments:
 
-- `max_rate`: `number` — Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
-- `attack`: `number` — Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing.
-- `release`: `number` — Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing.
+- `value` ([`VuSubscription`](#vusubscription)): Rate limit and smoothing settings.
 
 #### `GetSignalPeaksSinceStart`
 
 Get the peak capture and playback levels measured since processing started.
 
-Returns: `PbCapLevels` — Peak levels since processing started, for both sides.
-
-**`PbCapLevels` fields:**
-
-- `playback`: `number[]` — Peak level per playback channel in dB, measured since processing started.
-- `capture`: `number[]` — Peak level per capture channel in dB, measured since processing started.
+Returns ([`PbCapLevels`](#pbcaplevels)): Peak levels since processing started, for both sides.
 
 #### `ResetSignalPeaksSinceStart`
 
@@ -429,13 +392,7 @@ Reset the peak-since-start counters. Affects all connected clients.
 
 Get the optional display labels for capture and playback channels.
 
-Returns: `ChannelLabels` — Display labels for capture and playback channels.
-
-**`ChannelLabels` fields:**
-
-- `playback`: `string | null[] | null` — Labels for playback channels. `null` if no labels are configured. Each entry is a label
-string, or `null` if that specific channel has no label.
-- `capture`: `string | null[] | null` — Labels for capture channels. Same structure as `playback`.
+Returns ([`ChannelLabels`](#channellabels)): Display labels for capture and playback channels.
 
 ### Spectrum analysis
 
@@ -445,20 +402,11 @@ Compute an FFT-based frequency spectrum from the audio passing through the pipel
 
 Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
 
-**`SpectrumRequest` fields:**
+Arguments:
 
-- `side`: `SpectrumSide` — Which side to analyze: `"capture"` or `"playback"`.
-- `channel`: `integer (≥ 0) | null` — Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
-- `min_freq`: `number` — Lower edge of the frequency range in Hz. Must be > 0.
-- `max_freq`: `number` — Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins`: `integer (≥ 0)` — Number of output bins. Must be ≥ 2.
+- `value` ([`SpectrumRequest`](#spectrumrequest)): The spectrum to compute.
 
-Returns: `SpectrumData | null` — Computed spectrum with frequency and magnitude arrays.
-
-**`SpectrumData` fields:**
-
-- `frequencies`: `Arc<?>` — Center frequency of each output bin in Hz.
-- `magnitudes`: `number[]` — Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
+Returns ([`SpectrumData`](#spectrumdata) or `null`): Computed spectrum with frequency and magnitude arrays.
 
 #### `SubscribeSpectrum`
 
@@ -473,14 +421,9 @@ the subscription is cancelled. Resubscribe once processing has resumed.
 
 Send `StopSubscription` to end the stream.
 
-**`SpectrumSubscription` fields:**
+Arguments:
 
-- `side`: `SpectrumSide` — Which side to analyze: `"capture"` or `"playback"`.
-- `channel`: `integer (≥ 0) | null` — Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
-- `min_freq`: `number` — Lower edge of the frequency range in Hz. Must be > 0.
-- `max_freq`: `number` — Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins`: `integer (≥ 0)` — Number of output bins. Must be ≥ 2.
-- `max_rate`: `number | null` — Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
+- `value` ([`SpectrumSubscription`](#spectrumsubscription)): The spectrum to compute, and the push rate.
 
 ### Volume control
 
@@ -490,103 +433,124 @@ Read and adjust the volume and mute state of the faders. The Main fader (index 0
 
 Get the current volume of the Main fader.
 
-Returns: `number` — Current volume in dB.
+Returns (`number`): Current volume in dB.
 
 #### `SetVolume`
 
 Set the volume of the Main fader. Clamped to −150 to +50 dB.
 
-Argument: `number` — volume in dB as a float.
+Arguments:
+
+- `value` (`number`): Volume in dB.
 
 #### `AdjustVolume`
 
 Adjust the volume of the Main fader by `value` dB.
 
-The optional `min` and `max` fields clamp the resulting volume; when omitted they default
-to the global −150 to +50 dB range.
+Arguments:
 
-Returns: `number` — New volume in dB after the adjustment.
+- `value` (`number`): Volume change in dB.
+- `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
+- `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
+
+Returns (`number`): New volume in dB after the adjustment.
 
 #### `GetMute`
 
 Get the mute state of the Main fader.
 
-Returns: `boolean` — `true` if muted.
+Returns (`boolean`): `true` if muted.
 
 #### `SetMute`
 
 Set the mute state of the Main fader.
 
-Argument: `boolean` — `true` to mute, `false` to unmute.
+Arguments:
+
+- `value` (`boolean`): `true` to mute, `false` to unmute.
 
 #### `ToggleMute`
 
 Toggle the mute state of the Main fader.
 
-Returns: `boolean` — New mute state after the toggle.
+Returns (`boolean`): New mute state after the toggle.
 
 #### `GetFaders`
 
 Get the volume and mute state of all faders in a single request.
 
-Returns: `Fader[]` — List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
-
-**`Fader` fields:**
-
-- `volume`: `number` — Current volume in dB.
-- `mute`: `boolean` — Whether the fader is muted.
+Returns (array of [`Fader`](#fader)): List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
 
 #### `GetFaderVolume`
 
 Get the volume of a specific fader.
 
-Field: `fader` index — 0 for Main, 1–4 for Aux1–Aux4.
+Arguments:
 
-Returns: `[integer (≥ 0), number]` — `[fader_index, volume_dB]`.
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[`integer (≥ 0)`, `number`\]): `[fader_index, volume_dB]`.
 
 #### `SetFaderVolume`
 
 Set the volume of a specific fader. Clamped to −150 to +50 dB.
 
-Fields: `fader` index and `value` (volume in dB).
+Arguments:
+
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume in dB.
 
 #### `SetFaderExternalVolume`
 
 Special volume setter for use with a Loudness filter and an external volume control
 (without a Volume filter). Clamped to −150 to +50 dB.
 
-Fields: `fader` index and `value` (volume in dB).
+Arguments:
+
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume in dB.
 
 #### `AdjustFaderVolume`
 
 Adjust the volume of a specific fader by `value` dB.
 
-Fields: `fader` index and `value` (delta in dB). The optional `min` and `max` fields clamp
-the resulting volume; when omitted they default to the global −150 to +50 dB range.
+Arguments:
 
-Returns: `[integer (≥ 0), number]` — `[fader_index, new_volume_dB]` after the adjustment.
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume change in dB.
+- `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
+- `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
+
+Returns (array \[`integer (≥ 0)`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
 
 #### `GetFaderMute`
 
 Get the mute state of a specific fader.
 
-Field: `fader` index.
+Arguments:
 
-Returns: `[integer (≥ 0), boolean]` — `[fader_index, is_muted]`.
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[`integer (≥ 0)`, `boolean`\]): `[fader_index, is_muted]`.
 
 #### `SetFaderMute`
 
 Set the mute state of a specific fader.
 
-Fields: `fader` index and `value` (`true` to mute).
+Arguments:
+
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`boolean`): `true` to mute, `false` to unmute.
 
 #### `ToggleFaderMute`
 
 Toggle the mute state of a specific fader.
 
-Field: `fader` index.
+Arguments:
 
-Returns: `[integer (≥ 0), boolean]` — `[fader_index, new_mute_state]` after the toggle.
+- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[`integer (≥ 0)`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
 
 ### Config management
 
@@ -596,79 +560,90 @@ Read and modify the active configuration. Changes applied via `SetConfig`, `SetC
 
 Read the active configuration.
 
-Returns: `string` — Active config in YAML format.
+Returns (`string`): Active config in YAML format.
 
 #### `GetConfigJson`
 
 Read the active configuration as JSON.
 
-Returns: `string` — Active config in JSON format.
+Returns (`string`): Active config in JSON format.
 
 #### `GetConfigTitle`
 
 Read the `title` field from the active configuration.
 
-Returns: `string` — Title string from the active config.
+Returns (`string`): Title string from the active config.
 
 #### `GetConfigDescription`
 
 Read the `description` field from the active configuration.
 
-Returns: `string` — Description string from the active config.
+Returns (`string`): Description string from the active config.
 
 #### `GetConfigFilePath`
 
 Get the path of the currently loaded config file.
 
-Returns: `string | null` — File path of the active config, or `null` if no file is loaded.
+Returns (`string` or `null`): File path of the active config, or `null` if no file is loaded.
 
 #### `GetPreviousConfig`
 
 Read the previously active configuration (before the last reload or upload).
 
-Returns: `string` — Previously active config in YAML format.
+Returns (`string`): Previously active config in YAML format.
 
 #### `SetConfigFilePath`
 
 Change the active config file path. Not applied until `Reload` is called.
 
-Argument: `string` — file path as a string.
+Arguments:
+
+- `value` (`string`): Path of the config file.
 
 #### `SetConfig`
 
 Upload and immediately apply a new configuration as a YAML string.
 
-Argument: `string` — config in YAML format as a string.
+Arguments:
+
+- `value` (`string`): Config in YAML format.
 
 #### `SetConfigJson`
 
 Upload and immediately apply a new configuration as a JSON string.
 
-Argument: `string` — config in JSON format as a string.
+Arguments:
+
+- `value` (`string`): Config in JSON format.
 
 #### `PatchConfig`
 
 Apply a partial patch to the active configuration.
 
-The patch is a partial config object containing only the fields to change.
 If the resulting config is valid it is applied immediately.
 
-Argument: `any` — partial config as a JSON value.
+Arguments:
+
+- `value` (any JSON value): Partial config object containing only the fields to change.
 
 #### `GetConfigValue`
 
 Read a single value from the active configuration using a JSON Pointer (RFC 6901).
 
-Argument: `string` — JSON Pointer string, e.g. `"/devices/samplerate"`.
+Arguments:
 
-Returns: `any` — Value at the specified JSON Pointer path.
+- `value` (`string`): JSON Pointer to the value, such as `"/devices/samplerate"`.
+
+Returns (any JSON value): Value at the specified JSON Pointer path.
 
 #### `SetConfigValue`
 
 Set a single value in the active configuration using a JSON Pointer (RFC 6901).
 
-Fields: `pointer` is a JSON Pointer string such as `"/devices/samplerate"`, and `value`
-is the JSON value to store there.
+Arguments:
+
+- `pointer` (`string`): JSON Pointer to the value, such as `"/devices/samplerate"`.
+- `value` (any JSON value): The value to store there.
 
 #### `Reload`
 
@@ -682,41 +657,51 @@ Parse and validate a configuration string or file without affecting the running 
 
 Parse and fill defaults for a YAML config string without changing the active config.
 
-Argument: `string` — config in YAML format as a string.
+Arguments:
 
-Returns: `string` — Config with all optional fields filled with defaults, or an error message.
+- `value` (`string`): Config in YAML format.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
 
 #### `ReadConfigJson`
 
 Parse and fill defaults for a JSON config string without changing the active config.
 
-Argument: `string` — config in JSON format as a string.
+Arguments:
 
-Returns: `string` — Config with all optional fields filled with defaults, or an error message.
+- `value` (`string`): Config in JSON format.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
 
 #### `ReadConfigFile`
 
 Parse and fill defaults for a config file without changing the active config.
 
-Argument: `string` — path to the config file as a string.
+Arguments:
 
-Returns: `string` — Config with all optional fields filled with defaults, or an error message.
+- `value` (`string`): Path of the config file.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
 
 #### `ValidateConfig`
 
 Like `ReadConfig` but performs more extensive validation checks.
 
-Argument: `string` — config in YAML format as a string.
+Arguments:
 
-Returns: `string` — Validated config with defaults, or an error message.
+- `value` (`string`): Config in YAML format.
+
+Returns (`string`): Validated config with defaults, or an error message.
 
 #### `ValidateConfigJson`
 
 Like `ReadConfigJson` but performs more extensive validation checks.
 
-Argument: `string` — config in JSON format as a string.
+Arguments:
 
-Returns: `string` — Validated config with defaults, or an error message.
+- `value` (`string`): Config in JSON format.
+
+Returns (`string`): Validated config with defaults, or an error message.
 
 ### Audio device listing
 
@@ -726,49 +711,313 @@ Enumerate available audio devices for a given backend and query their supported 
 
 List available capture devices for a given backend.
 
-Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+Arguments:
 
-Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
+- `backend` (`string`): Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+
+Returns (array of array \[`string`, `string`\]): List of `[identifier, name]` pairs. Some backends use the identifier as the name.
 
 #### `GetAvailablePlaybackDevices`
 
 List available playback devices for a given backend.
 
-Field: `backend` name — one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+Arguments:
 
-Returns: `[string, string][]` — List of `[identifier, name_or_null]` pairs.
+- `backend` (`string`): Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+
+Returns (array of array \[`string`, `string`\]): List of `[identifier, name]` pairs. Some backends use the identifier as the name.
 
 #### `GetCaptureDeviceCapabilities`
 
 Get the capabilities of a specific capture device.
 
-Fields: `backend` and `device` names.
-
 Errors: `WsResult::DeviceNotFoundError`, `WsResult::DeviceBusyError`, `WsResult::DeviceError`.
 
-Returns: `AudioDeviceDescriptor` — Capabilities of the requested capture device.
+Arguments:
 
-**`AudioDeviceDescriptor` fields:**
+- `backend` (`string`): Backend name.
+- `device` (`string`): Device identifier, as listed by `GetAvailableCaptureDevices`.
 
-- `name`: `string` — Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
-- `description`: `string` — Human-readable device name.
-- `capability_sets`: `DeviceCapabilitySet[]` — Capability sets, one per access mode supported by the backend.
+Returns ([`AudioDeviceDescriptor`](#audiodevicedescriptor)): Capabilities of the requested capture device.
 
 #### `GetPlaybackDeviceCapabilities`
 
 Get the capabilities of a specific playback device.
 
-Fields: `backend` and `device` names.
-
 Errors: `WsResult::DeviceNotFoundError`, `WsResult::DeviceBusyError`, `WsResult::DeviceError`.
 
-Returns: `AudioDeviceDescriptor` — Capabilities of the requested playback device.
+Arguments:
 
-**`AudioDeviceDescriptor` fields:**
+- `backend` (`string`): Backend name.
+- `device` (`string`): Device identifier, as listed by `GetAvailablePlaybackDevices`.
 
-- `name`: `string` — Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
-- `description`: `string` — Human-readable device name.
-- `capability_sets`: `DeviceCapabilitySet[]` — Capability sets, one per access mode supported by the backend.
+Returns ([`AudioDeviceDescriptor`](#audiodevicedescriptor)): Capabilities of the requested playback device.
+
+## Other replies
+
+These replies do not answer a command. The events are pushed to clients that have subscribed to
+them, and `Invalid` is the reply to a message that could not be parsed as a command.
+
+### `SignalLevelsEvent`
+
+Pushed to subscribed clients each time the signal levels are updated.
+
+Fields:
+
+- `value` ([`StreamLevels`](#streamlevels)): Levels for the subscribed side.
+
+### `VuLevelsEvent`
+
+Pushed to subscribed clients each time smoothed VU levels are updated.
+
+Fields:
+
+- `value` ([`VuLevels`](#vulevels)): Smoothed RMS and peak levels for both sides.
+
+### `StateEvent`
+
+Pushed to subscribed clients each time the processing state changes.
+
+Fields:
+
+- `value` ([`StateUpdate`](#stateupdate)): New processing state, with stop reason if the state is `Inactive`.
+
+### `SpectrumEvent`
+
+Pushed to subscribed clients each time a new spectrum is ready.
+
+Fields:
+
+- `value` ([`SpectrumData`](#spectrumdata) or `null`, optional): Computed spectrum, or absent if processing has stopped.
+
+### `Invalid`
+
+Sent when the server cannot parse or dispatch the incoming command.
+
+Fields:
+
+- `error` (`string`)
+
+## Types
+
+The structured values used by the commands and replies.
+
+### `ProcessingState`
+
+The state of the processing, as reported by `WsCommand::GetState`.
+
+- `Running`: processing is running normally.
+- `Paused`: processing is paused because the input signal is silent.
+- `Inactive`: processing is off and devices are closed, waiting for a new configuration.
+- `Starting`: opening devices and starting up processing with a new configuration.
+- `Stalled`: the capture device is not providing data, so processing is stalled.
+
+One of `"Running"`, `"Paused"`, `"Inactive"`, `"Starting"`, `"Stalled"`.
+
+### `StopReason`
+
+Reason a processing run ended.
+
+One of:
+
+- `"None"`: Processing is still running; not yet stopped.
+- `"Done"`: Processing completed normally (e.g. end of file input).
+- `{"CaptureError": string}`: Capture device reported an error.
+- `{"PlaybackError": string}`: Playback device reported an error.
+- `{"UnknownError": string}`: An unexpected internal error occurred.
+- `{"CaptureFormatChange": integer (≥ 0)}`: Capture device sample rate changed to the given value.
+- `{"PlaybackFormatChange": integer (≥ 0)}`: Playback device sample rate changed to the given value.
+
+### `AllLevels`
+
+Combined RMS and peak levels for both sides, returned by the `GetSignalLevels*` commands.
+
+All values are in dB (0 dB = full level), one entry per channel.
+
+Fields:
+
+- `playback_rms` (array of `number`): RMS level per playback channel in dB.
+- `playback_peak` (array of `number`): Peak level per playback channel in dB.
+- `capture_rms` (array of `number`): RMS level per capture channel in dB.
+- `capture_peak` (array of `number`): Peak level per capture channel in dB.
+
+### `WsSignalLevelSide`
+
+Side selector for `WsCommand::SubscribeSignalLevels` subscriptions.
+
+Serialised as a lowercase string: `"playback"`, `"capture"`, or `"both"`.
+
+One of `"playback"`, `"capture"`, `"both"`.
+
+### `VuSubscription`
+
+Parameters for a VU-meter subscription (`WsCommand::SubscribeVuLevels`).
+
+Controls smoothing and rate-limiting of pushed level events.
+
+Fields:
+
+- `max_rate` (`number`): Maximum event rate in Hz. A value ≤ 0 disables rate limiting. If set higher than the natural update rate, events are sent at the natural rate.
+- `attack` (`number`): Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing. A smaller value gives a faster, more responsive meter on rising signals. For peak values, upward changes are always applied immediately regardless of this setting.
+- `release` (`number`): Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing. A smaller value makes the meter drop faster; a larger value gives a slower decay. A good starting point for an analog-feel meter is around 300 ms.
+
+### `PbCapLevels`
+
+Peak levels for playback and capture sides, returned by `WsCommand::GetSignalPeaksSinceStart`.
+
+All values are in dB, one entry per channel.
+
+Fields:
+
+- `playback` (array of `number`): Peak level per playback channel in dB, measured since processing started.
+- `capture` (array of `number`): Peak level per capture channel in dB, measured since processing started.
+
+### `ChannelLabels`
+
+Channel display labels returned by `WsCommand::GetChannelLabels`.
+
+Fields:
+
+- `playback` (array of (`string` or `null`) or `null`): Labels for playback channels. `null` if no labels are configured. Each entry is a label string, or `null` if that specific channel has no label.
+- `capture` (array of (`string` or `null`) or `null`): Labels for capture channels. Same structure as `playback`.
+
+### `SpectrumRequest`
+
+Parameters for a one-shot spectrum request (`WsCommand::GetSpectrum`).
+
+The spectrum is computed from a Hann-windowed FFT.
+Output bins are logarithmically spaced between `min_freq` and `max_freq`.
+Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
+
+Fields:
+
+- `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
+- `channel` (`integer (≥ 0)` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
+- `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
+- `n_bins` (`integer (≥ 0)`): Number of output bins. Must be ≥ 2.
+
+### `SpectrumData`
+
+Log-spaced spectrum, as returned by `WsCommand::GetSpectrum`.
+
+Fields:
+
+- `frequencies` (array of `number`): Center frequency of each output bin in Hz.
+- `magnitudes` (array of `number`): Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
+
+### `SpectrumSubscription`
+
+Parameters for a streaming spectrum subscription (`WsCommand::SubscribeSpectrum`).
+
+Same fields as `SpectrumRequest` plus an optional `max_rate` cap.
+
+Fields:
+
+- `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
+- `channel` (`integer (≥ 0)` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
+- `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
+- `n_bins` (`integer (≥ 0)`): Number of output bins. Must be ≥ 2.
+- `max_rate` (`number` or `null`, optional): Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
+
+### `Fader`
+
+Volume and mute state for one fader, as returned by `WsCommand::GetFaders`.
+
+Fields:
+
+- `volume` (`number`): Current volume in dB.
+- `mute` (`boolean`): Whether the fader is muted.
+
+### `AudioDeviceDescriptor`
+
+Full capability descriptor for a named audio device.
+
+Fields:
+
+- `name` (`string`): Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
+- `description` (`string`): Human-readable device name.
+- `capability_sets` (array of [`DeviceCapabilitySet`](#devicecapabilityset)): Capability sets, one per access mode supported by the backend.
+
+### `StreamLevels`
+
+Payload of a `WsReply::SignalLevelsEvent` pushed by `WsCommand::SubscribeSignalLevels`.
+
+All dB values are per-channel, 0 dB = full level.
+
+Fields:
+
+- `side` ([`WsSignalLevelSide`](#wssignallevelside)): Which side these levels belong to.
+- `rms` (array of `number`): RMS level per channel in dB.
+- `peak` (array of `number`): Peak level per channel in dB.
+
+### `VuLevels`
+
+Payload of a `WsReply::VuLevelsEvent` pushed by `WsCommand::SubscribeVuLevels`.
+
+All values are smoothed dB levels, per channel.
+
+Fields:
+
+- `playback_rms` (array of `number`): Smoothed RMS level per playback channel in dB.
+- `playback_peak` (array of `number`): Smoothed peak level per playback channel in dB.
+- `capture_rms` (array of `number`): Smoothed RMS level per capture channel in dB.
+- `capture_peak` (array of `number`): Smoothed peak level per capture channel in dB.
+
+### `StateUpdate`
+
+Payload of a `WsReply::StateEvent` pushed by `WsCommand::SubscribeState`.
+
+Fields:
+
+- `state` ([`ProcessingState`](#processingstate)): The new processing state.
+- `stop_reason` ([`StopReason`](#stopreason) or `null`, optional): Present only when `state` is `Inactive`.
+
+### `SpectrumSide`
+
+Side selector for spectrum analysis commands.
+
+Serialised as a lowercase string: `"playback"` or `"capture"`.
+
+One of `"playback"`, `"capture"`.
+
+### `DeviceCapabilitySet`
+
+A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
+
+Fields:
+
+- `mode` ([`CapabilityMode`](#capabilitymode)): The access mode these capabilities were probed under.
+- `capabilities` (array of [`ChannelCapability`](#channelcapability)): Per-channel-count capability entries.
+
+### `CapabilityMode`
+
+The access mode a `DeviceCapabilitySet` was probed under.
+
+- `Unified`: the device uses a unified capability model (ALSA, CoreAudio, ASIO).
+- `Shared`: WASAPI shared-mode capabilities, derived from the mix format.
+- `Exclusive`: WASAPI exclusive-mode capabilities, probed independently.
+
+One of `"Unified"`, `"Shared"`, `"Exclusive"`.
+
+### `ChannelCapability`
+
+The sample rates (and their formats) supported by a device at a specific channel count.
+
+Fields:
+
+- `channels` (`integer (≥ 0)`): Number of channels.
+- `samplerates` (array of [`SamplerateCapability`](#sampleratecapability)): Supported sample rates for this channel count.
+
+### `SamplerateCapability`
+
+The sample formats supported by a device at a specific sample rate.
+
+Fields:
+
+- `samplerate` (`integer (≥ 0)`): Sample rate in Hz.
+- `formats` (array of `string`): Names of the supported sample formats at this rate.
 
 
 ## Audio device capability response format
@@ -841,11 +1090,12 @@ Example device list entries for ALSA:
 ]
 ```
 
-Example device list entries for WASAPI (identifier is the display name; name field is `null`):
+Example device list entries for WASAPI. The identifier is the display name, and the name repeats
+it. CoreAudio and ASIO do the same.
 ```
 [
-  ["Microphone (USB Microphone)", null],
-  ["In 3-4 (MOTU M Series)", null]
+  ["Microphone (USB Microphone)", "Microphone (USB Microphone)"],
+  ["In 3-4 (MOTU M Series)", "In 3-4 (MOTU M Series)"]
 ]
 ```
 
