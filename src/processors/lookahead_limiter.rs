@@ -116,13 +116,11 @@ impl LookaheadLimiter {
         }
     }
 
-    /// Find the largest amplitude of all monitored channels, store result in self.scratch
+    /// Find the largest amplitude of all monitored channels, store result in self.scratch.
+    /// A channel that was not captured is empty, and counts as silence.
     fn detect_peaks(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        for (peak, val) in self.scratch.iter_mut().zip(input.waveforms[ch].iter()) {
-            *peak = val.abs();
-        }
-        for ch in self.monitor_channels.iter().skip(1) {
+        self.scratch.fill(0.0);
+        for ch in self.monitor_channels.iter() {
             for (peak, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
                 *peak = peak.max(val.abs());
             }
@@ -351,6 +349,26 @@ mod tests {
         assert_close(&input.waveforms[1], &[1.0, 2.0, 3.0, 4.0], 1e-12);
         // Channel 0 is still delayed by the two samples of lookahead.
         assert_close(&input.waveforms[0], &[0.0, 0.0, 0.0, 0.0], 1e-12);
+    }
+
+    /// A monitored channel that was not captured is empty, and acts like a silent one.
+    /// The peaks of the previous chunk must not be reused.
+    #[test]
+    fn test_uncaptured_monitor_channel_is_silent() {
+        let config = params(None, Some(vec![1]), 0.0, 0.0);
+        let mut empty = LookaheadLimiter::from_config("test", config.clone(), 48000, 4);
+        let mut silent = LookaheadLimiter::from_config("test", config, 48000, 4);
+        for limiter in [&mut empty, &mut silent] {
+            limiter.process_chunk(&mut chunk(vec![vec![4.0; 4], vec![0.5; 4]]));
+        }
+
+        let mut empty_input = chunk(vec![vec![], vec![0.5; 4]]);
+        let mut silent_input = chunk(vec![vec![0.0; 4], vec![0.5; 4]]);
+        empty.process_chunk(&mut empty_input);
+        silent.process_chunk(&mut silent_input);
+        assert!(empty_input.waveforms[0].is_empty());
+        assert_close(&empty_input.waveforms[1], &silent_input.waveforms[1], 1e-12);
+        assert_close(&empty_input.waveforms[1], &[0.5; 4], 1e-12);
     }
 
     #[test]

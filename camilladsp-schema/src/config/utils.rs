@@ -19,6 +19,7 @@ use crate::fader;
 use crate::filters;
 use crate::filters::fftconv::ImpulseCache;
 use crate::mixer;
+use crate::processors;
 use crate::processors::compressor;
 use crate::processors::lookahead_limiter;
 use crate::processors::noisegate;
@@ -1119,16 +1120,29 @@ pub fn max_channels(conf: &Configuration) -> usize {
     max_channels
 }
 
-/// Get a vector telling which channels are actually used in the pipeline
+/// Get a vector telling which channels are actually used in the pipeline.
+///
+/// These are the channels used by the first mixer, plus the ones read by any processor before it.
 pub fn used_capture_channels(conf: &Configuration) -> Vec<bool> {
+    let mut processor_channels = Vec::new();
     if let Some(pipeline) = &conf.pipeline {
         for step in pipeline.iter() {
-            if let PipelineStep::Mixer(mix) = step
-                && !mix.is_bypassed()
-            {
-                // Safe to unwrap here since we have already verified that the mixer exists
-                let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
-                return mixer::used_input_channels(mixerconf);
+            match step {
+                PipelineStep::Mixer(mix) if !mix.is_bypassed() => {
+                    // Safe to unwrap here since we have already verified that the mixer exists
+                    let mixerconf = conf.mixers.as_ref().unwrap().get(&mix.name).unwrap();
+                    let mut used_channels = mixer::used_input_channels(mixerconf);
+                    for ch in processor_channels {
+                        used_channels[ch] = true;
+                    }
+                    return used_channels;
+                }
+                PipelineStep::Processor(proc) if !proc.is_bypassed() => {
+                    // Safe to unwrap here since we have already verified that the processor exists
+                    let procconf = conf.processors.as_ref().unwrap().get(&proc.name).unwrap();
+                    processor_channels.extend(processors::read_channels(procconf));
+                }
+                _ => {}
             }
         }
     }
@@ -1167,8 +1181,8 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        check_all_finite, deserialize_config, max_channels, parse_config, validate_config,
-        validate_resampler, validate_unused,
+        check_all_finite, deserialize_config, max_channels, parse_config, used_capture_channels,
+        validate_config, validate_resampler, validate_unused,
     };
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
     use crate::config::{IssueKind, Issues, format_path};
@@ -1378,6 +1392,47 @@ pipeline:
         assert_eq!(max_channels(&parse(&with_mixers(false)).unwrap()), 6);
         // Bypassed mixers do not widen anything.
         assert_eq!(max_channels(&parse(&with_mixers(true)).unwrap()), 2);
+    }
+
+    /// A mixer that only reads channel 0, and a compressor that monitors channel 1.
+    fn with_compressor(pipeline: &str) -> String {
+        format!(
+            "{BASE}mixers:
+  left:
+    channels: {{in: 2, out: 2}}
+    mapping:
+      - dest: 0
+        sources: [{{channel: 0}}]
+      - dest: 1
+        sources: [{{channel: 0}}]
+processors:
+  comp:
+    type: Compressor
+    parameters:
+      channels: 2
+      monitor_channels: [1]
+      attack: 25
+      attack_unit: ms
+      release: 1
+      release_unit: s
+      threshold: -20
+      factor: 4
+pipeline:
+{pipeline}"
+        )
+    }
+
+    #[test]
+    fn used_capture_channels_include_processors_before_the_mixer() {
+        let mixer = "  - type: Mixer\n    name: left\n";
+        let processor = "  - type: Processor\n    name: comp\n";
+        let bypassed = "  - type: Processor\n    name: comp\n    bypassed: true\n";
+        let used =
+            |pipeline: &str| used_capture_channels(&parse(&with_compressor(pipeline)).unwrap());
+        assert_eq!(used(&format!("{processor}{mixer}")), vec![true, true]);
+        // After the mixer, or bypassed, the compressor does not read any capture channel.
+        assert_eq!(used(&format!("{mixer}{processor}")), vec![true, false]);
+        assert_eq!(used(&format!("{bypassed}{mixer}")), vec![true, false]);
     }
 
     /// The path and kind of every issue, in order.

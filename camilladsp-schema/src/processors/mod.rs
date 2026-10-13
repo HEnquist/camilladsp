@@ -14,6 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
+use crate::config;
 use crate::config::{Issues, issue_path};
 
 /// Dynamic range compressor processor.
@@ -24,6 +25,32 @@ pub mod lookahead_limiter;
 pub mod noisegate;
 /// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
 pub mod race;
+
+/// Get the channels that a processor needs as input.
+///
+/// These are the monitored channels, where an empty list means all channels.
+/// RACE needs both of its channels, since each one feeds into the other.
+pub fn read_channels(processor: &config::Processor) -> Vec<usize> {
+    let (channels, monitor_channels) = match processor {
+        config::Processor::Compressor { parameters, .. } => {
+            (parameters.channels, parameters.monitor_channels())
+        }
+        config::Processor::NoiseGate { parameters, .. } => {
+            (parameters.channels, parameters.monitor_channels())
+        }
+        config::Processor::LookaheadLimiter { parameters, .. } => {
+            (parameters.channels, parameters.monitor_channels())
+        }
+        config::Processor::RACE { parameters, .. } => {
+            return vec![parameters.channel_a, parameters.channel_b];
+        }
+    };
+    if monitor_channels.is_empty() {
+        (0..channels).collect()
+    } else {
+        monitor_channels
+    }
+}
 
 /// Check that a processor has channels at all. Its count is also checked against
 /// the pipeline, but the channel indexes cannot be checked against zero.
