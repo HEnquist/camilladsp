@@ -309,23 +309,39 @@ pub fn recover_suspended_pcm(pcmdevice: &alsa::PCM, direction: &str) -> Res<()> 
     Ok(())
 }
 
-/// Start a prepared capture device.
+/// Start a capture device, unless it is already running.
 /// A start can fail with EPIPE if the stream was stopped again in between,
 /// for example by playback on a USB device using implicit feedback.
-/// Then prepare and try again a few times.
+/// Then wait a moment, prepare and try again a few times.
 pub fn start_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
     let mut attempt = 1;
     loop {
+        if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+            return Ok(());
+        }
         match pcmdevice.start() {
             Ok(()) => return Ok(()),
-            Err(err) if Errno::from_raw(err.errno()) == Errno::EPIPE && attempt < 5 => {
+            Err(err) if Errno::from_raw(err.errno()) == Errno::EPIPE => {
+                if attempt >= 5 {
+                    warn!("Capture: start failed {attempt} times, giving up. Error: {err}");
+                    return Err(Box::new(err));
+                }
                 warn!("Capture: start failed, preparing and trying again. Error: {err}");
+                thread::sleep(Duration::from_millis(10));
                 pcmdevice.prepare()?;
                 attempt += 1;
             }
             Err(err) => return Err(Box::new(err)),
         }
     }
+}
+
+/// Prepare a capture device after an overrun and start it again.
+/// A prepared capture device does not start by itself before it is read,
+/// and polling it just times out, so it must be started explicitly.
+pub fn restart_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
+    pcmdevice.prepare()?;
+    start_capture_pcm(pcmdevice)
 }
 
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {

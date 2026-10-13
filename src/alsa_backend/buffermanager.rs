@@ -190,7 +190,7 @@ impl DeviceBufferManager for CaptureBufferManager {
     }
 
     fn apply_start_threshold(&mut self, swp: &SwParams) -> Res<()> {
-        // immediate start after pcmdev.prepare
+        // start on first read of any size, recovery after an overrun starts it explicitly
         let threshold = 0;
         swp.set_start_threshold(threshold)?;
         self.data.threshold = threshold;
