@@ -17,9 +17,14 @@ to ask, an agent should stop and ask its user, who can then check with the maint
 - `camilladsp-schema/`: config types, validation and the websocket protocol. It is a separate crate,
   also used by the GUI.
 - Unit tests live in `#[cfg(test)] mod tests` at the bottom of each source file. Do not add a
-  `tests/` directory, a separate test file or a test harness.
+  `tests/` directory, a separate test file or a test harness. The one exception is
+  `camilladsp-schema/tests/ws_docs.rs`, which generates `websocket.md`.
 - User docs: `README.md`, `backend_*.md`, `websocket.md` and the other Markdown files in the root.
   The changelog is `CHANGELOG.md`.
+- `websocket.md` is generated. Add commands in `ws_protocol!` in
+  `camilladsp-schema/src/protocol.rs`, edit the text around them in
+  `camilladsp-schema/tests/ws_template.md.j2`, and regenerate the file with
+  `UPDATE_DOCS=1 cargo test -p camilladsp-schema --features utoipa --test ws_docs`.
 
 ## Scope
 

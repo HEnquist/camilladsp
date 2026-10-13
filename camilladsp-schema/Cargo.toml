@@ -11,6 +11,17 @@ repository = "https://github.com/HEnquist/camilladsp"
 homepage = "https://camilladsp.com"
 keywords = ["audio", "dsp", "camilladsp", "config", "websocket"]
 categories = ["multimedia::audio", "config"]
+# An allow-list. tests/ is included because the [[test]] entry needs its file, otherwise
+# cargo package warns. The ws_docs test reads websocket.md from outside the crate, and skips
+# the check when it is not there.
+include = [
+    "/src",
+    "/tests",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE_GPLv3.txt",
+    "/LICENSE_MPL2.0.txt",
+]
 
 # The features only add device types and OpenAPI schemas, so document them all.
 [package.metadata.docs.rs]
@@ -40,4 +51,16 @@ audioadapter = "5.0.0"
 audioadapter-sample = "5.1.0"
 waveadapter = "0.3.0"
 serde_json = "1.0"
-utoipa = { version = "6.0.0", optional = true }
+# preserve_order keeps the properties in declaration order, which the generated
+# websocket.md relies on.
+utoipa = { version = "6.0.0", optional = true, features = ["preserve_order"] }
+
+[dev-dependencies]
+minijinja = { version = "3.0.0", features = ["serde"] }
+# preserve_order keeps the schema properties in declaration order, which the generated
+# websocket.md relies on.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+
+[[test]]
+name = "ws_docs"
+required-features = ["utoipa"]
