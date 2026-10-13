@@ -1,47 +1,41 @@
 //! Channel reduction only; consumers retain their own rectification/envelope logic.
 
 use crate::CamillaFloat;
-use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config::MonitorMode;
 
 /// Reduce resolved monitor entries into scratch. Sum stays signed; the
 /// processors rectify it when calculating the envelope.
+/// Empty waveforms from chunks captured with an older mask count as silence.
 pub(crate) fn aggregate_monitor_channels(
     input: &AudioChunk,
     channels: &[usize],
     mode: MonitorMode,
     scratch: &mut [CamillaFloat],
 ) {
+    scratch.fill(0.0);
     match mode {
         MonitorMode::Sum => {
-            scratch.copy_from_slice(&input.waveforms[channels[0]]);
-            for &ch in channels.iter().skip(1) {
+            for &ch in channels {
                 for (acc, val) in scratch.iter_mut().zip(input.waveforms[ch].iter()) {
                     *acc += *val;
                 }
             }
         }
         MonitorMode::Max => {
-            for (peak, val) in scratch.iter_mut().zip(input.waveforms[channels[0]].iter()) {
-                *peak = val.abs();
-            }
-            for &ch in channels.iter().skip(1) {
+            for &ch in channels {
                 for (peak, val) in scratch.iter_mut().zip(input.waveforms[ch].iter()) {
                     *peak = peak.max(val.abs());
                 }
             }
         }
         MonitorMode::Rms => {
-            scratch.fill(0.0);
             for &ch in channels {
-                // Capture-pruned empty waveforms contribute silence, but still
-                // count towards the number of monitor entries.
                 for (acc, val) in scratch.iter_mut().zip(input.waveforms[ch].iter()) {
                     *acc += val * val;
                 }
             }
-            let count = (channels.len() as f64).to_camilla_float();
+            let count = channels.len() as CamillaFloat;
             for val in scratch.iter_mut() {
                 *val = (*val / count).sqrt();
             }
@@ -84,14 +78,24 @@ mod tests {
     }
 
     #[test]
-    fn test_rms_empty_waveforms_count_as_silence() {
+    fn test_empty_waveforms_count_as_silence() {
         let input = AudioChunk::new(vec![vec![], vec![0.5, -0.5]], 1.0, -1.0, 2, 2);
-        let mut scratch = [123.0; 2];
-        aggregate_monitor_channels(&input, &[0, 1], MonitorMode::Rms, &mut scratch);
-        for value in scratch {
-            assert!((value - 0.5 / CamillaFloat::sqrt(2.0)).abs() < 1e-6);
+        let silent = AudioChunk::new(vec![vec![0.0; 2], vec![0.5, -0.5]], 1.0, -1.0, 2, 2);
+        for (mode, expected) in [
+            (MonitorMode::Sum, [0.5, -0.5]),
+            (MonitorMode::Max, [0.5; 2]),
+            (MonitorMode::Rms, [0.5 / CamillaFloat::sqrt(2.0); 2]),
+        ] {
+            let mut scratch = [1.0; 2];
+            let mut reference = [0.0; 2];
+            aggregate_monitor_channels(&input, &[0, 1], mode, &mut scratch);
+            aggregate_monitor_channels(&silent, &[0, 1], mode, &mut reference);
+            assert_eq!(scratch, reference);
+            for (actual, expected) in scratch.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-6);
+            }
+            aggregate_monitor_channels(&input, &[0], mode, &mut scratch);
+            assert_eq!(scratch, [0.0; 2]);
         }
-        aggregate_monitor_channels(&input, &[0], MonitorMode::Rms, &mut scratch);
-        assert_eq!(scratch, [0.0; 2]);
     }
 }
