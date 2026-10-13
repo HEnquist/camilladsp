@@ -168,7 +168,7 @@ snapshots are refreshed internally.
 
 Get the update interval for capture rate and signal range polling.
 
-Returns (`integer (≥ 0)`): Update interval in milliseconds.
+Returns (`integer`): Update interval in milliseconds.
 
 #### `SetUpdateInterval`
 
@@ -176,7 +176,7 @@ Set the update interval for capture rate and signal range polling.
 
 Arguments:
 
-- `value` (`integer (≥ 0)`): Interval in milliseconds.
+- `value` (`integer`): Interval in milliseconds.
 
 ### Processing status
 
@@ -219,7 +219,7 @@ with the error `"No active subscription"`.
 
 Get the measured sample rate of the capture device.
 
-Returns (`integer (≥ 0)`): Measured capture sample rate in Hz.
+Returns (`integer`): Measured capture sample rate in Hz.
 
 #### `GetSignalRange`
 
@@ -239,14 +239,14 @@ Returns (`number`): Rate adjustment factor applied to the async resampler (1.0 =
 
 Get the current playback device buffer level when rate adjust is enabled.
 
-Returns (`integer (≥ 0)`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
+Returns (`integer`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
 
 #### `GetClippedSamples`
 
 Get the number of samples that have been clipped since start, or since the
 counter was last reset. Loading a new config does not reset it.
 
-Returns (`integer (≥ 0)`): Number of clipped samples since start or the last reset.
+Returns (`integer`): Number of clipped samples since start or the last reset.
 
 #### `ResetClippedSamples`
 
@@ -541,9 +541,9 @@ Get the volume of a specific fader.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer (≥ 0)`, `number`\]): `[fader_index, volume_dB]`.
+Returns (array \[`integer`, `number`\]): `[fader_index, volume_dB]`.
 
 #### `SetFaderVolume`
 
@@ -551,7 +551,7 @@ Set the volume of a specific fader. Clamped to −150 to +50 dB.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume in dB.
 
 #### `SetFaderExternalVolume`
@@ -561,7 +561,7 @@ Special volume setter for use with a Loudness filter and an external volume cont
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume in dB.
 
 #### `AdjustFaderVolume`
@@ -570,12 +570,12 @@ Adjust the volume of a specific fader by `value` dB.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume change in dB.
 - `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
 - `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
 
-Returns (array \[`integer (≥ 0)`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
+Returns (array \[`integer`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
 
 #### `GetFaderMute`
 
@@ -583,9 +583,9 @@ Get the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer (≥ 0)`, `boolean`\]): `[fader_index, is_muted]`.
+Returns (array \[`integer`, `boolean`\]): `[fader_index, is_muted]`.
 
 #### `SetFaderMute`
 
@@ -593,7 +593,7 @@ Set the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`boolean`): `true` to mute, `false` to unmute.
 
 #### `ToggleFaderMute`
@@ -602,9 +602,9 @@ Toggle the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer (≥ 0)`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer (≥ 0)`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
+Returns (array \[`integer`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
 
 ### Config management
 
@@ -884,11 +884,11 @@ One of:
 
 - `"None"`: Processing is still running; not yet stopped.
 - `"Done"`: Processing completed normally (e.g. end of file input).
-- `{"CaptureError": string}`: Capture device reported an error.
-- `{"PlaybackError": string}`: Playback device reported an error.
-- `{"UnknownError": string}`: An unexpected internal error occurred.
-- `{"CaptureFormatChange": integer (≥ 0)}`: Capture device sample rate changed to the given value.
-- `{"PlaybackFormatChange": integer (≥ 0)}`: Playback device sample rate changed to the given value.
+- `{"CaptureError": value}` (`value` is `string`): Capture device reported an error.
+- `{"PlaybackError": value}` (`value` is `string`): Playback device reported an error.
+- `{"UnknownError": value}` (`value` is `string`): An unexpected internal error occurred.
+- `{"CaptureFormatChange": value}` (`value` is `integer`): Capture device sample rate changed to the given value.
+- `{"PlaybackFormatChange": value}` (`value` is `integer`): Playback device sample rate changed to the given value.
 
 ### `AllLevels`
 
@@ -954,10 +954,10 @@ Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
 Fields:
 
 - `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
-- `channel` (`integer (≥ 0)` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `channel` (`integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
 - `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
 - `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins` (`integer (≥ 0)`): Number of output bins. Must be ≥ 2.
+- `n_bins` (`integer`): Number of output bins. Must be ≥ 2.
 
 ### `SpectrumData`
 
@@ -977,10 +977,10 @@ Same fields as `SpectrumRequest` plus an optional `max_rate` cap.
 Fields:
 
 - `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
-- `channel` (`integer (≥ 0)` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `channel` (`integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
 - `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
 - `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins` (`integer (≥ 0)`): Number of output bins. Must be ≥ 2.
+- `n_bins` (`integer`): Number of output bins. Must be ≥ 2.
 - `max_rate` (`number` or `null`, optional): Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
 
 ### `Fader`
@@ -1069,7 +1069,7 @@ The sample rates (and their formats) supported by a device at a specific channel
 
 Fields:
 
-- `channels` (`integer (≥ 0)`): Number of channels.
+- `channels` (`integer`): Number of channels.
 - `samplerates` (array of [`SamplerateCapability`](#sampleratecapability)): Supported sample rates for this channel count.
 
 ### `SamplerateCapability`
@@ -1078,7 +1078,7 @@ The sample formats supported by a device at a specific sample rate.
 
 Fields:
 
-- `samplerate` (`integer (≥ 0)`): Sample rate in Hz.
+- `samplerate` (`integer`): Sample rate in Hz.
 - `formats` (array of `string`): Names of the supported sample formats at this rate.
 
 

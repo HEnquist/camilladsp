@@ -79,6 +79,8 @@ struct OtherReply {
 #[derive(Serialize)]
 struct TypeOption {
     name: String,
+    /// The type of the value, for an option that carries one.
+    payload: String,
     docs: String,
 }
 
@@ -137,13 +139,6 @@ fn description_of(schema: &Value) -> &str {
         .unwrap_or("")
 }
 
-fn primitive_md(type_name: &str, schema: &Value) -> String {
-    match (type_name, schema.get("minimum")) {
-        ("integer", Some(minimum)) => format!("`integer (≥ {minimum})`"),
-        _ => format!("`{type_name}`"),
-    }
-}
-
 /// Renders a schema as a Markdown type expression, linking named types to the Types section.
 fn type_md(schema: &Value) -> String {
     if let Some(name) = ref_name(schema) {
@@ -183,7 +178,7 @@ fn type_md(schema: &Value) -> String {
                 }
             }
         }
-        Some(Value::String(type_name)) => primitive_md(type_name, schema),
+        Some(Value::String(type_name)) => format!("`{type_name}`"),
         _ => {
             let only_description = match schema {
                 Value::Bool(true) | Value::Null => true,
@@ -194,23 +189,6 @@ fn type_md(schema: &Value) -> String {
             "any JSON value".to_string()
         }
     }
-}
-
-/// Removes the Markdown from a rendered type, for use inside a code span.
-fn plain_type(md: &str) -> String {
-    let mut out = String::new();
-    let mut rest = md;
-    while let Some(c) = rest.chars().next() {
-        if let Some(link) = rest.strip_prefix("](#") {
-            rest = link.split_once(')').map_or("", |(_, tail)| tail);
-        } else {
-            if !matches!(c, '`' | '\\' | '[') {
-                out.push(c);
-            }
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    out
 }
 
 /// Collects the names of all named types a schema refers to, in order of appearance.
@@ -425,19 +403,21 @@ fn describe_type(links: &Links, name: &str, schema: &Value) -> TypeEntry {
     } else if let Some(variants) = schema.get("oneOf").and_then(Value::as_array) {
         for variant in variants {
             let docs = links.one_line(variant["description"].as_str().unwrap_or(""));
-            let option_name = if let Some(value) = variant.get("enum").and_then(|e| e.get(0)) {
-                value.to_string()
-            } else {
-                // An externally tagged variant with data, an object with a single key.
-                let properties = variant["properties"]
-                    .as_object()
-                    .expect("variant without properties");
-                assert_eq!(properties.len(), 1, "unexpected variant shape in {name}");
-                let (key, prop) = properties.iter().next().unwrap();
-                format!("{{\"{key}\": {}}}", plain_type(&type_md(prop)))
-            };
+            let (option_name, payload) =
+                if let Some(value) = variant.get("enum").and_then(|e| e.get(0)) {
+                    (value.to_string(), String::new())
+                } else {
+                    // An externally tagged variant with data, an object with a single key.
+                    let properties = variant["properties"]
+                        .as_object()
+                        .expect("variant without properties");
+                    assert_eq!(properties.len(), 1, "unexpected variant shape in {name}");
+                    let (key, prop) = properties.iter().next().unwrap();
+                    (format!("{{\"{key}\": value}}"), type_md(prop))
+                };
             entry.options.push(TypeOption {
                 name: option_name,
+                payload,
                 docs,
             });
         }

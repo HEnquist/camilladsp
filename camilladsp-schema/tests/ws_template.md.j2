@@ -199,7 +199,7 @@ One of {{ t.plain_values }}.
 One of:
 
 {% for v in t.options %}
-- `{{ v.name }}`{% if v.docs %}: {{ v.docs }}{% endif %}
+- `{{ v.name }}`{% if v.payload %} (`value` is {{ v.payload }}){% endif %}{% if v.docs %}: {{ v.docs }}{% endif %}
 
 {% endfor %}
 
