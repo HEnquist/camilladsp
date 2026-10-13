@@ -435,6 +435,7 @@ pub enum WsCommand {
     /// While subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a
     /// new chunk is analyzed. The event rate therefore depends on the configured chunk size and
     /// sample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+    /// No other commands are accepted on the connection until then.
     SubscribeSignalLevels { value: WsSignalLevelSide },
 
     /// Subscribe to smoothed, rate-capped VU-meter level events.
@@ -445,11 +446,13 @@ pub enum WsCommand {
     /// While subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing
     /// smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+    /// No other commands are accepted on the connection until then.
     SubscribeVuLevels { value: VuSubscription },
 
     /// Stop an active subscription (signal levels, VU levels, state, or spectrum).
     ///
-    /// Returns [`WsResult::InvalidRequestError`] if no subscription is active.
+    /// If no subscription is active, the reply is [`WsReply::Invalid`]
+    /// with the error `"No active subscription"`.
     StopSubscription,
 
     // ── Processing status ─────────────────────────────────────────────────
@@ -460,6 +463,7 @@ pub enum WsCommand {
     /// `"Inactive"` it also contains `stop_reason`.
     ///
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+    /// No other commands are accepted on the connection until then.
     SubscribeState,
 
     /// Get the peak capture and playback levels measured since processing started.
@@ -634,6 +638,7 @@ pub enum WsCommand {
     /// the subscription is cancelled. Resubscribe once processing has resumed.
     ///
     /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+    /// No other commands are accepted on the connection until then.
     SubscribeSpectrum { value: SpectrumSubscription },
 
     // ── Shutdown ──────────────────────────────────────────────────────────

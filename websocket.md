@@ -66,6 +66,16 @@ Errors that carry a description add a top-level `"message"` field:
 ```
 See [Error responses](#error-responses) for the full list.
 
+Command names and field names are case sensitive.
+A message that can't be parsed as a command, for example because of a misspelled command name,
+gets an `Invalid` reply with an `"error"` field describing the problem:
+```json
+{
+  "reply": "Invalid",
+  "error": "unknown variant `StopSubScription`, expected one of `SetConfigFilePath`, ..."
+}
+```
+
 ## Message encoding
 
 Every message, in both directions, is a websocket text frame whose payload is a JSON document
@@ -89,6 +99,28 @@ before sending and parse with `JSON.parse()` on receipt; in Python the `json` mo
 
 If you use Python, the pyCamillaDSP library handles all of this for you. See
 [Controlling from Python](#controlling-from-python) below.
+
+## Subscriptions
+
+The subscribe commands (`SubscribeState`, `SubscribeSignalLevels`, `SubscribeVuLevels` and
+`SubscribeSpectrum`) switch the connection to streaming mode.
+CamillaDSP then pushes event messages on that connection whenever there is new data,
+without waiting for a request.
+
+While a subscription is active, the connection __only__ accepts `StopSubscription`.
+Any other command is not executed, and gets this reply instead:
+```json
+{
+  "reply": "Invalid",
+  "error": "Only StopSubscription is accepted while streaming is active"
+}
+```
+After `StopSubscription` the connection accepts all commands again.
+
+This means that a client that needs a subscription and also sends other commands
+must use two connections, one for the subscription and one for the commands.
+The same goes for receiving several streams at once,
+since each connection can have only one active subscription.
 
 
 ## All commands
@@ -181,12 +213,14 @@ processing state changes. The event payload always contains `state`. When the st
 `"Inactive"` it also contains `stop_reason`.
 
 Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
 
 #### `StopSubscription`
 
 Stop an active subscription (signal levels, VU levels, state, or spectrum).
 
-Returns `WsResult::InvalidRequestError` if no subscription is active.
+If no subscription is active, the reply is `WsReply::Invalid`
+with the error `"No active subscription"`.
 
 #### `GetCaptureRate`
 
@@ -386,6 +420,7 @@ Argument: `WsSignalLevelSide` — which side to receive events for — `"playbac
 While subscribed, CamillaDSP sends a `WsReply::SignalLevelsEvent` message each time a
 new chunk is analyzed. The event rate therefore depends on the configured chunk size and
 sample rate. Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
 
 **`WsSignalLevelSide` values:**
 
@@ -403,6 +438,7 @@ and no subscription is started.
 While subscribed, CamillaDSP sends `WsReply::VuLevelsEvent` messages containing
 smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
 Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
 
 **`VuSubscription` fields:**
 
@@ -472,6 +508,7 @@ ready. If processing stops, a final event with `WsResult::ProcessingStopped` is 
 the subscription is cancelled. Resubscribe once processing has resumed.
 
 Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
 
 **`SpectrumSubscription` fields:**
 
