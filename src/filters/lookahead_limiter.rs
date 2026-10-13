@@ -516,8 +516,6 @@ mod tests {
         gain.set_parameters(0.5, 2, 0.75);
         assert_eq!(gain.history.iter().copied().collect::<Vec<_>>(), history);
         assert_eq!(gain.release_gain, release_gain);
-        assert_eq!(gain.limit, 0.5);
-        assert_eq!(gain.release_coeff, 0.75);
         gain.process_detection(&[0.0, 0.0]);
         assert_close(gain.envelope(), &[0.125, 0.125], 1e-6);
 

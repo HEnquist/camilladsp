@@ -129,6 +129,7 @@ and the Mozilla Public License Version 2.0:
    - **[Lookahead limiter](#lookahead-limiter)**
    - **[Difference equation](#difference-equation)**
 - **[Processors](#processors)**
+   - **[Monitor-channel aggregation](#monitor-channel-aggregation)**
    - **[Compressor](#compressor)**
    - **[NoiseGate](#noise-gate)**
    - **[Lookahead limiter](#lookahead-limiter-processor)**
@@ -2426,6 +2427,7 @@ processors:
       clip_limit: 0.0 (*)
       soft_clip: true (*)
       monitor_channels: [0, 1] (*)
+      monitor_mode: Sum (*)
       process_channels: [0, 1] (*)
 
 pipeline:
@@ -2474,6 +2476,7 @@ processors:
       threshold: -25
       attenuation: 50.0
       monitor_channels: [0, 1] (*)
+      monitor_mode: Sum (*)
       process_channels: [0, 1] (*)
 
 pipeline:
@@ -2498,7 +2501,7 @@ pipeline:
 ### Lookahead Limiter (processor)
 The "LookaheadLimiter" processor is the multichannel version of the
 [LookaheadLimiter filter](#lookahead-limiter).
-It uses the same algorithm, but detects peaks on a set of monitored channels
+It uses the same algorithm, but aggregates monitored channels into a detection signal
 and applies the resulting gain reduction to a set of processed channels.
 This keeps the gain reduction identical on all processed channels,
 which preserves the stereo image.
@@ -2520,6 +2523,7 @@ processors:
       release: 100.0
       release_unit: ms
       monitor_channels: [0, 1] (*)
+      monitor_mode: Max (*)
       process_channels: [0, 1] (*)
       delay_processed_only: false (*)
 

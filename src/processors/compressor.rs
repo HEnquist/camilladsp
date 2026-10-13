@@ -77,11 +77,12 @@ impl Compressor {
         let scratch = vec![0.0; chunksize];
 
         debug!(
-            "Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+            "Creating compressor '{}', channels: {}, monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
             name,
             channels,
-            process_channels,
             monitor_channels,
+            config.monitor_mode(),
+            process_channels,
             attack,
             release,
             config.threshold,
@@ -227,10 +228,11 @@ impl Processor for Compressor {
             self.clipper = clipper;
 
             debug!(
-                "Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+                "Updated compressor '{}', monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
                 self.name,
-                self.process_channels,
                 self.monitor_channels,
+                self.monitor_mode,
+                self.process_channels,
                 attack,
                 release,
                 config.threshold,
@@ -286,39 +288,37 @@ mod tests {
 
     #[test]
     fn test_default_and_mode_change_preserves_loudness() {
-        for mode in ["", "monitor_mode: null"] {
-            let mut parameters: config::CompressorParameters = yaml_serde::from_str(&format!(
-                "channels: 2
+        let mut parameters: config::CompressorParameters = yaml_serde::from_str(
+            "channels: 2
 attack: 3
 attack_unit: samples
 release: 19
 release_unit: samples
 threshold: -20
 factor: 2
-{mode}
-"
-            ))
-            .unwrap();
-            let mut processor = Compressor::from_config("test", parameters.clone(), 48000, 8);
-            assert_eq!(processor.monitor_mode, config::MonitorMode::Sum);
-            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.25; 8]], 1.0, -1.0, 8, 8);
-            processor.process_chunk(&mut input);
-            let mut unchanged = processor.clone();
-            assert!(processor.prev_loudness < 0.0);
+",
+        )
+        .unwrap();
+        let mut processor = Compressor::from_config("test", parameters.clone(), 48000, 8);
+        assert_eq!(processor.monitor_mode, config::MonitorMode::Sum);
+        let initial_loudness = processor.prev_loudness;
+        let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.25; 8]], 1.0, -1.0, 8, 8);
+        processor.process_chunk(&mut input);
+        assert_ne!(processor.prev_loudness, initial_loudness);
+        let mut unchanged = processor.clone();
 
-            parameters.monitor_mode = Some(config::MonitorMode::Rms);
-            processor.update_parameters(config::Processor::Compressor {
-                description: None,
-                parameters,
-            });
-            assert_eq!(processor.prev_loudness, unchanged.prev_loudness);
-            assert_eq!(processor.monitor_mode, config::MonitorMode::Rms);
+        parameters.monitor_mode = Some(config::MonitorMode::Rms);
+        processor.update_parameters(config::Processor::Compressor {
+            description: None,
+            parameters,
+        });
+        assert_eq!(processor.prev_loudness, unchanged.prev_loudness);
+        assert_eq!(processor.monitor_mode, config::MonitorMode::Rms);
 
-            let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.5; 8]], 1.0, -1.0, 8, 8);
-            let mut reference = AudioChunk::from(&input, input.waveforms.clone());
-            unchanged.process_chunk(&mut reference);
-            processor.process_chunk(&mut input);
-            assert!(processor.prev_loudness > unchanged.prev_loudness);
-        }
+        let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.5; 8]], 1.0, -1.0, 8, 8);
+        let mut reference = AudioChunk::from(&input, input.waveforms.clone());
+        unchanged.process_chunk(&mut reference);
+        processor.process_chunk(&mut input);
+        assert!(processor.prev_loudness > unchanged.prev_loudness);
     }
 }

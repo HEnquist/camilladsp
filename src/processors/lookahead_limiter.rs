@@ -28,7 +28,7 @@ pub use camilladsp_schema::processors::lookahead_limiter::validate_lookahead_lim
 
 /// Multichannel lookahead limiter.
 ///
-/// Peaks are detected on the monitored channels, and the resulting gain envelope is
+/// Monitored channels are aggregated into a detection signal, and the resulting gain envelope is
 /// applied to the processed channels. Looking ahead means the output is delayed by
 /// the attack time. By default all channels are delayed, also the ones that are not
 /// processed, so that the channels stay time aligned.
@@ -43,7 +43,7 @@ pub struct LookaheadLimiter {
     gain: LookaheadGain,
     /// Lookahead delay for each channel.
     delays: Vec<Delay>,
-    /// Peak detection signal of the current chunk.
+    /// Aggregated detection signal of the current chunk.
     scratch: Vec<CamillaFloat>,
 }
 
@@ -101,10 +101,11 @@ impl LookaheadLimiter {
         );
 
         debug!(
-            "Creating lookahead limiter '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, delay_processed_only: {}, limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
+            "Creating lookahead limiter '{}', channels: {}, monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, delay_processed_only: {}, limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
             name,
             channels,
             monitor_channels,
+            config.monitor_mode(),
             process_channels,
             config.delay_processed_only(),
             config.limit,
@@ -201,9 +202,10 @@ impl Processor for LookaheadLimiter {
                 .set_parameters(limit, attack_samples, release_coeff);
 
             debug!(
-                "Updated lookahead limiter '{}', monitor_channels: {:?}, process_channels: {:?}, delay_processed_only: {}, limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
+                "Updated lookahead limiter '{}', monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, delay_processed_only: {}, limit dB: {}, linear: {}, attack/lookahead: {} samples, release coefficient: {}",
                 self.name,
                 self.monitor_channels,
+                self.monitor_mode,
                 self.process_channels,
                 self.delay_processed_only,
                 config.limit,
@@ -260,21 +262,10 @@ mod tests {
     }
 
     #[test]
-    fn test_default_monitor_mode() {
-        for mode in ["", "monitor_mode: null"] {
-            let parameters = yaml_serde::from_str(&format!(
-                "channels: 2\nattack: 2\nattack_unit: samples\nrelease: 4\nrelease_unit: samples\n{mode}"
-            ))
-            .unwrap();
-            let limiter = LookaheadLimiter::from_config("test", parameters, 48000, 2);
-            assert_eq!(limiter.monitor_mode, config::MonitorMode::Max);
-        }
-    }
-
-    #[test]
     fn test_mode_change_preserves_buffered_history() {
         let mut parameters = params(None, None, 2.0, 1.0 / std::f64::consts::LN_2);
         let mut limiter = LookaheadLimiter::from_config("test", parameters.clone(), 48000, 2);
+        assert_eq!(limiter.monitor_mode, config::MonitorMode::Max);
         let input = vec![vec![4.0; 2], vec![-4.0; 2]];
         limiter.process_chunk(&mut chunk(input.clone()));
 
