@@ -49,10 +49,11 @@ use crate::alsa_backend::threaded_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsa_backend::utils::{
-    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, find_elem,
-    list_channels_as_text, list_device_names, list_formats_as_text, list_samplerates_as_text,
-    pick_preferred_format, process_events, recover_suspended_pcm, restart_capture_pcm,
-    resume_capture_pcm, start_capture_pcm, state_desc, sync_linked_controls,
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
+    list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
+    recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
+    sync_linked_controls,
 };
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
@@ -752,32 +753,7 @@ fn capture_buffer(
     if SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
         return Ok((CaptureResult::Done, 0));
     }
-    let capture_state = pcmdevice.state_raw();
-    let start_result = if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
-        warn!("Capture device has overrun, restarting it");
-        restart_capture_pcm(pcmdevice)?
-    } else if capture_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
-        resume_capture_pcm(pcmdevice)?
-    } else if capture_state < 0 {
-        // This should never happen but sometimes does anyway,
-        // for example if a USB device is unplugged.
-        let nixerr = Errno::from_raw(-capture_state);
-        error!(
-            "Alsa snd_pcm_state() of capture device returned an unexpected error: {capture_state}"
-        );
-        return Err(Box::new(nixerr));
-    } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-        debug!(
-            "Starting capture from state: {}",
-            state_desc(capture_state as u32)
-        );
-        start_capture_pcm(pcmdevice)?
-    } else {
-        CaptureResult::Normal
-    };
-    if let CaptureResult::Stalled = start_result {
-        return Ok((CaptureResult::Stalled, 0));
-    }
+    ensure_capture_running(pcmdevice)?;
     // `frames_to_read` is counted on the capture side, so the wait timeout must be
     // derived from the capture rate and not the pipeline rate.
     let millis_per_chunk = 1000.0 * frames_to_read as f32 / params.capture_samplerate as f32;
@@ -834,16 +810,12 @@ fn capture_buffer(
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EPIPE => {
                     warn!("Capture: wait overrun, trying to recover. Error: {err}");
-                    if let CaptureResult::Stalled = restart_capture_pcm(pcmdevice)? {
-                        return Ok((CaptureResult::Stalled, 0));
-                    }
+                    restart_capture_pcm(pcmdevice)?;
                     break;
                 }
                 Errno::ESTRPIPE => {
                     warn!("Capture: wait interrupted by suspend, trying to recover. Error: {err}");
-                    if let CaptureResult::Stalled = resume_capture_pcm(pcmdevice)? {
-                        return Ok((CaptureResult::Stalled, 0));
-                    }
+                    resume_capture_pcm(pcmdevice)?;
                     break;
                 }
                 _ => {
@@ -880,11 +852,13 @@ fn capture_buffer(
             }
             Errno::EPIPE => {
                 warn!("Capture: read overrun, trying to recover. Error: {err}");
-                Ok((restart_capture_pcm(pcmdevice)?, 0))
+                restart_capture_pcm(pcmdevice)?;
+                Ok((CaptureResult::Normal, 0))
             }
             Errno::ESTRPIPE => {
                 warn!("Capture: read interrupted by suspend, trying to recover. Error: {err}");
-                Ok((resume_capture_pcm(pcmdevice)?, 0))
+                resume_capture_pcm(pcmdevice)?;
+                Ok((CaptureResult::Normal, 0))
             }
             _ => {
                 warn!("Capture failed, error: {err}");
@@ -1580,6 +1554,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     );
 
                                     match capture_res {
+                                        // Nothing read after recovering from an overrun, or on EAGAIN.
+                                        // This is not a stall, so just read again.
+                                        Ok((CaptureResult::Normal, 0)) => continue,
                                         Ok((CaptureResult::Normal, bytes_read)) => {
                                             let pushed_bytes =
                                                 device_producer.push_slice(&buffer[0..bytes_read]);
