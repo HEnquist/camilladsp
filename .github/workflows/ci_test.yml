@@ -76,6 +76,10 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --workspace -- -D warnings
 
+      # The ws_docs test needs the utoipa feature, so the plain cargo test skips it.
+      - name: Check that websocket.md is up to date
+        run: cargo test -p camilladsp-schema --features utoipa --test ws_docs
+
       # camilladsp never enables the utoipa feature, so the schema crate needs
       # its own run with it.
       - name: Run cargo test and clippy for the schema with OpenAPI schemas

@@ -178,7 +178,14 @@ fn type_md(schema: &Value) -> String {
                 }
             }
         }
-        Some(Value::String(type_name)) => format!("`{type_name}`"),
+        Some(Value::String(type_name)) => {
+            // Unsigned integers have a minimum of 0, which a client needs to know.
+            match schema.get("minimum").and_then(Value::as_i64) {
+                Some(0) if type_name == "integer" => "non-negative `integer`".to_string(),
+                Some(min) if type_name == "integer" => format!("`integer` ≥ {min}"),
+                _ => format!("`{type_name}`"),
+            }
+        }
         _ => {
             let only_description = match schema {
                 Value::Bool(true) | Value::Null => true,
@@ -312,14 +319,27 @@ impl Links {
         out.trim().to_string()
     }
 
-    /// Joins a multi-paragraph doc into one line, for use in a list entry.
-    fn one_line(&self, text: &str) -> String {
-        self.convert(text)
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
+    /// Converts a doc for use in a list entry. Further paragraphs, lists and code blocks are
+    /// indented, so that they stay part of the entry.
+    fn item_text(&self, text: &str) -> String {
+        let converted = self.convert(text);
+        let paragraphs = converted.split("\n\n").map(|paragraph| {
+            let lines = paragraph.lines().map(str::trim);
+            let structured = lines.clone().any(|l| {
+                l.starts_with("- ")
+                    || l.starts_with("* ")
+                    || l.starts_with("```")
+                    || l.split_once(". ")
+                        .is_some_and(|(n, _)| n.parse::<u32>().is_ok())
+            });
+            if structured {
+                // A list or code block needs its line breaks.
+                lines.collect::<Vec<_>>().join("\n  ")
+            } else {
+                lines.collect::<Vec<_>>().join(" ")
+            }
+        });
+        paragraphs.collect::<Vec<_>>().join("\n\n  ")
     }
 }
 
@@ -348,7 +368,7 @@ fn field_entries(
             name: name.clone(),
             type_md: type_md(prop),
             optional: !required.contains(name),
-            docs: links.one_line(description_of(prop)),
+            docs: links.item_text(description_of(prop)),
         })
         .collect()
 }
@@ -359,7 +379,7 @@ fn command_entry(links: &Links, schema: &Value, reply: Option<&Value>) -> Comman
     let returns = reply
         .and_then(|r| variant_properties(r, "reply").0.get("value").cloned())
         .map(|value| {
-            let value_docs = links.one_line(description_of(&value));
+            let value_docs = links.item_text(description_of(&value));
             if value_docs.is_empty() {
                 type_md(&value)
             } else {
@@ -402,22 +422,27 @@ fn describe_type(links: &Links, name: &str, schema: &Value) -> TypeEntry {
             .join(", ");
     } else if let Some(variants) = schema.get("oneOf").and_then(Value::as_array) {
         for variant in variants {
-            let docs = links.one_line(variant["description"].as_str().unwrap_or(""));
-            let (option_name, payload) =
-                if let Some(value) = variant.get("enum").and_then(|e| e.get(0)) {
-                    (value.to_string(), String::new())
-                } else {
-                    // An externally tagged variant with data, an object with a single key.
-                    let properties = variant["properties"]
-                        .as_object()
-                        .expect("variant without properties");
-                    assert_eq!(properties.len(), 1, "unexpected variant shape in {name}");
-                    let (key, prop) = properties.iter().next().unwrap();
-                    (format!("{{\"{key}\": value}}"), type_md(prop))
-                };
+            let docs = links.item_text(variant["description"].as_str().unwrap_or(""));
+            // utoipa groups unit variants without docs into one entry with several values.
+            if let Some(values) = variant.get("enum").and_then(Value::as_array) {
+                for value in values {
+                    entry.options.push(TypeOption {
+                        name: value.to_string(),
+                        payload: String::new(),
+                        docs: docs.clone(),
+                    });
+                }
+                continue;
+            }
+            // An externally tagged variant with data, an object with a single key.
+            let properties = variant["properties"]
+                .as_object()
+                .expect("variant without properties");
+            assert_eq!(properties.len(), 1, "unexpected variant shape in {name}");
+            let (key, prop) = properties.iter().next().unwrap();
             entry.options.push(TypeOption {
-                name: option_name,
-                payload,
+                name: format!("{{\"{key}\": value}}"),
+                payload: type_md(prop),
                 docs,
             });
         }
@@ -584,13 +609,17 @@ fn render() -> String {
         }
     }
 
-    // The type headings and the command headings share one anchor namespace.
-    for t in &types {
-        if command_names
-            .iter()
-            .any(|c| c.eq_ignore_ascii_case(&t.name))
-        {
-            problems.push(format!("type {} clashes with a command name", t.name));
+    // The headings of commands, replies, errors and types share one anchor namespace.
+    let mut headings: HashSet<String> = HashSet::new();
+    let heading_names = command_names
+        .iter()
+        .copied()
+        .chain(other_replies.iter().map(|r| r.name.as_str()))
+        .chain(errors.iter().map(|e| e.name.as_str()))
+        .chain(types.iter().map(|t| t.name.as_str()));
+    for heading in heading_names {
+        if !headings.insert(anchor(heading)) {
+            problems.push(format!("the heading {heading} is used more than once"));
         }
     }
 
@@ -629,6 +658,14 @@ fn websocket_md_is_up_to_date() {
     let generated = render();
     if std::env::var_os("UPDATE_DOCS").is_some_and(|v| !v.is_empty()) {
         std::fs::write(&path, &generated).unwrap();
+        return;
+    }
+    // The published package does not contain websocket.md, only the repository does.
+    if !path.exists() {
+        eprintln!(
+            "{} not found, skipping the up-to-date check",
+            path.display()
+        );
         return;
     }
     // Normalize CRLF, for Windows checkouts.

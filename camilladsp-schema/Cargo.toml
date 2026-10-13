@@ -11,10 +11,12 @@ repository = "https://github.com/HEnquist/camilladsp"
 homepage = "https://camilladsp.com"
 keywords = ["audio", "dsp", "camilladsp", "config", "websocket"]
 categories = ["multimedia::audio", "config"]
-# An allow-list, so that tests/ is not published. The ws_docs test reads websocket.md from
-# outside the crate, so it cannot run from the package.
+# An allow-list. tests/ is included because the [[test]] entry needs its file, otherwise
+# cargo package warns. The ws_docs test reads websocket.md from outside the crate, and skips
+# the check when it is not there.
 include = [
     "/src",
+    "/tests",
     "/Cargo.toml",
     "/README.md",
     "/LICENSE_GPLv3.txt",

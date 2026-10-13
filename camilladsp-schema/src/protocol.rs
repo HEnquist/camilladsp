@@ -245,7 +245,8 @@ pub struct SpectrumSubscription {
     pub max_freq: f64,
     /// Number of output bins. Must be ≥ 2.
     pub n_bins: usize,
-    /// Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
+    /// Maximum push rate in Hz. Leave out or set `null` for the natural rate (one push per 50 %
+    /// overlap hop).
     pub max_rate: Option<f32>,
 }
 
@@ -1051,8 +1052,8 @@ ws_protocol! {
     }
 
     internal {
-        /// Internal sentinel. Not a valid command from clients.
-        #[doc(hidden)]
+        /// Internal sentinel, used for messages that are not text. Never accepted from clients.
+        #[serde(skip_deserializing)]
         None,
     }
 
@@ -1420,6 +1421,11 @@ mod tests {
     }
 
     #[test]
+    fn internal_command_is_not_accepted_from_clients() {
+        assert!(serde_json::from_str::<WsCommand>(r#"{"command": "None"}"#).is_err());
+    }
+
+    #[test]
     fn reply_name_is_the_tag() {
         for reply in [
             WsReply::GetConfigJson {
@@ -1466,7 +1472,12 @@ mod tests {
     /// as serde uses the same set of names, i.e. no variant is renamed.
     #[test]
     fn every_name_is_a_tag() {
-        let mut names: Vec<&str> = WsCommand::NAMES.to_vec();
+        // The internal sentinel is never deserialized, so serde does not list it.
+        let mut names: Vec<&str> = WsCommand::NAMES
+            .iter()
+            .copied()
+            .filter(|n| *n != "None")
+            .collect();
         names.sort();
         assert_eq!(names, serde_tags::<WsCommand>("command"));
         let mut names: Vec<&str> = WsReply::NAMES.to_vec();

@@ -168,7 +168,7 @@ snapshots are refreshed internally.
 
 Get the update interval for capture rate and signal range polling.
 
-Returns (`integer`): Update interval in milliseconds.
+Returns (non-negative `integer`): Update interval in milliseconds.
 
 #### `SetUpdateInterval`
 
@@ -176,7 +176,7 @@ Set the update interval for capture rate and signal range polling.
 
 Arguments:
 
-- `value` (`integer`): Interval in milliseconds.
+- `value` (non-negative `integer`): Interval in milliseconds.
 
 ### Processing status
 
@@ -219,7 +219,7 @@ with the error `"No active subscription"`.
 
 Get the measured sample rate of the capture device.
 
-Returns (`integer`): Measured capture sample rate in Hz.
+Returns (non-negative `integer`): Measured capture sample rate in Hz.
 
 #### `GetSignalRange`
 
@@ -239,14 +239,14 @@ Returns (`number`): Rate adjustment factor applied to the async resampler (1.0 =
 
 Get the current playback device buffer level when rate adjust is enabled.
 
-Returns (`integer`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
+Returns (non-negative `integer`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
 
 #### `GetClippedSamples`
 
 Get the number of samples that have been clipped since start, or since the
 counter was last reset. Loading a new config does not reset it.
 
-Returns (`integer`): Number of clipped samples since start or the last reset.
+Returns (non-negative `integer`): Number of clipped samples since start or the last reset.
 
 #### `ResetClippedSamples`
 
@@ -541,9 +541,9 @@ Get the volume of a specific fader.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer`, `number`\]): `[fader_index, volume_dB]`.
+Returns (array \[non-negative `integer`, `number`\]): `[fader_index, volume_dB]`.
 
 #### `SetFaderVolume`
 
@@ -551,7 +551,7 @@ Set the volume of a specific fader. Clamped to −150 to +50 dB.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume in dB.
 
 #### `SetFaderExternalVolume`
@@ -561,7 +561,7 @@ Special volume setter for use with a Loudness filter and an external volume cont
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume in dB.
 
 #### `AdjustFaderVolume`
@@ -570,12 +570,12 @@ Adjust the volume of a specific fader by `value` dB.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`number`): Volume change in dB.
 - `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
 - `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
 
-Returns (array \[`integer`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
+Returns (array \[non-negative `integer`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
 
 #### `GetFaderMute`
 
@@ -583,9 +583,9 @@ Get the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer`, `boolean`\]): `[fader_index, is_muted]`.
+Returns (array \[non-negative `integer`, `boolean`\]): `[fader_index, is_muted]`.
 
 #### `SetFaderMute`
 
@@ -593,7 +593,7 @@ Set the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 - `value` (`boolean`): `true` to mute, `false` to unmute.
 
 #### `ToggleFaderMute`
@@ -602,9 +602,9 @@ Toggle the mute state of a specific fader.
 
 Arguments:
 
-- `fader` (`integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
 
-Returns (array \[`integer`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
+Returns (array \[non-negative `integer`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
 
 ### Config management
 
@@ -887,8 +887,8 @@ One of:
 - `{"CaptureError": value}` (`value` is `string`): Capture device reported an error.
 - `{"PlaybackError": value}` (`value` is `string`): Playback device reported an error.
 - `{"UnknownError": value}` (`value` is `string`): An unexpected internal error occurred.
-- `{"CaptureFormatChange": value}` (`value` is `integer`): Capture device sample rate changed to the given value.
-- `{"PlaybackFormatChange": value}` (`value` is `integer`): Playback device sample rate changed to the given value.
+- `{"CaptureFormatChange": value}` (`value` is non-negative `integer`): Capture device sample rate changed to the given value.
+- `{"PlaybackFormatChange": value}` (`value` is non-negative `integer`): Playback device sample rate changed to the given value.
 
 ### `AllLevels`
 
@@ -919,9 +919,15 @@ Controls smoothing and rate-limiting of pushed level events.
 
 Fields:
 
-- `max_rate` (`number`): Maximum event rate in Hz. A value ≤ 0 disables rate limiting. If set higher than the natural update rate, events are sent at the natural rate.
-- `attack` (`number`): Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing. A smaller value gives a faster, more responsive meter on rising signals. For peak values, upward changes are always applied immediately regardless of this setting.
-- `release` (`number`): Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing. A smaller value makes the meter drop faster; a larger value gives a slower decay. A good starting point for an analog-feel meter is around 300 ms.
+- `max_rate` (`number`): Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
+
+  If set higher than the natural update rate, events are sent at the natural rate.
+- `attack` (`number`): Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing.
+
+  A smaller value gives a faster, more responsive meter on rising signals. For peak values, upward changes are always applied immediately regardless of this setting.
+- `release` (`number`): Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing.
+
+  A smaller value makes the meter drop faster; a larger value gives a slower decay. A good starting point for an analog-feel meter is around 300 ms.
 
 ### `PbCapLevels`
 
@@ -954,10 +960,10 @@ Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
 Fields:
 
 - `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
-- `channel` (`integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `channel` (non-negative `integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
 - `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
 - `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins` (`integer`): Number of output bins. Must be ≥ 2.
+- `n_bins` (non-negative `integer`): Number of output bins. Must be ≥ 2.
 
 ### `SpectrumData`
 
@@ -977,11 +983,11 @@ Same fields as `SpectrumRequest` plus an optional `max_rate` cap.
 Fields:
 
 - `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
-- `channel` (`integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `channel` (non-negative `integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
 - `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
 - `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
-- `n_bins` (`integer`): Number of output bins. Must be ≥ 2.
-- `max_rate` (`number` or `null`, optional): Maximum push rate in Hz. `None` = natural rate (one push per 50 % overlap hop).
+- `n_bins` (non-negative `integer`): Number of output bins. Must be ≥ 2.
+- `max_rate` (`number` or `null`, optional): Maximum push rate in Hz. Leave out or set `null` for the natural rate (one push per 50 % overlap hop).
 
 ### `Fader`
 
@@ -1069,7 +1075,7 @@ The sample rates (and their formats) supported by a device at a specific channel
 
 Fields:
 
-- `channels` (`integer`): Number of channels.
+- `channels` (non-negative `integer`): Number of channels.
 - `samplerates` (array of [`SamplerateCapability`](#sampleratecapability)): Supported sample rates for this channel count.
 
 ### `SamplerateCapability`
@@ -1078,7 +1084,7 @@ The sample formats supported by a device at a specific sample rate.
 
 Fields:
 
-- `samplerate` (`integer`): Sample rate in Hz.
+- `samplerate` (non-negative `integer`): Sample rate in Hz.
 - `formats` (array of `string`): Names of the supported sample formats at this rate.
 
 
