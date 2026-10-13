@@ -347,8 +347,8 @@ def extract_enum_variants(index: dict, enum_name: str) -> list[dict]:
 def main() -> None:
     run_rustdoc()
 
-    data = json.loads(JSON_PATH.read_text())
-    config = yaml.safe_load(GROUPS_CONFIG.read_text())
+    data = json.loads(JSON_PATH.read_text(encoding="utf-8"))
+    config = yaml.safe_load(GROUPS_CONFIG.read_text(encoding="utf-8"))
     index = data["index"]
 
     # --- WsCommand variants + return info from matching WsReply variants ---
@@ -423,7 +423,7 @@ def main() -> None:
         lstrip_blocks=True,
     )
     template = env.get_template(TEMPLATE_FILE)
-    OUTPUT_PATH.write_text(template.render(groups=groups, errors=errors))
+    OUTPUT_PATH.write_text(template.render(groups=groups, errors=errors), encoding="utf-8")
     print(f"Written to {OUTPUT_PATH}", file=sys.stderr)
 
 
