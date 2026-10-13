@@ -115,11 +115,11 @@ impl Compressor {
         }
     }
 
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
+    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
+    /// A channel that was not captured is empty, and counts as silence.
     fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        self.scratch.copy_from_slice(&input.waveforms[ch]);
-        for ch in self.monitor_channels.iter().skip(1) {
+        self.scratch.fill(0.0);
+        for ch in self.monitor_channels.iter() {
             for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
                 *acc += *val;
             }
@@ -245,5 +245,43 @@ impl Processor for Compressor {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::TimeUnit;
+    use crate::config::finite;
+
+    fn compressor() -> Compressor {
+        let config = config::CompressorParameters {
+            channels: 2,
+            monitor_channels: None,
+            process_channels: Some(vec![1]),
+            attack: finite!(1.0),
+            attack_unit: TimeUnit::Samples,
+            release: finite!(10.0),
+            release_unit: TimeUnit::Samples,
+            threshold: finite!(-20.0),
+            factor: finite!(4.0),
+            makeup_gain: None,
+            soft_clip: None,
+            clip_limit: None,
+        };
+        Compressor::from_config("test", config, 48000, 4)
+    }
+
+    /// A monitored channel that was not captured is empty, and acts like a silent one.
+    #[test]
+    fn test_uncaptured_monitor_channel_is_silent() {
+        let waveform = vec![1.0, -1.0, 1.0, -1.0];
+        let mut empty = AudioChunk::new(vec![vec![], waveform.clone()], 1.0, -1.0, 4, 4);
+        let mut silent = AudioChunk::new(vec![vec![0.0; 4], waveform.clone()], 1.0, -1.0, 4, 4);
+        compressor().process_chunk(&mut empty);
+        compressor().process_chunk(&mut silent);
+        assert!(empty.waveforms[0].is_empty());
+        assert_eq!(empty.waveforms[1], silent.waveforms[1]);
+        assert_ne!(empty.waveforms[1], waveform);
     }
 }

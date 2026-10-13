@@ -96,6 +96,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
   which cannot tell packed 24-bit samples from padded ones. A driver could accept the format there
   and then treat the samples as the other layout.
+- Processors before the first mixer no longer lose the channels they read when the mixer does not
+  use them. Those channels were not captured, which made the `Compressor` and `NoiseGate` panic,
+  the multichannel `LookaheadLimiter` react to stale peaks, and `RACE` skip its processing.
 
 ## Changes
 - Checking a config no longer stops at the first problem. Every problem is listed, one per line,

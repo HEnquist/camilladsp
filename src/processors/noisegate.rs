@@ -98,11 +98,11 @@ impl NoiseGate {
         }
     }
 
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
+    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
+    /// A channel that was not captured is empty, and counts as silence.
     fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        self.scratch.copy_from_slice(&input.waveforms[ch]);
-        for ch in self.monitor_channels.iter().skip(1) {
+        self.scratch.fill(0.0);
+        for ch in self.monitor_channels.iter() {
             for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
                 *acc += *val;
             }
