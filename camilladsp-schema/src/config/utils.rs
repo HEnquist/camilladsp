@@ -1394,8 +1394,9 @@ pipeline:
         assert_eq!(max_channels(&parse(&with_mixers(true)).unwrap()), 2);
     }
 
-    /// A mixer that only reads channel 0, and a compressor that monitors channel 1.
-    fn with_compressor(pipeline: &str) -> String {
+    /// A mixer that only reads channel 0, and processors that all read channel 1.
+    /// The noise gate leaves `monitor_channels` out, so it monitors all channels.
+    fn with_processors(pipeline: &str) -> String {
         format!(
             "{BASE}mixers:
   left:
@@ -1409,14 +1410,22 @@ processors:
   comp:
     type: Compressor
     parameters:
-      channels: 2
-      monitor_channels: [1]
-      attack: 25
-      attack_unit: ms
-      release: 1
-      release_unit: s
-      threshold: -20
-      factor: 4
+      {{channels: 2, monitor_channels: [1], attack: 25, attack_unit: ms, release: 1,
+        release_unit: s, threshold: -20, factor: 4}}
+  gate:
+    type: NoiseGate
+    parameters:
+      {{channels: 2, attack: 25, attack_unit: ms, release: 1, release_unit: s,
+        threshold: -60, attenuation: 20}}
+  limiter:
+    type: LookaheadLimiter
+    parameters:
+      {{channels: 2, monitor_channels: [1], attack: 1, attack_unit: ms, release: 100,
+        release_unit: ms}}
+  race:
+    type: RACE
+    parameters:
+      {{channels: 2, channel_a: 1, channel_b: 0, delay: 1, delay_unit: ms, attenuation: 3}}
 pipeline:
 {pipeline}"
         )
@@ -1425,13 +1434,19 @@ pipeline:
     #[test]
     fn used_capture_channels_include_processors_before_the_mixer() {
         let mixer = "  - type: Mixer\n    name: left\n";
-        let processor = "  - type: Processor\n    name: comp\n";
-        let bypassed = "  - type: Processor\n    name: comp\n    bypassed: true\n";
+        let step = |name: &str| format!("  - type: Processor\n    name: {name}\n");
         let used =
-            |pipeline: &str| used_capture_channels(&parse(&with_compressor(pipeline)).unwrap());
-        assert_eq!(used(&format!("{processor}{mixer}")), vec![true, true]);
-        // After the mixer, or bypassed, the compressor does not read any capture channel.
-        assert_eq!(used(&format!("{mixer}{processor}")), vec![true, false]);
+            |pipeline: &str| used_capture_channels(&parse(&with_processors(pipeline)).unwrap());
+        for name in ["comp", "gate", "limiter", "race"] {
+            assert_eq!(
+                used(&format!("{}{mixer}", step(name))),
+                vec![true, true],
+                "{name}"
+            );
+        }
+        // After the mixer, or bypassed, a processor does not read any capture channel.
+        let bypassed = format!("{}    bypassed: true\n", step("comp"));
+        assert_eq!(used(&format!("{mixer}{}", step("comp"))), vec![true, false]);
         assert_eq!(used(&format!("{bypassed}{mixer}")), vec![true, false]);
     }
 
