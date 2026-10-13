@@ -271,446 +271,828 @@ pub struct VuSubscription {
     pub release: f32,
 }
 
-/// All commands accepted by the websocket server.
+/// Defines the websocket protocol: [`WsCommand`], [`WsReply`] and the command groups.
 ///
-/// Every command is a JSON object with a `"command"` field holding the command name.
-/// Commands with arguments carry them in additional named fields, e.g.
-/// `{"command": "SetUpdateInterval", "value": 500}`.
+/// Each command is written together with its reply, inside a group:
 ///
-/// See the [module-level documentation](self) for the general message format.
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-#[serde(tag = "command")]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub enum WsCommand {
-    // ── Config management ──────────────────────────────────────────────────
-    /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
-    SetConfigFilePath {
-        /// Path of the config file.
-        value: String,
-    },
-
-    /// Upload and immediately apply a new configuration as a YAML string.
-    SetConfig {
-        /// Config in YAML format.
-        value: String,
-    },
-
-    /// Upload and immediately apply a new configuration as a JSON string.
-    SetConfigJson {
-        /// Config in JSON format.
-        value: String,
-    },
-
-    /// Apply a partial patch to the active configuration.
-    ///
-    /// If the resulting config is valid it is applied immediately.
-    PatchConfig {
-        /// Partial config object containing only the fields to change.
-        value: serde_json::Value,
-    },
-
-    /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
-    SetConfigValue {
-        /// JSON Pointer to the value, such as `"/devices/samplerate"`.
-        pointer: String,
-        /// The value to store there.
-        value: serde_json::Value,
-    },
-
-    /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
-    Reload,
-
-    /// Read the active configuration.
-    GetConfig,
-
-    /// Read a single value from the active configuration using a JSON Pointer (RFC 6901).
-    GetConfigValue {
-        /// JSON Pointer to the value, such as `"/devices/samplerate"`.
-        value: String,
-    },
-
-    /// Read the `title` field from the active configuration.
-    GetConfigTitle,
-
-    /// Read the `description` field from the active configuration.
-    GetConfigDescription,
-
-    /// Read the previously active configuration (before the last reload or upload).
-    GetPreviousConfig,
-
-    /// Parse and fill defaults for a YAML config string without changing the active config.
-    ReadConfig {
-        /// Config in YAML format.
-        value: String,
-    },
-
-    /// Parse and fill defaults for a JSON config string without changing the active config.
-    ReadConfigJson {
-        /// Config in JSON format.
-        value: String,
-    },
-
-    /// Parse and fill defaults for a config file without changing the active config.
-    ReadConfigFile {
-        /// Path of the config file.
-        value: String,
-    },
-
-    /// Like [`ReadConfig`](Self::ReadConfig) but performs more extensive validation checks.
-    ValidateConfig {
-        /// Config in YAML format.
-        value: String,
-    },
-
-    /// Like [`ReadConfigJson`](Self::ReadConfigJson) but performs more extensive validation checks.
-    ValidateConfigJson {
-        /// Config in JSON format.
-        value: String,
-    },
-
-    /// Read the active configuration as JSON.
-    GetConfigJson,
-
-    /// Get the path of the currently loaded config file.
-    GetConfigFilePath,
-
-    // ── State file ────────────────────────────────────────────────────────
-    /// Get the path of the state file, if one is configured.
-    GetStateFilePath,
-
-    /// Check whether all pending changes have been saved to the state file.
-    GetStateFileUpdated,
-
-    // ── Signal levels ─────────────────────────────────────────────────────
-    /// Get the peak-to-peak signal range of the last processed chunk.
-    ///
-    /// A value of 2.0 means full level (signal swings from −1.0 to +1.0).
-    GetSignalRange,
-
-    /// Get the RMS level of the last chunk on the capture side, per channel.
-    GetCaptureSignalRms,
-
-    /// Get the RMS level averaged over the last `value` seconds on the capture side, per channel.
-    GetCaptureSignalRmsSince {
-        /// Time window in seconds.
-        value: f32,
-    },
-
-    /// Get the RMS level since the last call to this command from this client, per channel.
-    ///
-    /// On the first call, returns values since the client connected.
-    /// If called again before new data is available, returns an empty list.
-    GetCaptureSignalRmsSinceLast,
-
-    /// Get the peak level of the last chunk on the capture side, per channel.
-    GetCaptureSignalPeak,
-
-    /// Get the peak level over the last `value` seconds on the capture side, per channel.
-    GetCaptureSignalPeakSince {
-        /// Time window in seconds.
-        value: f32,
-    },
-
-    /// Get the peak level since the last call to this command from this client, per channel.
-    GetCaptureSignalPeakSinceLast,
-
-    /// Get the RMS level of the last chunk on the playback side, per channel.
-    GetPlaybackSignalRms,
-
-    /// Get the RMS level averaged over the last `value` seconds on the playback side, per channel.
-    GetPlaybackSignalRmsSince {
-        /// Time window in seconds.
-        value: f32,
-    },
-
-    /// Get the RMS level since the last call to this command from this client, per channel.
-    GetPlaybackSignalRmsSinceLast,
-
-    /// Get the peak level of the last chunk on the playback side, per channel.
-    GetPlaybackSignalPeak,
-
-    /// Get the peak level over the last `value` seconds on the playback side, per channel.
-    GetPlaybackSignalPeakSince {
-        /// Time window in seconds.
-        value: f32,
-    },
-
-    /// Get the peak level since the last call to this command from this client, per channel.
-    GetPlaybackSignalPeakSinceLast,
-
-    /// Get RMS and peak levels for both sides in a single request.
-    GetSignalLevels,
-
-    /// Get RMS and peak levels over the last `value` seconds for both sides.
-    GetSignalLevelsSince {
-        /// Time window in seconds.
-        value: f32,
-    },
-
-    /// Get RMS and peak levels since the last call to this command from this client, for both sides.
-    GetSignalLevelsSinceLast,
-
-    /// Subscribe to pushed signal level events.
-    ///
-    /// While subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a
-    /// new chunk is analyzed. The event rate therefore depends on the configured chunk size and
-    /// sample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    /// No other commands are accepted on the connection until then.
-    SubscribeSignalLevels {
-        /// Which side to receive events for.
-        value: WsSignalLevelSide,
-    },
-
-    /// Subscribe to smoothed, rate-capped VU-meter level events.
-    ///
-    /// If `attack` or `release` is out of range the command returns [`WsResult::InvalidValueError`]
-    /// and no subscription is started.
-    ///
-    /// While subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing
-    /// smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
-    /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    /// No other commands are accepted on the connection until then.
-    SubscribeVuLevels {
-        /// Rate limit and smoothing settings.
-        value: VuSubscription,
-    },
-
-    /// Stop an active subscription (signal levels, VU levels, state, or spectrum).
-    ///
-    /// If no subscription is active, the reply is [`WsReply::Invalid`]
-    /// with the error `"No active subscription"`.
-    StopSubscription,
-
-    // ── Processing status ─────────────────────────────────────────────────
-    /// Subscribe to pushed processing state change events.
-    ///
-    /// While subscribed, CamillaDSP sends a [`WsReply::StateEvent`] message whenever the
-    /// processing state changes. The event payload always contains `state`. When the state is
-    /// `"Inactive"` it also contains `stop_reason`.
-    ///
-    /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    /// No other commands are accepted on the connection until then.
-    SubscribeState,
-
-    /// Get the peak capture and playback levels measured since processing started.
-    GetSignalPeaksSinceStart,
-
-    /// Reset the peak-since-start counters. Affects all connected clients.
-    ResetSignalPeaksSinceStart,
-
-    /// Get the optional display labels for capture and playback channels.
-    GetChannelLabels,
-
-    /// Get the measured sample rate of the capture device.
-    GetCaptureRate,
-
-    /// Get the update interval for capture rate and signal range polling.
-    GetUpdateInterval,
-
-    /// Set the update interval for capture rate and signal range polling.
-    SetUpdateInterval {
-        /// Interval in milliseconds.
-        value: usize,
-    },
-
-    // ── Volume control (Main fader) ───────────────────────────────────────
-    /// Get the current volume of the Main fader.
-    GetVolume,
-
-    /// Set the volume of the Main fader. Clamped to −150 to +50 dB.
-    SetVolume {
-        /// Volume in dB.
-        value: f32,
-    },
-
-    /// Adjust the volume of the Main fader by `value` dB.
-    AdjustVolume {
-        /// Volume change in dB.
-        value: f32,
-        /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
-        #[serde(default)]
-        min: Option<f32>,
-        /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
-        #[serde(default)]
-        max: Option<f32>,
-    },
-
-    /// Get the mute state of the Main fader.
-    GetMute,
-
-    /// Set the mute state of the Main fader.
-    SetMute {
-        /// `true` to mute, `false` to unmute.
-        value: bool,
-    },
-
-    /// Toggle the mute state of the Main fader.
-    ToggleMute,
-
-    // ── Volume control (faders) ───────────────────────────────────────────
-    /// Get the volume and mute state of all faders in a single request.
-    GetFaders,
-
-    /// Get the volume of a specific fader.
-    GetFaderVolume {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-    },
-
-    /// Set the volume of a specific fader. Clamped to −150 to +50 dB.
-    SetFaderVolume {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-        /// Volume in dB.
-        value: f32,
-    },
-
-    /// Special volume setter for use with a Loudness filter and an external volume control
-    /// (without a Volume filter). Clamped to −150 to +50 dB.
-    SetFaderExternalVolume {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-        /// Volume in dB.
-        value: f32,
-    },
-
-    /// Adjust the volume of a specific fader by `value` dB.
-    AdjustFaderVolume {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-        /// Volume change in dB.
-        value: f32,
-        /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
-        #[serde(default)]
-        min: Option<f32>,
-        /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
-        #[serde(default)]
-        max: Option<f32>,
-    },
-
-    /// Get the mute state of a specific fader.
-    GetFaderMute {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-    },
-
-    /// Set the mute state of a specific fader.
-    SetFaderMute {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-        /// `true` to mute, `false` to unmute.
-        value: bool,
-    },
-
-    /// Toggle the mute state of a specific fader.
-    ToggleFaderMute {
-        /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
-        fader: usize,
-    },
-
-    // ── General ───────────────────────────────────────────────────────────
-    /// Get the CamillaDSP version string.
-    GetVersion,
-
-    /// Get the current processing state.
-    GetState,
-
-    /// Get the reason processing last stopped.
-    GetStopReason,
-
-    /// Get the current adjustment factor applied to the asynchronous resampler.
-    GetRateAdjust,
-
-    /// Get the number of samples that have been clipped since start, or since the
-    /// counter was last reset. Loading a new config does not reset it.
-    GetClippedSamples,
-
-    /// Reset the clipped-samples counter to zero.
-    ResetClippedSamples,
-
-    /// Get the current playback device buffer level when rate adjust is enabled.
-    GetBufferLevel,
-
-    /// Get the list of supported playback and capture device types.
-    GetSupportedDeviceTypes,
-
-    // ── Audio device listing ──────────────────────────────────────────────
-    /// List available capture devices for a given backend.
-    GetAvailableCaptureDevices {
-        /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-        backend: String,
-    },
-
-    /// List available playback devices for a given backend.
-    GetAvailablePlaybackDevices {
-        /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
-        backend: String,
-    },
-
-    /// Get the capabilities of a specific capture device.
-    ///
-    /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetCaptureDeviceCapabilities {
-        /// Backend name.
-        backend: String,
-        /// Device identifier, as listed by
-        /// [`GetAvailableCaptureDevices`](Self::GetAvailableCaptureDevices).
-        device: String,
-    },
-
-    /// Get the capabilities of a specific playback device.
-    ///
-    /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
-    GetPlaybackDeviceCapabilities {
-        /// Backend name.
-        backend: String,
-        /// Device identifier, as listed by
-        /// [`GetAvailablePlaybackDevices`](Self::GetAvailablePlaybackDevices).
-        device: String,
-    },
-
-    // ── Performance ───────────────────────────────────────────────────────
-    /// Get the current pipeline processing load.
-    GetProcessingLoad,
-
-    /// Get the current resampler processing load.
-    GetResamplerLoad,
-
-    // ── Spectrum analysis ─────────────────────────────────────────────────
-    /// Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
-    GetSpectrum {
-        /// The spectrum to compute.
-        value: SpectrumRequest,
-    },
-
-    /// Subscribe to pushed spectrum events.
-    ///
-    /// If processing is not running when this is sent, the result is
-    /// [`WsResult::ProcessingNotRunningError`] and no subscription is started.
-    ///
-    /// While subscribed, CamillaDSP sends [`WsReply::SpectrumEvent`] each time a new spectrum is
-    /// ready. If processing stops, a final event with [`WsResult::ProcessingStopped`] is sent and
-    /// the subscription is cancelled. Resubscribe once processing has resumed.
-    ///
-    /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
-    /// No other commands are accepted on the connection until then.
-    SubscribeSpectrum {
-        /// The spectrum to compute, and the push rate.
-        value: SpectrumSubscription,
-    },
-
-    // ── Shutdown ──────────────────────────────────────────────────────────
-    /// Stop processing and exit CamillaDSP.
-    Exit,
-
-    /// Stop processing and wait for a new configuration to be uploaded
-    /// via [`SetConfig`](Self::SetConfig) or [`SetConfigFilePath`](Self::SetConfigFilePath) +
-    /// [`Reload`](Self::Reload).
-    Stop,
-
-    /// Internal sentinel. Not a valid command from clients.
-    #[doc(hidden)]
-    None,
+/// ```text
+/// /// Group description, shown in websocket.md.
+/// group "Group name" {
+///     /// Command description.
+///     CommandName { arguments } -> { reply fields },
+/// }
+/// ```
+///
+/// - `{ arguments }` are the named fields of the command. Leave it out for a command without
+///   arguments.
+/// - `-> { reply fields }` are the fields of the reply, normally just a documented `value`.
+///   Leave it out for a reply that only reports the result. Every reply gets a flattened
+///   `result: WsResult` field first, so it is never written here.
+/// - `internal { ... }` holds commands that are not part of the protocol. They get no reply
+///   and are left out of websocket.md.
+/// - `other_replies { ... }` holds replies that do not answer a command, written out in full:
+///   the pushed events and `Invalid`.
+///
+/// The groups and the commands within them are listed in the order they appear in
+/// websocket.md. Doc comments on commands, arguments and reply fields become the descriptions
+/// in websocket.md and in the OpenAPI schemas. rustfmt does not format the macro body, so keep
+/// the layout of the existing entries.
+macro_rules! ws_protocol {
+    (
+        $(
+            $(#[doc = $gdoc:literal])*
+            group $gname:literal {
+                $(
+                    $(#[$cmeta:meta])*
+                    $cmd:ident
+                    $({ $($args:tt)* })?
+                    $(-> { $($rfields:tt)* })?
+                ),* $(,)?
+            }
+        )*
+        internal {
+            $(
+                $(#[$imeta:meta])*
+                $iname:ident
+            ),* $(,)?
+        }
+        other_replies {
+            $(
+                $(#[$ometa:meta])*
+                $oname:ident { $($ofields:tt)* }
+            ),* $(,)?
+        }
+    ) => {
+        /// All commands accepted by the websocket server.
+        ///
+        /// Every command is a JSON object with a `"command"` field holding the command name.
+        /// Commands with arguments carry them in additional named fields, e.g.
+        /// `{"command": "SetUpdateInterval", "value": 500}`.
+        ///
+        /// See the [module-level documentation](self) for the general message format.
+        #[derive(Debug, PartialEq, Deserialize, Serialize)]
+        #[serde(tag = "command")]
+        #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+        pub enum WsCommand {
+            $($(
+                $(#[$cmeta])*
+                $cmd $({ $($args)* })?,
+            )*)*
+            $(
+                $(#[$imeta])*
+                $iname,
+            )*
+        }
+
+        /// All possible reply messages sent by the websocket server.
+        ///
+        /// Each variant mirrors the corresponding [`WsCommand`]. Every reply is a JSON object with a
+        /// `"reply"` field holding the reply name, e.g. `{"reply": "GetVersion", "result": "Ok",
+        /// "value": "2.0.0"}`.
+        #[derive(Debug, PartialEq, Deserialize, Serialize)]
+        #[serde(tag = "reply")]
+        #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+        pub enum WsReply {
+            $($(
+                $cmd {
+                    #[serde(flatten)]
+                    result: WsResult,
+                    $($($rfields)*)?
+                },
+            )*)*
+            $(
+                $(#[$ometa])*
+                $oname { $($ofields)* },
+            )*
+        }
+
+        impl WsCommand {
+            /// The variant name, which is also the value of the `"command"` field in the JSON
+            /// message.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $($(Self::$cmd { .. } => stringify!($cmd),)*)*
+                    $(Self::$iname { .. } => stringify!($iname),)*
+                }
+            }
+
+            #[cfg(test)]
+            const NAMES: &[&str] = &[
+                $($(stringify!($cmd),)*)*
+                $(stringify!($iname),)*
+            ];
+        }
+
+        impl WsReply {
+            /// The variant name, which is also the value of the `"reply"` field in the JSON
+            /// message.
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $($(Self::$cmd { .. } => stringify!($cmd),)*)*
+                    $(Self::$oname { .. } => stringify!($oname),)*
+                }
+            }
+
+            #[cfg(test)]
+            const NAMES: &[&str] = &[
+                $($(stringify!($cmd),)*)*
+                $(stringify!($oname),)*
+            ];
+        }
+
+        /// The command groups in the order of websocket.md, as
+        /// `(group name, group description, command names)`.
+        pub const WS_COMMAND_GROUPS: &[(&str, &str, &[&str])] = &[
+            $((
+                $gname,
+                concat!($($gdoc, "\n"),*),
+                &[$(stringify!($cmd)),*],
+            ),)*
+        ];
+    };
+}
+
+ws_protocol! {
+    /// Basic commands for querying the CamillaDSP version and the list of supported
+    /// device types, and for stopping or exiting the process.
+    group "General" {
+        /// Get the CamillaDSP version string.
+        GetVersion -> {
+            /// Version string, e.g. `"2.0.0"`.
+            value: String,
+        },
+
+        /// Get the list of supported playback and capture device types.
+        GetSupportedDeviceTypes -> {
+            /// `[list_of_playback_types, list_of_capture_types]`.
+            value: (Vec<String>, Vec<String>),
+        },
+
+        /// Stop processing and wait for a new configuration to be uploaded
+        /// via [`SetConfig`](Self::SetConfig) or [`SetConfigFilePath`](Self::SetConfigFilePath) +
+        /// [`Reload`](Self::Reload).
+        Stop,
+
+        /// Stop processing and exit CamillaDSP.
+        Exit,
+    }
+
+    /// Controls the polling interval used for background status sampling.
+    /// The update interval determines how often the capture rate and signal range
+    /// snapshots are refreshed internally.
+    group "Websocket server settings" {
+        /// Get the update interval for capture rate and signal range polling.
+        GetUpdateInterval -> {
+            /// Update interval in milliseconds.
+            value: usize,
+        },
+
+        /// Set the update interval for capture rate and signal range polling.
+        SetUpdateInterval {
+            /// Interval in milliseconds.
+            value: usize,
+        },
+    }
+
+    /// Commands for monitoring the running pipeline: processing state, capture rate,
+    /// signal range, async-resampler adjustment, playback buffer level, clipped
+    /// samples, and CPU load. Also covers the optional state file and
+    /// a push subscription for state-change events.
+    group "Processing status" {
+        /// Get the current processing state.
+        GetState -> {
+            /// Current processing state.
+            value: ProcessingState,
+        },
+
+        /// Get the reason processing last stopped.
+        GetStopReason -> {
+            /// Reason the processing last stopped.
+            value: StopReason,
+        },
+
+        /// Subscribe to pushed processing state change events.
+        ///
+        /// While subscribed, CamillaDSP sends a [`WsReply::StateEvent`] message whenever the
+        /// processing state changes. The event payload always contains `state`. When the state is
+        /// `"Inactive"` it also contains `stop_reason`.
+        ///
+        /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+        /// No other commands are accepted on the connection until then.
+        SubscribeState,
+
+        /// Stop an active subscription (signal levels, VU levels, state, or spectrum).
+        ///
+        /// If no subscription is active, the reply is [`WsReply::Invalid`]
+        /// with the error `"No active subscription"`.
+        StopSubscription,
+
+        /// Get the measured sample rate of the capture device.
+        GetCaptureRate -> {
+            /// Measured capture sample rate in Hz.
+            value: usize,
+        },
+
+        /// Get the peak-to-peak signal range of the last processed chunk.
+        ///
+        /// A value of 2.0 means full level (signal swings from −1.0 to +1.0).
+        GetSignalRange -> {
+            /// Peak-to-peak amplitude range of the last chunk (2.0 = full level).
+            value: f32,
+        },
+
+        /// Get the current adjustment factor applied to the asynchronous resampler.
+        GetRateAdjust -> {
+            /// Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
+            value: f32,
+        },
+
+        /// Get the current playback device buffer level when rate adjust is enabled.
+        GetBufferLevel -> {
+            /// Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
+            value: usize,
+        },
+
+        /// Get the number of samples that have been clipped since start, or since the
+        /// counter was last reset. Loading a new config does not reset it.
+        GetClippedSamples -> {
+            /// Number of clipped samples since start or the last reset.
+            value: usize,
+        },
+
+        /// Reset the clipped-samples counter to zero.
+        ResetClippedSamples,
+
+        /// Get the current pipeline processing load.
+        GetProcessingLoad -> {
+            /// Pipeline processing load in percent.
+            value: f32,
+        },
+
+        /// Get the current resampler processing load.
+        GetResamplerLoad -> {
+            /// Resampler processing load in percent.
+            value: f32,
+        },
+
+        /// Get the path of the state file, if one is configured.
+        GetStateFilePath -> {
+            /// File path of the state file, or `null` if no state file is used.
+            value: Option<String>,
+        },
+
+        /// Check whether all pending changes have been saved to the state file.
+        GetStateFileUpdated -> {
+            /// `true` if all changes have been saved to the state file.
+            value: bool,
+        },
+    }
+
+    /// Read RMS and peak levels for capture and playback channels.
+    /// Levels are available as an instantaneous snapshot, averaged over a time window,
+    /// accumulated since the last call, or pushed continuously via a subscription.
+    /// Also includes peak-since-start tracking, per-channel display labels,
+    /// and a smoothed VU-meter subscription.
+    group "Signal levels" {
+        /// Get the RMS level of the last chunk on the capture side, per channel.
+        GetCaptureSignalRms -> {
+            /// RMS level per capture channel in dB (0 dB = full level).
+            value: Vec<f32>,
+        },
+
+        /// Get the RMS level averaged over the last `value` seconds on the capture side, per channel.
+        GetCaptureSignalRmsSince {
+            /// Time window in seconds.
+            value: f32,
+        } -> {
+            /// RMS level per capture channel in dB, averaged over the requested window.
+            value: Vec<f32>,
+        },
+
+        /// Get the RMS level since the last call to this command from this client, per channel.
+        ///
+        /// On the first call, returns values since the client connected.
+        /// If called again before new data is available, returns an empty list.
+        GetCaptureSignalRmsSinceLast -> {
+            /// RMS level per capture channel in dB since the last call; empty if no new data.
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level of the last chunk on the capture side, per channel.
+        GetCaptureSignalPeak -> {
+            /// Peak level per capture channel in dB (0 dB = full level).
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level over the last `value` seconds on the capture side, per channel.
+        GetCaptureSignalPeakSince {
+            /// Time window in seconds.
+            value: f32,
+        } -> {
+            /// Peak level per capture channel in dB over the requested window.
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level since the last call to this command from this client, per channel.
+        GetCaptureSignalPeakSinceLast -> {
+            /// Peak level per capture channel in dB since the last call; empty if no new data.
+            value: Vec<f32>,
+        },
+
+        /// Get the RMS level of the last chunk on the playback side, per channel.
+        GetPlaybackSignalRms -> {
+            /// RMS level per playback channel in dB (0 dB = full level).
+            value: Vec<f32>,
+        },
+
+        /// Get the RMS level averaged over the last `value` seconds on the playback side, per channel.
+        GetPlaybackSignalRmsSince {
+            /// Time window in seconds.
+            value: f32,
+        } -> {
+            /// RMS level per playback channel in dB, averaged over the requested window.
+            value: Vec<f32>,
+        },
+
+        /// Get the RMS level since the last call to this command from this client, per channel.
+        GetPlaybackSignalRmsSinceLast -> {
+            /// RMS level per playback channel in dB since the last call; empty if no new data.
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level of the last chunk on the playback side, per channel.
+        GetPlaybackSignalPeak -> {
+            /// Peak level per playback channel in dB (0 dB = full level).
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level over the last `value` seconds on the playback side, per channel.
+        GetPlaybackSignalPeakSince {
+            /// Time window in seconds.
+            value: f32,
+        } -> {
+            /// Peak level per playback channel in dB over the requested window.
+            value: Vec<f32>,
+        },
+
+        /// Get the peak level since the last call to this command from this client, per channel.
+        GetPlaybackSignalPeakSinceLast -> {
+            /// Peak level per playback channel in dB since the last call; empty if no new data.
+            value: Vec<f32>,
+        },
+
+        /// Get RMS and peak levels for both sides in a single request.
+        GetSignalLevels -> {
+            /// RMS and peak levels for both sides.
+            value: AllLevels,
+        },
+
+        /// Get RMS and peak levels over the last `value` seconds for both sides.
+        GetSignalLevelsSince {
+            /// Time window in seconds.
+            value: f32,
+        } -> {
+            /// RMS and peak levels for both sides, averaged over the requested window.
+            value: AllLevels,
+        },
+
+        /// Get RMS and peak levels since the last call to this command from this client, for both sides.
+        GetSignalLevelsSinceLast -> {
+            /// RMS and peak levels for both sides since the last call; empty if no new data.
+            value: AllLevels,
+        },
+
+        /// Subscribe to pushed signal level events.
+        ///
+        /// While subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a
+        /// new chunk is analyzed. The event rate therefore depends on the configured chunk size and
+        /// sample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+        /// No other commands are accepted on the connection until then.
+        SubscribeSignalLevels {
+            /// Which side to receive events for.
+            value: WsSignalLevelSide,
+        },
+
+        /// Subscribe to smoothed, rate-capped VU-meter level events.
+        ///
+        /// If `attack` or `release` is out of range the command returns [`WsResult::InvalidValueError`]
+        /// and no subscription is started.
+        ///
+        /// While subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing
+        /// smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
+        /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+        /// No other commands are accepted on the connection until then.
+        SubscribeVuLevels {
+            /// Rate limit and smoothing settings.
+            value: VuSubscription,
+        },
+
+        /// Get the peak capture and playback levels measured since processing started.
+        GetSignalPeaksSinceStart -> {
+            /// Peak levels since processing started, for both sides.
+            value: PbCapLevels,
+        },
+
+        /// Reset the peak-since-start counters. Affects all connected clients.
+        ResetSignalPeaksSinceStart,
+
+        /// Get the optional display labels for capture and playback channels.
+        GetChannelLabels -> {
+            /// Display labels for capture and playback channels.
+            value: ChannelLabels,
+        },
+    }
+
+    /// Compute an FFT-based frequency spectrum from the audio passing through
+    /// the pipeline. Available as a one-shot request or a continuous push
+    /// subscription.
+    group "Spectrum analysis" {
+        /// Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
+        GetSpectrum {
+            /// The spectrum to compute.
+            value: SpectrumRequest,
+        } -> {
+            /// Computed spectrum with frequency and magnitude arrays.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<SpectrumData>,
+        },
+
+        /// Subscribe to pushed spectrum events.
+        ///
+        /// If processing is not running when this is sent, the result is
+        /// [`WsResult::ProcessingNotRunningError`] and no subscription is started.
+        ///
+        /// While subscribed, CamillaDSP sends [`WsReply::SpectrumEvent`] each time a new spectrum is
+        /// ready. If processing stops, a final event with [`WsResult::ProcessingStopped`] is sent and
+        /// the subscription is cancelled. Resubscribe once processing has resumed.
+        ///
+        /// Send [`StopSubscription`](Self::StopSubscription) to end the stream.
+        /// No other commands are accepted on the connection until then.
+        SubscribeSpectrum {
+            /// The spectrum to compute, and the push rate.
+            value: SpectrumSubscription,
+        },
+    }
+
+    /// Read and adjust the volume and mute state of the faders.
+    /// The Main fader (index 0) maps to fader index 0; Aux1–Aux4 map to indices 1–4.
+    /// Volume adjustments can optionally specify a clamping range so that the
+    /// result stays within caller-defined limits.
+    group "Volume control" {
+        /// Get the current volume of the Main fader.
+        GetVolume -> {
+            /// Current volume in dB.
+            value: f32,
+        },
+
+        /// Set the volume of the Main fader. Clamped to −150 to +50 dB.
+        SetVolume {
+            /// Volume in dB.
+            value: f32,
+        },
+
+        /// Adjust the volume of the Main fader by `value` dB.
+        AdjustVolume {
+            /// Volume change in dB.
+            value: f32,
+            /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
+            #[serde(default)]
+            min: Option<f32>,
+            /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
+            #[serde(default)]
+            max: Option<f32>,
+        } -> {
+            /// New volume in dB after the adjustment.
+            value: f32,
+        },
+
+        /// Get the mute state of the Main fader.
+        GetMute -> {
+            /// `true` if muted.
+            value: bool,
+        },
+
+        /// Set the mute state of the Main fader.
+        SetMute {
+            /// `true` to mute, `false` to unmute.
+            value: bool,
+        },
+
+        /// Toggle the mute state of the Main fader.
+        ToggleMute -> {
+            /// New mute state after the toggle.
+            value: bool,
+        },
+
+        /// Get the volume and mute state of all faders in a single request.
+        GetFaders -> {
+            /// List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
+            value: Vec<Fader>,
+        },
+
+        /// Get the volume of a specific fader.
+        GetFaderVolume {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+        } -> {
+            /// `[fader_index, volume_dB]`.
+            value: (usize, f32),
+        },
+
+        /// Set the volume of a specific fader. Clamped to −150 to +50 dB.
+        SetFaderVolume {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+            /// Volume in dB.
+            value: f32,
+        },
+
+        /// Special volume setter for use with a Loudness filter and an external volume control
+        /// (without a Volume filter). Clamped to −150 to +50 dB.
+        SetFaderExternalVolume {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+            /// Volume in dB.
+            value: f32,
+        },
+
+        /// Adjust the volume of a specific fader by `value` dB.
+        AdjustFaderVolume {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+            /// Volume change in dB.
+            value: f32,
+            /// Lower limit for the resulting volume in dB. Defaults to −150 dB.
+            #[serde(default)]
+            min: Option<f32>,
+            /// Upper limit for the resulting volume in dB. Defaults to +50 dB.
+            #[serde(default)]
+            max: Option<f32>,
+        } -> {
+            /// `[fader_index, new_volume_dB]` after the adjustment.
+            value: (usize, f32),
+        },
+
+        /// Get the mute state of a specific fader.
+        GetFaderMute {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+        } -> {
+            /// `[fader_index, is_muted]`.
+            value: (usize, bool),
+        },
+
+        /// Set the mute state of a specific fader.
+        SetFaderMute {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+            /// `true` to mute, `false` to unmute.
+            value: bool,
+        },
+
+        /// Toggle the mute state of a specific fader.
+        ToggleFaderMute {
+            /// Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+            fader: usize,
+        } -> {
+            /// `[fader_index, new_mute_state]` after the toggle.
+            value: (usize, bool),
+        },
+    }
+
+    /// Read and modify the active configuration.
+    /// Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
+    /// effect immediately. Changes via `SetConfigFilePath` require a subsequent
+    /// `Reload` to be applied.
+    group "Config management" {
+        /// Read the active configuration.
+        GetConfig -> {
+            /// Active config in YAML format.
+            value: String,
+        },
+
+        /// Read the active configuration as JSON.
+        GetConfigJson -> {
+            /// Active config in JSON format.
+            value: String,
+        },
+
+        /// Read the `title` field from the active configuration.
+        GetConfigTitle -> {
+            /// Title string from the active config.
+            value: String,
+        },
+
+        /// Read the `description` field from the active configuration.
+        GetConfigDescription -> {
+            /// Description string from the active config.
+            value: String,
+        },
+
+        /// Get the path of the currently loaded config file.
+        GetConfigFilePath -> {
+            /// File path of the active config, or `null` if no file is loaded.
+            value: Option<String>,
+        },
+
+        /// Read the previously active configuration (before the last reload or upload).
+        GetPreviousConfig -> {
+            /// Previously active config in YAML format.
+            value: String,
+        },
+
+        /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
+        SetConfigFilePath {
+            /// Path of the config file.
+            value: String,
+        },
+
+        /// Upload and immediately apply a new configuration as a YAML string.
+        SetConfig {
+            /// Config in YAML format.
+            value: String,
+        },
+
+        /// Upload and immediately apply a new configuration as a JSON string.
+        SetConfigJson {
+            /// Config in JSON format.
+            value: String,
+        },
+
+        /// Apply a partial patch to the active configuration.
+        ///
+        /// If the resulting config is valid it is applied immediately.
+        PatchConfig {
+            /// Partial config object containing only the fields to change.
+            value: serde_json::Value,
+        },
+
+        /// Read a single value from the active configuration using a JSON Pointer (RFC 6901).
+        GetConfigValue {
+            /// JSON Pointer to the value, such as `"/devices/samplerate"`.
+            value: String,
+        } -> {
+            /// Value at the specified JSON Pointer path.
+            value: serde_json::Value,
+        },
+
+        /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+        SetConfigValue {
+            /// JSON Pointer to the value, such as `"/devices/samplerate"`.
+            pointer: String,
+            /// The value to store there.
+            value: serde_json::Value,
+        },
+
+        /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+        Reload,
+    }
+
+    /// Parse and validate a configuration string or file without affecting the
+    /// running pipeline. Useful for checking a config before applying it.
+    /// The `Validate` variants perform more thorough cross-field checks than
+    /// the `Read` variants.
+    group "Config reading and checking" {
+        /// Parse and fill defaults for a YAML config string without changing the active config.
+        ReadConfig {
+            /// Config in YAML format.
+            value: String,
+        } -> {
+            /// Config with all optional fields filled with defaults, or an error message.
+            value: String,
+        },
+
+        /// Parse and fill defaults for a JSON config string without changing the active config.
+        ReadConfigJson {
+            /// Config in JSON format.
+            value: String,
+        } -> {
+            /// Config with all optional fields filled with defaults, or an error message.
+            value: String,
+        },
+
+        /// Parse and fill defaults for a config file without changing the active config.
+        ReadConfigFile {
+            /// Path of the config file.
+            value: String,
+        } -> {
+            /// Config with all optional fields filled with defaults, or an error message.
+            value: String,
+        },
+
+        /// Like [`ReadConfig`](Self::ReadConfig) but performs more extensive validation checks.
+        ValidateConfig {
+            /// Config in YAML format.
+            value: String,
+        } -> {
+            /// Validated config with defaults, or an error message.
+            value: String,
+        },
+
+        /// Like [`ReadConfigJson`](Self::ReadConfigJson) but performs more extensive validation checks.
+        ValidateConfigJson {
+            /// Config in JSON format.
+            value: String,
+        } -> {
+            /// Validated config with defaults, or an error message.
+            value: String,
+        },
+    }
+
+    /// Enumerate available audio devices for a given backend and query their
+    /// supported sample rates, formats, and channel counts.
+    /// See the section below for the response format.
+    group "Audio device listing" {
+        /// List available capture devices for a given backend.
+        GetAvailableCaptureDevices {
+            /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+            backend: String,
+        } -> {
+            /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
+            value: Vec<(String, String)>,
+        },
+
+        /// List available playback devices for a given backend.
+        GetAvailablePlaybackDevices {
+            /// Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+            backend: String,
+        } -> {
+            /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
+            value: Vec<(String, String)>,
+        },
+
+        /// Get the capabilities of a specific capture device.
+        ///
+        /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
+        GetCaptureDeviceCapabilities {
+            /// Backend name.
+            backend: String,
+            /// Device identifier, as listed by
+            /// [`GetAvailableCaptureDevices`](Self::GetAvailableCaptureDevices).
+            device: String,
+        } -> {
+            /// Capabilities of the requested capture device.
+            value: AudioDeviceDescriptor,
+        },
+
+        /// Get the capabilities of a specific playback device.
+        ///
+        /// Errors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].
+        GetPlaybackDeviceCapabilities {
+            /// Backend name.
+            backend: String,
+            /// Device identifier, as listed by
+            /// [`GetAvailablePlaybackDevices`](Self::GetAvailablePlaybackDevices).
+            device: String,
+        } -> {
+            /// Capabilities of the requested playback device.
+            value: AudioDeviceDescriptor,
+        },
+    }
+
+    internal {
+        /// Internal sentinel. Not a valid command from clients.
+        #[doc(hidden)]
+        None,
+    }
+
+    other_replies {
+        /// Pushed to subscribed clients each time the signal levels are updated.
+        SignalLevelsEvent {
+            #[serde(flatten)]
+            result: WsResult,
+            /// Levels for the subscribed side.
+            value: StreamLevels,
+        },
+
+        /// Pushed to subscribed clients each time smoothed VU levels are updated.
+        VuLevelsEvent {
+            #[serde(flatten)]
+            result: WsResult,
+            /// Smoothed RMS and peak levels for both sides.
+            value: VuLevels,
+        },
+
+        /// Pushed to subscribed clients each time the processing state changes.
+        StateEvent {
+            #[serde(flatten)]
+            result: WsResult,
+            /// New processing state, with stop reason if the state is `Inactive`.
+            value: StateUpdate,
+        },
+
+        /// Pushed to subscribed clients each time a new spectrum is ready.
+        SpectrumEvent {
+            #[serde(flatten)]
+            result: WsResult,
+            /// Computed spectrum, or absent if processing has stopped.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<SpectrumData>,
+        },
+
+        /// Sent when the server cannot parse or dispatch the incoming command.
+        Invalid { error: String },
+    }
 }
 
 /// Result status returned in every websocket response.
@@ -859,662 +1241,6 @@ pub struct StateUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<StopReason>,
 }
-
-/// All possible reply messages sent by the websocket server.
-///
-/// Each variant mirrors the corresponding [`WsCommand`]. Every reply is a JSON object with a
-/// `"reply"` field holding the reply name, e.g. `{"reply": "GetVersion", "result": "Ok",
-/// "value": "2.0.0"}`.
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-#[serde(tag = "reply")]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub enum WsReply {
-    SetConfigFilePath {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SetConfig {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SetConfigJson {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    PatchConfig {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SetConfigValue {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    Reload {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetConfig {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Active config in YAML format.
-        value: String,
-    },
-    GetConfigJson {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Active config in JSON format.
-        value: String,
-    },
-    GetConfigValue {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Value at the specified JSON Pointer path.
-        value: serde_json::Value,
-    },
-    GetConfigTitle {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Title string from the active config.
-        value: String,
-    },
-    GetConfigDescription {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Description string from the active config.
-        value: String,
-    },
-    GetPreviousConfig {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Previously active config in YAML format.
-        value: String,
-    },
-    ReadConfig {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Config with all optional fields filled with defaults, or an error message.
-        value: String,
-    },
-    ReadConfigJson {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Config with all optional fields filled with defaults, or an error message.
-        value: String,
-    },
-    ReadConfigFile {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Config with all optional fields filled with defaults, or an error message.
-        value: String,
-    },
-    ValidateConfig {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Validated config with defaults, or an error message.
-        value: String,
-    },
-    ValidateConfigJson {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Validated config with defaults, or an error message.
-        value: String,
-    },
-    GetConfigFilePath {
-        #[serde(flatten)]
-        result: WsResult,
-        /// File path of the active config, or `null` if no file is loaded.
-        value: Option<String>,
-    },
-    GetStateFilePath {
-        #[serde(flatten)]
-        result: WsResult,
-        /// File path of the state file, or `null` if no state file is used.
-        value: Option<String>,
-    },
-    GetStateFileUpdated {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `true` if all changes have been saved to the state file.
-        value: bool,
-    },
-    GetSignalRange {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak-to-peak amplitude range of the last chunk (2.0 = full level).
-        value: f32,
-    },
-    GetPlaybackSignalRms {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per playback channel in dB (0 dB = full level).
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalRmsSince {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per playback channel in dB, averaged over the requested window.
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalRmsSinceLast {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per playback channel in dB since the last call; empty if no new data.
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeak {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per playback channel in dB (0 dB = full level).
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeakSince {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per playback channel in dB over the requested window.
-        value: Vec<f32>,
-    },
-    GetPlaybackSignalPeakSinceLast {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per playback channel in dB since the last call; empty if no new data.
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRms {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per capture channel in dB (0 dB = full level).
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRmsSince {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per capture channel in dB, averaged over the requested window.
-        value: Vec<f32>,
-    },
-    GetCaptureSignalRmsSinceLast {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS level per capture channel in dB since the last call; empty if no new data.
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeak {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per capture channel in dB (0 dB = full level).
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeakSince {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per capture channel in dB over the requested window.
-        value: Vec<f32>,
-    },
-    GetCaptureSignalPeakSinceLast {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak level per capture channel in dB since the last call; empty if no new data.
-        value: Vec<f32>,
-    },
-    GetSignalLevels {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS and peak levels for both sides.
-        value: AllLevels,
-    },
-    GetSignalLevelsSince {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS and peak levels for both sides, averaged over the requested window.
-        value: AllLevels,
-    },
-    GetSignalLevelsSinceLast {
-        #[serde(flatten)]
-        result: WsResult,
-        /// RMS and peak levels for both sides since the last call; empty if no new data.
-        value: AllLevels,
-    },
-    SubscribeSignalLevels {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SubscribeVuLevels {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SubscribeState {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    StopSubscription {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    /// Pushed to subscribed clients each time the signal levels are updated.
-    SignalLevelsEvent {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Levels for the subscribed side.
-        value: StreamLevels,
-    },
-    /// Pushed to subscribed clients each time smoothed VU levels are updated.
-    VuLevelsEvent {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Smoothed RMS and peak levels for both sides.
-        value: VuLevels,
-    },
-    /// Pushed to subscribed clients each time the processing state changes.
-    StateEvent {
-        #[serde(flatten)]
-        result: WsResult,
-        /// New processing state, with stop reason if the state is `Inactive`.
-        value: StateUpdate,
-    },
-    GetSignalPeaksSinceStart {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Peak levels since processing started, for both sides.
-        value: PbCapLevels,
-    },
-    ResetSignalPeaksSinceStart {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetChannelLabels {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Display labels for capture and playback channels.
-        value: ChannelLabels,
-    },
-    GetCaptureRate {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Measured capture sample rate in Hz.
-        value: usize,
-    },
-    GetUpdateInterval {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Update interval in milliseconds.
-        value: usize,
-    },
-    SetUpdateInterval {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SetVolume {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetVolume {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Current volume in dB.
-        value: f32,
-    },
-    AdjustVolume {
-        #[serde(flatten)]
-        result: WsResult,
-        /// New volume in dB after the adjustment.
-        value: f32,
-    },
-    SetMute {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetMute {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `true` if muted.
-        value: bool,
-    },
-    ToggleMute {
-        #[serde(flatten)]
-        result: WsResult,
-        /// New mute state after the toggle.
-        value: bool,
-    },
-    SetFaderVolume {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    SetFaderExternalVolume {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetFaders {
-        #[serde(flatten)]
-        result: WsResult,
-        /// List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
-        value: Vec<Fader>,
-    },
-    GetFaderVolume {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `[fader_index, volume_dB]`.
-        value: (usize, f32),
-    },
-    AdjustFaderVolume {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `[fader_index, new_volume_dB]` after the adjustment.
-        value: (usize, f32),
-    },
-    SetFaderMute {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetFaderMute {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `[fader_index, is_muted]`.
-        value: (usize, bool),
-    },
-    ToggleFaderMute {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `[fader_index, new_mute_state]` after the toggle.
-        value: (usize, bool),
-    },
-    GetVersion {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Version string, e.g. `"2.0.0"`.
-        value: String,
-    },
-    GetState {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Current processing state.
-        value: ProcessingState,
-    },
-    GetStopReason {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Reason the processing last stopped.
-        value: StopReason,
-    },
-    GetRateAdjust {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
-        value: f32,
-    },
-    GetBufferLevel {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
-        value: usize,
-    },
-    GetClippedSamples {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Number of clipped samples since start or the last reset.
-        value: usize,
-    },
-    ResetClippedSamples {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    GetSupportedDeviceTypes {
-        #[serde(flatten)]
-        result: WsResult,
-        /// `[list_of_playback_types, list_of_capture_types]`.
-        value: (Vec<String>, Vec<String>),
-    },
-    GetAvailableCaptureDevices {
-        #[serde(flatten)]
-        result: WsResult,
-        /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
-        value: Vec<(String, String)>,
-    },
-    GetAvailablePlaybackDevices {
-        #[serde(flatten)]
-        result: WsResult,
-        /// List of `[identifier, name]` pairs. Some backends use the identifier as the name.
-        value: Vec<(String, String)>,
-    },
-    GetCaptureDeviceCapabilities {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Capabilities of the requested capture device.
-        value: AudioDeviceDescriptor,
-    },
-    GetPlaybackDeviceCapabilities {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Capabilities of the requested playback device.
-        value: AudioDeviceDescriptor,
-    },
-    GetProcessingLoad {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Pipeline processing load in percent.
-        value: f32,
-    },
-    GetResamplerLoad {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Resampler processing load in percent.
-        value: f32,
-    },
-    GetSpectrum {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Computed spectrum with frequency and magnitude arrays.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        value: Option<SpectrumData>,
-    },
-    SubscribeSpectrum {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    /// Pushed to subscribed clients each time a new spectrum is ready.
-    SpectrumEvent {
-        #[serde(flatten)]
-        result: WsResult,
-        /// Computed spectrum, or absent if processing has stopped.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        value: Option<SpectrumData>,
-    },
-    Exit {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    Stop {
-        #[serde(flatten)]
-        result: WsResult,
-    },
-    /// Sent when the server cannot parse or dispatch the incoming command.
-    Invalid { error: String },
-}
-
-/// Implements `name()` for a protocol enum. The match is exhaustive, so a new variant does not
-/// compile until it is listed here.
-macro_rules! variant_names {
-    ($enum:ident { $($variant:ident),* $(,)? }) => {
-        impl $enum {
-            /// The variant name, which is also the value of the tag field
-            /// (`"command"` or `"reply"`) in the JSON message.
-            pub fn name(&self) -> &'static str {
-                match self {
-                    $(Self::$variant { .. } => stringify!($variant),)*
-                }
-            }
-
-            #[cfg(test)]
-            const NAMES: &[&str] = &[$(stringify!($variant)),*];
-        }
-    };
-}
-
-variant_names!(WsCommand {
-    SetConfigFilePath,
-    SetConfig,
-    SetConfigJson,
-    PatchConfig,
-    SetConfigValue,
-    Reload,
-    GetConfig,
-    GetConfigValue,
-    GetConfigTitle,
-    GetConfigDescription,
-    GetPreviousConfig,
-    ReadConfig,
-    ReadConfigJson,
-    ReadConfigFile,
-    ValidateConfig,
-    ValidateConfigJson,
-    GetConfigJson,
-    GetConfigFilePath,
-    GetStateFilePath,
-    GetStateFileUpdated,
-    GetSignalRange,
-    GetCaptureSignalRms,
-    GetCaptureSignalRmsSince,
-    GetCaptureSignalRmsSinceLast,
-    GetCaptureSignalPeak,
-    GetCaptureSignalPeakSince,
-    GetCaptureSignalPeakSinceLast,
-    GetPlaybackSignalRms,
-    GetPlaybackSignalRmsSince,
-    GetPlaybackSignalRmsSinceLast,
-    GetPlaybackSignalPeak,
-    GetPlaybackSignalPeakSince,
-    GetPlaybackSignalPeakSinceLast,
-    GetSignalLevels,
-    GetSignalLevelsSince,
-    GetSignalLevelsSinceLast,
-    SubscribeSignalLevels,
-    SubscribeVuLevels,
-    StopSubscription,
-    SubscribeState,
-    GetSignalPeaksSinceStart,
-    ResetSignalPeaksSinceStart,
-    GetChannelLabels,
-    GetCaptureRate,
-    GetUpdateInterval,
-    SetUpdateInterval,
-    GetVolume,
-    SetVolume,
-    AdjustVolume,
-    GetMute,
-    SetMute,
-    ToggleMute,
-    GetFaders,
-    GetFaderVolume,
-    SetFaderVolume,
-    SetFaderExternalVolume,
-    AdjustFaderVolume,
-    GetFaderMute,
-    SetFaderMute,
-    ToggleFaderMute,
-    GetVersion,
-    GetState,
-    GetStopReason,
-    GetRateAdjust,
-    GetClippedSamples,
-    ResetClippedSamples,
-    GetBufferLevel,
-    GetSupportedDeviceTypes,
-    GetAvailableCaptureDevices,
-    GetAvailablePlaybackDevices,
-    GetCaptureDeviceCapabilities,
-    GetPlaybackDeviceCapabilities,
-    GetProcessingLoad,
-    GetResamplerLoad,
-    GetSpectrum,
-    SubscribeSpectrum,
-    Exit,
-    Stop,
-    None,
-});
-
-variant_names!(WsReply {
-    SetConfigFilePath,
-    SetConfig,
-    SetConfigJson,
-    PatchConfig,
-    SetConfigValue,
-    Reload,
-    GetConfig,
-    GetConfigJson,
-    GetConfigValue,
-    GetConfigTitle,
-    GetConfigDescription,
-    GetPreviousConfig,
-    ReadConfig,
-    ReadConfigJson,
-    ReadConfigFile,
-    ValidateConfig,
-    ValidateConfigJson,
-    GetConfigFilePath,
-    GetStateFilePath,
-    GetStateFileUpdated,
-    GetSignalRange,
-    GetPlaybackSignalRms,
-    GetPlaybackSignalRmsSince,
-    GetPlaybackSignalRmsSinceLast,
-    GetPlaybackSignalPeak,
-    GetPlaybackSignalPeakSince,
-    GetPlaybackSignalPeakSinceLast,
-    GetCaptureSignalRms,
-    GetCaptureSignalRmsSince,
-    GetCaptureSignalRmsSinceLast,
-    GetCaptureSignalPeak,
-    GetCaptureSignalPeakSince,
-    GetCaptureSignalPeakSinceLast,
-    GetSignalLevels,
-    GetSignalLevelsSince,
-    GetSignalLevelsSinceLast,
-    SubscribeSignalLevels,
-    SubscribeVuLevels,
-    SubscribeState,
-    StopSubscription,
-    SignalLevelsEvent,
-    VuLevelsEvent,
-    StateEvent,
-    GetSignalPeaksSinceStart,
-    ResetSignalPeaksSinceStart,
-    GetChannelLabels,
-    GetCaptureRate,
-    GetUpdateInterval,
-    SetUpdateInterval,
-    SetVolume,
-    GetVolume,
-    AdjustVolume,
-    SetMute,
-    GetMute,
-    ToggleMute,
-    SetFaderVolume,
-    SetFaderExternalVolume,
-    GetFaders,
-    GetFaderVolume,
-    AdjustFaderVolume,
-    SetFaderMute,
-    GetFaderMute,
-    ToggleFaderMute,
-    GetVersion,
-    GetState,
-    GetStopReason,
-    GetRateAdjust,
-    GetBufferLevel,
-    GetClippedSamples,
-    ResetClippedSamples,
-    GetSupportedDeviceTypes,
-    GetAvailableCaptureDevices,
-    GetAvailablePlaybackDevices,
-    GetCaptureDeviceCapabilities,
-    GetPlaybackDeviceCapabilities,
-    GetProcessingLoad,
-    GetResamplerLoad,
-    GetSpectrum,
-    SubscribeSpectrum,
-    SpectrumEvent,
-    Exit,
-    Stop,
-    Invalid,
-});
 
 #[cfg(test)]
 mod tests {
