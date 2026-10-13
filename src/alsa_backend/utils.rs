@@ -310,26 +310,31 @@ pub fn recover_suspended_pcm(pcmdevice: &alsa::PCM, direction: &str) -> Res<()> 
 }
 
 /// Start a capture device, unless it is already running.
-/// A start can fail with EPIPE if the stream was stopped again in between,
-/// for example by playback on a USB device using implicit feedback.
-/// Then wait a moment, prepare and try again a few times.
-pub fn start_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
-    let mut attempt = 1;
+/// On a USB device using implicit feedback, capture and playback share an endpoint.
+/// If playback stopped it and it has not finished stopping, the start fails with EPIPE.
+/// The device is then in XRUN, and a prepare waits for the endpoint to finish stopping.
+/// Prepare and try once more, like the kernel driver does for playback.
+/// If that also fails, report a stall and pause for one poll slice,
+/// so that the capture loop keeps trying without spinning.
+pub fn start_capture_pcm(pcmdevice: &alsa::PCM) -> Res<CaptureResult> {
+    if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        return Ok(CaptureResult::Normal);
+    }
+    let mut retried = false;
     loop {
-        if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-            return Ok(());
-        }
+        trace!("snd_pcm_start");
         match pcmdevice.start() {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(CaptureResult::Normal),
             Err(err) if Errno::from_raw(err.errno()) == Errno::EPIPE => {
-                if attempt >= 5 {
-                    warn!("Capture: start failed {attempt} times, giving up. Error: {err}");
-                    return Err(Box::new(err));
+                if retried {
+                    debug!("Capture: start failed again, trying later. Error: {err}");
+                    thread::sleep(Duration::from_millis(20));
+                    return Ok(CaptureResult::Stalled);
                 }
                 warn!("Capture: start failed, preparing and trying again. Error: {err}");
-                thread::sleep(Duration::from_millis(10));
+                trace!("snd_pcm_prepare");
                 pcmdevice.prepare()?;
-                attempt += 1;
+                retried = true;
             }
             Err(err) => return Err(Box::new(err)),
         }
@@ -339,8 +344,15 @@ pub fn start_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
 /// Prepare a capture device after an overrun and start it again.
 /// A prepared capture device does not start by itself before it is read,
 /// and polling it just times out, so it must be started explicitly.
-pub fn restart_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
+pub fn restart_capture_pcm(pcmdevice: &alsa::PCM) -> Res<CaptureResult> {
+    trace!("snd_pcm_prepare");
     pcmdevice.prepare()?;
+    start_capture_pcm(pcmdevice)
+}
+
+/// Resume a suspended capture device and start it again.
+pub fn resume_capture_pcm(pcmdevice: &alsa::PCM) -> Res<CaptureResult> {
+    recover_suspended_pcm(pcmdevice, "Capture")?;
     start_capture_pcm(pcmdevice)
 }
 

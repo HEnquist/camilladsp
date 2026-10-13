@@ -91,6 +91,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   on the data of the previous read as if it were new.
 - ASIO: when capture timed out waiting for the driver, the part of the chunk that had not arrived
   was filled with leftover audio from the previous chunk. It is now filled with silence.
+- ALSA: after a capture overrun, the capture device is now started right after it is prepared.
+  It was previously left prepared until a poll timed out. On a USB device using implicit
+  feedback, capture depends on playback, and starting the capture could then fail with EPIPE,
+  which stopped processing. A start that fails like this is now retried once after a new prepare.
+  If that also fails it is treated as a stall, and capture keeps trying until playback runs again.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
