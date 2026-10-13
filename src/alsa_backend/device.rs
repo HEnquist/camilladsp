@@ -50,7 +50,7 @@ use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
     find_elem, list_channels_as_text, list_device_names, list_formats_as_text,
     list_samplerates_as_text, pick_preferred_format, process_events, recover_suspended_pcm,
-    state_desc, sync_linked_controls,
+    start_capture_pcm, state_desc, sync_linked_controls,
 };
 use crate::utils::rate_controller::PIRateController;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
@@ -260,10 +260,11 @@ fn capture_buffer(
     if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("Prepare capture device");
         pcmdevice.prepare()?;
+        start_capture_pcm(pcmdevice)?;
     } else if capture_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
         recover_suspended_pcm(pcmdevice, "Capture")?;
         if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-            pcmdevice.start()?;
+            start_capture_pcm(pcmdevice)?;
         }
     } else if capture_state < 0 {
         // This should never happen but sometimes does anyway,
@@ -278,7 +279,7 @@ fn capture_buffer(
             "Starting capture from state: {}",
             state_desc(capture_state as u32)
         );
-        pcmdevice.start()?;
+        start_capture_pcm(pcmdevice)?;
     }
     // `frames_to_read` is counted on the capture side, so the wait timeout must be
     // derived from the capture rate and not the pipeline rate.
@@ -341,6 +342,7 @@ fn capture_buffer(
                         warn!("Capture: wait overrun, trying to recover. Error: {err}");
                         trace!("snd_pcm_prepare");
                         pcmdevice.prepare()?;
+                        start_capture_pcm(pcmdevice)?;
                         break;
                     }
                     Errno::ESTRPIPE => {
@@ -349,7 +351,7 @@ fn capture_buffer(
                         );
                         recover_suspended_pcm(pcmdevice, "Capture")?;
                         if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                            pcmdevice.start()?;
+                            start_capture_pcm(pcmdevice)?;
                         }
                         break;
                     }
@@ -393,13 +395,14 @@ fn capture_buffer(
                     warn!("Capture: read overrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
                     pcmdevice.prepare()?;
+                    start_capture_pcm(pcmdevice)?;
                     continue;
                 }
                 Errno::ESTRPIPE => {
                     warn!("Capture: read interrupted by suspend, trying to recover. Error: {err}");
                     recover_suspended_pcm(pcmdevice, "Capture")?;
                     if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                        pcmdevice.start()?;
+                        start_capture_pcm(pcmdevice)?;
                     }
                     continue;
                 }

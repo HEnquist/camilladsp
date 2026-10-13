@@ -309,6 +309,25 @@ pub fn recover_suspended_pcm(pcmdevice: &alsa::PCM, direction: &str) -> Res<()> 
     Ok(())
 }
 
+/// Start a prepared capture device.
+/// A start can fail with EPIPE if the stream was stopped again in between,
+/// for example by playback on a USB device using implicit feedback.
+/// Then prepare and try again a few times.
+pub fn start_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
+    let mut attempt = 1;
+    loop {
+        match pcmdevice.start() {
+            Ok(()) => return Ok(()),
+            Err(err) if Errno::from_raw(err.errno()) == Errno::EPIPE && attempt < 5 => {
+                warn!("Capture: start failed, preparing and trying again. Error: {err}");
+                pcmdevice.prepare()?;
+                attempt += 1;
+            }
+            Err(err) => return Err(Box::new(err)),
+        }
+    }
+}
+
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
     let min_rate = hwp.get_rate_min()?;
     let max_rate = hwp.get_rate_max()?;
