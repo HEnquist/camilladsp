@@ -1,11 +1,13 @@
 # Skips a change that is only to the docs or the example configs. README.crates.md
-# is the crate's rustdoc, see src/lib.rs, so it stays in.
+# is the crate's rustdoc, see src/lib.rs, so it stays in. websocket.md is checked against
+# the generated version by a test, so it stays in too.
 on:
   push:
     paths: &paths
       - "**"
       - "!**.md"
       - README.crates.md
+      - websocket.md
       - "!exampleconfigs/**"
   pull_request:
     paths: *paths

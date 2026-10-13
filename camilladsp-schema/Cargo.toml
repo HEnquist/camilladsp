@@ -11,6 +11,15 @@ repository = "https://github.com/HEnquist/camilladsp"
 homepage = "https://camilladsp.com"
 keywords = ["audio", "dsp", "camilladsp", "config", "websocket"]
 categories = ["multimedia::audio", "config"]
+# An allow-list, so that tests/ is not published. The ws_docs test reads websocket.md from
+# outside the crate, so it cannot run from the package.
+include = [
+    "/src",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE_GPLv3.txt",
+    "/LICENSE_MPL2.0.txt",
+]
 
 # The features only add device types and OpenAPI schemas, so document them all.
 [package.metadata.docs.rs]
@@ -43,10 +52,6 @@ serde_json = "1.0"
 # preserve_order keeps the properties in declaration order, which the generated
 # websocket.md relies on.
 utoipa = { version = "6.0.0", optional = true, features = ["preserve_order"] }
-
-[[example]]
-name = "ws_schema"
-required-features = ["utoipa"]
 
 [dev-dependencies]
 minijinja = { version = "3.0.0", features = ["serde"] }
