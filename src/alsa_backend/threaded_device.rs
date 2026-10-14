@@ -1554,6 +1554,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     );
 
                                     match capture_res {
+                                        // Nothing read after recovering from an overrun, or on EAGAIN.
+                                        // This is not a stall, so just read again.
+                                        Ok((CaptureResult::Normal, 0)) => continue,
                                         Ok((CaptureResult::Normal, bytes_read)) => {
                                             let pushed_bytes =
                                                 device_producer.push_slice(&buffer[0..bytes_read]);

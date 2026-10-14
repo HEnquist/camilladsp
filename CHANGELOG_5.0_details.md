@@ -95,6 +95,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   It was previously left prepared until a poll timed out, so capture delivered nothing in between.
   On a USB device using implicit feedback, capture and playback share an endpoint,
   and the delayed start could then fail with EPIPE, which stopped processing.
+- ALSA, threaded backend: a capture read that returned nothing after recovering from an overrun
+  was handled as a stall, which paused playback. Capture now just reads again.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,
