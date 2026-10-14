@@ -22,7 +22,7 @@ use crate::config::MonitorMode;
 
 /// Reduce resolved monitor entries into scratch. Sum stays signed; the
 /// processors rectify it when calculating the envelope.
-/// Empty waveforms from chunks captured with an older mask count as silence.
+/// A channel that was not captured is empty, and counts as silence.
 pub(crate) fn aggregate_monitor_channels(
     input: &AudioChunk,
     channels: &[usize],
