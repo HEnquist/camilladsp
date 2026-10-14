@@ -55,18 +55,26 @@ fn all_channels_if_empty(mut channels: Vec<usize>, nbr_channels: usize) -> Vec<u
     channels
 }
 
+/// Build the lookahead delay for a channel.
+fn make_delay(ch: usize, attack_samples: usize, samplerate: usize) -> Delay {
+    Delay::new(
+        &format!("Lookahead delay {ch}"),
+        samplerate,
+        attack_samples as f64,
+        false,
+    )
+}
+
 /// Build one lookahead delay per channel.
 fn make_delays(nbr_channels: usize, attack_samples: usize, samplerate: usize) -> Vec<Delay> {
     (0..nbr_channels)
-        .map(|ch| {
-            Delay::new(
-                &format!("Lookahead delay {ch}"),
-                samplerate,
-                attack_samples as f64,
-                false,
-            )
-        })
+        .map(|ch| make_delay(ch, attack_samples, samplerate))
         .collect()
+}
+
+/// Check if a channel goes through the lookahead delay.
+fn is_delayed(ch: usize, delay_processed_only: bool, process_channels: &[usize]) -> bool {
+    !delay_processed_only || process_channels.contains(&ch)
 }
 
 impl LookaheadLimiter {
@@ -145,7 +153,7 @@ impl Processor for LookaheadLimiter {
         self.gain.process_detection(&self.scratch);
         // Unless disabled, delay the unprocessed channels too, to keep all channels time aligned.
         for (ch, delay) in self.delays.iter_mut().enumerate() {
-            if !self.delay_processed_only || self.process_channels.contains(&ch) {
+            if is_delayed(ch, self.delay_processed_only, &self.process_channels) {
                 delay.process_waveform(&mut input.waveforms[ch]);
             }
         }
@@ -170,14 +178,27 @@ impl Processor for LookaheadLimiter {
                 samplerate,
             );
 
+            let process_channels = all_channels_if_empty(config.process_channels(), channels);
+            let delay_processed_only = config.delay_processed_only();
+
             // Rebuilding the delays clears them, so only do it when the length changed.
             if attack_samples != self.gain.attack_samples || channels != self.channels {
                 self.delays = make_delays(channels, attack_samples, samplerate);
+            } else {
+                // The delay of a channel that was not delayed holds stale samples,
+                // clear it when the channel is delayed again.
+                for (ch, delay) in self.delays.iter_mut().enumerate() {
+                    if !is_delayed(ch, self.delay_processed_only, &self.process_channels)
+                        && is_delayed(ch, delay_processed_only, &process_channels)
+                    {
+                        *delay = make_delay(ch, attack_samples, samplerate);
+                    }
+                }
             }
             self.channels = channels;
             self.monitor_channels = all_channels_if_empty(config.monitor_channels(), channels);
-            self.process_channels = all_channels_if_empty(config.process_channels(), channels);
-            self.delay_processed_only = config.delay_processed_only();
+            self.process_channels = process_channels;
+            self.delay_processed_only = delay_processed_only;
             self.gain
                 .set_parameters(limit, attack_samples, release_coeff);
 
@@ -349,6 +370,32 @@ mod tests {
         assert_close(&input.waveforms[1], &[1.0, 2.0, 3.0, 4.0], 1e-12);
         // Channel 0 is still delayed by the two samples of lookahead.
         assert_close(&input.waveforms[0], &[0.0, 0.0, 0.0, 0.0], 1e-12);
+    }
+
+    /// A channel that is processed again after a pause in its delay
+    /// must start from silence, not replay what was left in the delay.
+    #[test]
+    fn test_resumed_channel_does_not_replay_old_samples() {
+        let mut config = params(None, None, 2.0, 0.0);
+        config.delay_processed_only = Some(true);
+        let mut limiter = LookaheadLimiter::from_config("test", config.clone(), 48000, 4);
+        limiter.process_chunk(&mut chunk(vec![vec![0.0; 4], vec![0.5; 4]]));
+
+        config.process_channels = Some(vec![0]);
+        limiter.update_parameters(config::Processor::LookaheadLimiter {
+            description: None,
+            parameters: config.clone(),
+        });
+        limiter.process_chunk(&mut chunk(vec![vec![0.0; 4], vec![0.0; 4]]));
+
+        config.process_channels = None;
+        limiter.update_parameters(config::Processor::LookaheadLimiter {
+            description: None,
+            parameters: config,
+        });
+        let mut input = chunk(vec![vec![0.0; 4], vec![0.0; 4]]);
+        limiter.process_chunk(&mut input);
+        assert_close(&input.waveforms[1], &[0.0; 4], 1e-12);
     }
 
     /// A monitored channel that was not captured is empty, and acts like a silent one.
