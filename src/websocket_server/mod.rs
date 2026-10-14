@@ -587,7 +587,9 @@ macro_rules! make_handler {
                                 let reply = match command {
                                     Ok(cmd) => {
                                         if active_stream.is_some() {
-                                            if cmd != WsCommand::StopSubscription {
+                                            if cmd == WsCommand::None {
+                                                None
+                                            } else if cmd != WsCommand::StopSubscription {
                                                 Some(stream_invalid_reply())
                                             } else {
                                                 active_stream = None;
