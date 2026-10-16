@@ -35,6 +35,7 @@ All processing is done in chunks of a fixed number of samples.
 A small number of samples gives a small in-out latency
 while a larger number is more efficient.
 The full configuration is given in a YAML file.
+If something does not work as expected, see [Getting help](#getting-help).
 
 # License
 
@@ -144,8 +145,12 @@ and the Mozilla Public License Version 2.0:
 **[Related projects](#related-projects)**
 
 **[Getting help](#getting-help)**
-- **[FAQ](#faq)**
-- **[Troubleshooting](#troubleshooting)**
+- **[Underruns and dropouts](#underruns-and-dropouts)**
+- **[Channel count errors](#channel-count-errors)**
+- **[No sound on macOS](#no-sound-on-macos)**
+- **[Clipping with only negative gain](#clipping-with-only-negative-gain)**
+- **[Changelog](#changelog)**
+- **[Example configurations](#example-configurations)**
 
 
 
@@ -2791,11 +2796,57 @@ https://github.com/VilhoValittu/DecayCore - Free acoustic measurement tool and F
 
 # Getting help
 
-## FAQ
-See the [list of frequently asked questions.](./FAQ.md)
+Config errors are listed with their location in the config, and the messages describe the problem.
+For indentation problems and other YAML errors, see [The YAML format](#the-yaml-format).
 
-## Troubleshooting
-See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+## Underruns and dropouts
+The log shows messages like these when the playback device runs out of data:
+
+```
+PB: Prepare playback after buffer underrun
+PB: write underrun, trying to recover.
+Restarting playback after buffer underrun.
+```
+
+The most common cause is that the capture and playback devices have independent sample clocks.
+Two such clocks are never perfectly synchronised, so one of the devices always runs slightly faster.
+If the playback device is the faster one, it runs out of data to play, which gives almost periodic dropouts.
+If the capture device is the faster one, data piles up instead and the delay grows steadily.
+
+Set `enable_rate_adjust` to `true` to compensate for the drift.
+See [enable_rate_adjust](#devices) and [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works).
+Rate adjust needs a resampler that can change its ratio on the fly.
+Use [`Slip`](#slip-rate-adjust-for-independent-clocks-at-the-same-nominal-rate)
+if the capture and playback sample rates are equal, otherwise one of the `Async` types.
+
+A `chunksize` that is too small for the CPU, or other processes that load the CPU heavily, can also cause underruns.
+Increase `chunksize` to check.
+
+## Channel count errors
+The number of channels must match at every step of the pipeline:
+
+- A mixer's input channels must equal the output channels of the previous step.
+  For the first mixer, that is the number of channels of the capture device.
+  The error is `Mixer 'name' has wrong number of input channels. Expected X, found Y.`
+- The pipeline's output channels must equal the channels of the playback device.
+  If there is no mixer, the capture and playback devices must have the same number of channels.
+  The error is `Pipeline outputs X channels, playback device has Y.`
+- A filter step can only use channels that exist at that point of the pipeline.
+  The channels are numbered from 0 to X-1, where X is the channel count after the last mixer.
+  The error is `Use of non existing channel X`.
+
+## No sound on macOS
+Apps need microphone access to record sound from any source.
+Without it everything seems to run, but only silence is captured.
+See [Microphone access](./backend_coreaudio.md#microphone-access).
+
+## Clipping with only negative gain
+The peak amplitude can increase even when all filters only attenuate.
+A signal is a sum of many frequency components, and in each sample some components add up while others cancel.
+If a filter removes a component that was lowering the peak, the value in that sample goes up.
+Filters also shift the phase over a wide range, which changes how the components sum.
+This is mostly a problem with modern productions that already have many samples at maximum level.
+Adding a `Gain` filter of -3 dB is usually enough.
 
 ## Changelog
 See the [changelog](./CHANGELOG.md) for the changes in each release.
