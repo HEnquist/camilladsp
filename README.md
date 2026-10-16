@@ -2210,10 +2210,6 @@ The available types are:
           q: 0.7
   ```
 
-
-Other types such as Bessel filters can be built by combining several Biquads.
-[See the separate readme for more filter functions.](./filterfunctions.md)
-
 * GraphicEqualizer
 
   This creates a graphic equalizer with an arbitrary number of bands.
