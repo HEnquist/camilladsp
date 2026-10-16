@@ -290,6 +290,34 @@ jobs:
           asset_name: camilladsp-macos-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # Follows the links from the readme, so a new document only needs to be linked there.
+      # Fails on a broken link.
+      - name: Build documentation zip
+        run: python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: camilladsp-docs
+          path: camilladsp-docs.zip
+          retention-days: 14
+
+      - name: Upload documentation to release
+        if: github.event_name == 'release' && github.event.action == 'created'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-docs.zip
+          asset_name: camilladsp-docs.zip
+          tag: ${{ github.event.release.tag_name }}
+
   publish_crate:
     name: Publish to crates.io
     # A dry run on every push, so this job is known to work before a release needs it.
