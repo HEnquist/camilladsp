@@ -25,39 +25,6 @@
 
   Use the `enable_rate_adjust` option (with the asynchronous resampler if needed) to match the rates of the capture and playback devices. 
 
-- Why do I get only distorted noise when using 24-bit samples?
-
-  There are a total of three different 24-bit formats, and it's very important to pick the right one. All use three bytes to store each sample value, but they are packed in different ways.
-
-  - S24_3_LE: Here only the three data bytes are stored, without any padding.
-
-  - S24_4_RJ_LE: This format stores each 24-bit sample using 32 bits (4 bytes).
-    The 24-bit data is stored in the **lower** three bytes, and the highest byte is padding.
-    RJ stands for *right justified*, and this may also be called *aligned low*.
-
-  - S24_4_LJ_LE: As the one above, this format stores each 24-bit sample using 32 bits (4 bytes).
-    The 24-bit data is stored in the **upper** three bytes, and the lowest byte is padding.
-    LJ stands for *left justified*, which may also be called *aligned high*.
-
-  Let's make up three samples and write them as bytes in hex.
-  We use little-endian byte order, hence the first byte is the least significant.
-
-  Sample 1: `0xA1, 0xA2, 0xA3`
-
-  Sample 2: `0xB1, 0xB2, 0xB3`
-
-  Sample 3: `0xC1, 0xC2, 0xC3`
-
-  As I24_3_LE: `0xA1, 0xA2, 0xA3, 0xB1, 0xB2, 0xB3, 0xC1, 0xC2, 0xC3`
-
-  As S24_4_RJ_LE: `0xA1, 0xA2, 0xA3, 0x00, 0xB1, 0xB2, 0xB3, 0x00, 0xC1, 0xC2, 0xC3, 0x00`
-
-  As S24_4_LJ_LE: `0x00, 0xA1, 0xA2, 0xA3, 0x00, 0xB1, 0xB2, 0xB3, 0x00, 0xC1, 0xC2, 0xC3`
-
-  Note the extra padding bytes (`0x00`) in S24_4_RJ_LE and S24_4_LJ_LE.
-  This scheme means that the samples get an "easier" alignment in memory, while wasting some space.
-  In practice, the padded formats are not used very often.
-
 - Why don't I get any sound on MacOS?
 
   Apps need to be granted access to the microphone in order to record sound from any source.
