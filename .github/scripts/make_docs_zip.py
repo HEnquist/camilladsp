@@ -7,15 +7,30 @@ A link to a directory includes all files in it.
 Every file reached is written to the zip with its relative path kept,
 so the links between the documents keep working.
 A link to a file that does not exist is an error, which makes this double as a link check.
+Instruction files and config folders of AI coding tools are never included,
+even if they are linked.
 
-Usage: make_docs_zip.py README.md camilladsp-docs.zip [--exclude AGENTS.md ...]
+Usage: make_docs_zip.py README.md camilladsp-docs.zip
 """
 
 import argparse
 import re
 import sys
 import zipfile
+from fnmatch import fnmatch
 from pathlib import Path
+
+# Compared in lower case, against the file name and against every folder in the path.
+AI_FILES = (
+    "agents.md",
+    "claude.md",
+    "gemini.md",
+    "copilot-instructions.md",
+    "*.instructions.md",
+    ".cursorrules",
+    ".windsurfrules",
+)
+AI_DIRS = (".claude", ".codex", ".cursor", ".gemini", ".windsurf")
 
 FENCE = re.compile(r"^(```|~~~).*?^\1", re.S | re.M)
 # [text](target), [text]: target, and <img src="target">
@@ -37,7 +52,14 @@ def local_targets(text):
                 yield target
 
 
-def collect(start, excluded):
+def is_ai_file(path, root):
+    """True for instruction files and config folders of AI coding tools."""
+    if any(part.lower() in AI_DIRS for part in path.relative_to(root).parts):
+        return True
+    return any(fnmatch(path.name.lower(), pattern) for pattern in AI_FILES)
+
+
+def collect(start):
     root = start.parent.resolve()
     found = {}
     errors = []
@@ -56,8 +78,8 @@ def collect(start, excluded):
             elif not linked.exists():
                 errors.append(f"{path.relative_to(root)}: broken link: {target}")
             elif linked.is_dir():
-                queue.extend(p for p in sorted(linked.rglob("*")) if p.is_file())
-            elif linked.relative_to(root).as_posix() not in excluded:
+                queue.extend(p for p in sorted(linked.rglob("*")) if p.is_file() and not is_ai_file(p, root))
+            elif not is_ai_file(linked, root):
                 queue.append(linked)
     return root, sorted(found), errors
 
@@ -66,10 +88,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("start", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--exclude", nargs="*", default=[], help="paths relative to the start file")
     args = parser.parse_args()
 
-    root, files, errors = collect(args.start, set(args.exclude))
+    root, files, errors = collect(args.start)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         sys.exit(1)

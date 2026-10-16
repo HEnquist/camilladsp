@@ -300,7 +300,7 @@ jobs:
       # Follows the links from the readme, so a new document only needs to be linked there.
       # Fails on a broken link.
       - name: Build documentation zip
-        run: python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip --exclude AGENTS.md
+        run: python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v6
