@@ -350,7 +350,7 @@ Binaries for each release are available for the most common systems.
 See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page.
 To see the files click "Assets".
 
-These are compressed files containing a single executable file that is ready to run.
+The binary archives are compressed files containing a single executable file that is ready to run.
 
 The following configurations are provided:
 
@@ -367,15 +367,15 @@ The following configurations are provided:
 
 All builds include the Websocket server.
 
+Each release also has `camilladsp-docs.zip`, which contains the documentation for that release.
+It has the readme and the documents linked from it, the changelog, the licenses and the example configurations.
+It does not contain a binary.
+
 The `.tar.gz`-files can be uncompressed with the `tar` command:
 
 ```sh
 tar -xvf camilladsp-linux-amd64.tar.gz
 ```
-
-The documentation for each release is available as `camilladsp-docs.zip`.
-It contains the readme and the other documents linked from it, the changelog, the licenses and the example configurations.
-It is the same for all platforms.
 
 ## Running downloaded executables on macOS
 If the binary was downloaded using Safari, then macOS most likely won't allow it to be executed.
