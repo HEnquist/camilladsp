@@ -368,6 +368,10 @@ The `.tar.gz`-files can be uncompressed with the `tar` command:
 tar -xvf camilladsp-linux-amd64.tar.gz
 ```
 
+The documentation for each release is available as `camilladsp-docs.zip`.
+It contains the readme and the other documents linked from it, the changelog, the licenses and the example configurations.
+It is the same for all platforms.
+
 ## Running downloaded executables on macOS
 If the binary was downloaded using Safari, then macOS most likely won't allow it to be executed.
 Trying will result in an error message such as:
@@ -2792,3 +2796,12 @@ See the [list of frequently asked questions.](./FAQ.md)
 
 ## Troubleshooting
 See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+
+## Changelog
+See the [changelog](./CHANGELOG.md) for the changes in each release.
+
+## Example configurations
+The [exampleconfigs](./exampleconfigs/) folder contains a number of small configuration files.
+
+## Tested devices
+See the list of [tested multichannel devices](./tested_devices.md).
