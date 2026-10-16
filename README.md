@@ -2802,6 +2802,3 @@ See the [changelog](./CHANGELOG.md) for the changes in each release.
 
 ## Example configurations
 The [exampleconfigs](./exampleconfigs/) folder contains a number of small configuration files.
-
-## Tested devices
-See the list of [tested multichannel devices](./tested_devices.md).
