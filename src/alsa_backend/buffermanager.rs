@@ -17,7 +17,7 @@
 use alsa::pcm::{Frames, HwParams, SwParams};
 use std::fmt::Debug;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::Res;
 use crate::config;
@@ -224,13 +224,17 @@ impl PlaybackBufferManager {
         }
     }
 
-    pub fn sleep_for_target_delay(&self, millis_per_frame: f32) {
-        let sleep_millis = (self.target_level as f32 * millis_per_frame) as u64;
+    /// Sleep until the target level worth of time has passed since `since`.
+    pub fn sleep_for_target_delay(&self, millis_per_frame: f32, since: Instant) {
+        let align_target_micros = self.target_level as f32 * millis_per_frame * 1000.0;
+        let target = Duration::from_micros(align_target_micros as u64);
+        let elapsed = since.elapsed();
+        let remaining = target.saturating_sub(elapsed);
         trace!(
-            "Sleeping for {} frames = {} ms",
-            self.target_level, sleep_millis
+            "Sleeping for {} frames = {:?} target, {:?} already passed, sleeping {:?}",
+            self.target_level, target, elapsed, remaining
         );
-        thread::sleep(Duration::from_millis(sleep_millis));
+        thread::sleep(remaining);
     }
 }
 
