@@ -6,9 +6,10 @@ on:
     paths: &paths
       - "**"
       - "!**.md"
-      - README.crates.md
-      - websocket.md
+      - "!docs/**"
       - "!exampleconfigs/**"
+      - README.crates.md
+      - docs/websocket.md
   pull_request:
     paths: *paths
 

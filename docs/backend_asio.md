@@ -11,7 +11,7 @@ It is an independent implementation that talks to the ASIO drivers directly
 through the COM interfaces they expose.
 There are therefore no extra license restrictions on builds with ASIO enabled,
 and no SDK to download.
-See the [ASIO backend](./README.md#asio-backend) section for details.
+See the [ASIO backend](../README.md#asio-backend) section for details.
 
 ASIO is a trademark of Steinberg Media Technologies GmbH.
 CamillaDSP is not affiliated with or endorsed by Steinberg.

@@ -654,7 +654,7 @@ fn render() -> String {
 
 #[test]
 fn websocket_md_is_up_to_date() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../websocket.md");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/websocket.md");
     let generated = render();
     if std::env::var_os("UPDATE_DOCS").is_some_and(|v| !v.is_empty()) {
         std::fs::write(&path, &generated).unwrap();
