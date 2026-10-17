@@ -54,16 +54,13 @@ See `testscripts/e2e/README.md` for the layout, for why the suite is in Python r
 Rust, and for what to know before adding tests.
 
 ## Running the tests on GitHub Actions
-Some of the tests are difficult to run locally.
-The backend suites in `testscripts/e2e` need sound devices to run against.
-The ALSA suite needs the `snd-aloop` and `snd-dummy` kernel modules,
-the CoreAudio suite needs BlackHole,
-the WASAPI and ASIO suite needs VB-Cable and the Steinberg built-in ASIO Driver,
-and the PipeWire suite needs a running PipeWire with two null sinks.
-The CI checks also build and test on Linux, Windows and macOS, on several CPU architectures,
-while a single machine covers only one of them.
+A complete test run covers Linux, Windows and macOS, on several CPU architectures.
+Each backend suite in `testscripts/e2e` can only run on its own platform:
+ALSA and PipeWire on Linux, CoreAudio on macOS, and WASAPI and ASIO on Windows.
+Running everything locally would therefore take several computers.
 
-The GitHub Actions workflows of the repository set all of this up on GitHub's runners.
+The GitHub Actions workflows of the repository run all of it on GitHub's runners,
+including the setup of the sound devices each backend suite needs.
 Each end-to-end workflow only runs when the change touches its backend or the shared code.
 
 The workflows run in a fork too, so they can be used before a pull request is opened.
