@@ -176,7 +176,7 @@ and passes the processed audio via another message queue to the playback thread.
 There is also a supervisor thread for control.
 This chart shows the most important parts:
 
-![Overview](overview.png)
+![Overview](./docs/overview.png)
 
 ### Capture
 The capture thread reads a chunk samples from the audio device in the selected format.
@@ -264,7 +264,7 @@ either as built-in features or via third-party solutions.
 CamillaDSP is then configured to capture from the output of this device
 and play the processed audio on the real sound card.
 
-See the [tutorial for a step-by-step guide.](./stepbystep.md)
+See the [tutorial for a step-by-step guide.](./docs/stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillaDSP.
@@ -678,7 +678,7 @@ If it should be also available to remote machines, give the IP address of the in
 Giving 0.0.0.0 will bind to all interfaces.
 If CamillaDSP was built with the "secure-websocket" feature, it has two additional options `--cert` and `--pass`.
 These are used to provide an identity, to enable secure websocket connections.
-See the [websocket readme for more details.](./websocket.md)
+See the [websocket readme for more details.](./docs/websocket.md)
 
 If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded.
 Then the config file argument must be left out.
@@ -741,7 +741,7 @@ This will reload the config and if possible apply the new settings without inter
 Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
-See the [separate readme for the websocket server](./websocket.md)
+See the [separate readme for the websocket server](./docs/websocket.md)
 
 
 # Processing audio
@@ -765,26 +765,26 @@ See [the capture device section](#file-rawfile-wavfile-stdin-stdout) for more de
 
 
 ## Windows
-See the [separate readme for Wasapi](./backend_wasapi.md).
+See the [separate readme for Wasapi](./docs/backend_wasapi.md).
 
 ### ASIO
-See the [separate readme for ASIO](./backend_asio.md).
+See the [separate readme for ASIO](./docs/backend_asio.md).
 
 ## MacOS (CoreAudio)
-See the [separate readme for CoreAudio](./backend_coreaudio.md).
+See the [separate readme for CoreAudio](./docs/backend_coreaudio.md).
 
 ## Linux
 Linux offers several audio APIs that CamillaDSP can use.
 
 ### ALSA
-See the [separate readme for ALSA](./backend_alsa.md).
+See the [separate readme for ALSA](./docs/backend_alsa.md).
 
 ### PipeWire
 
 #### Native PipeWire backend
 CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
 This creates filter nodes in the PipeWire graph that can be connected to other nodes using WirePlumber rules or tools like Helvum.
-See [backend_pipewire.md](backend_pipewire.md) for configuration details.
+See [backend_pipewire.md](./docs/backend_pipewire.md) for configuration details.
 
 #### Capturing desktop audio via a null-sink
 PipeWire supports creating null-sinks. Create one with:
@@ -1189,15 +1189,15 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
     For `File`, `Stdin`, `Stdout` and `RawFile`, the choices are signed
     little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    - [S16_LE](sample_formats.md#s16_le)
-    - [S24_3_LE](sample_formats.md#s24_3_le)
-    - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
-    - [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
-    - [S32_LE](sample_formats.md#s32_le)
-    - [F32_LE](sample_formats.md#f32_le)
-    - [F64_LE](sample_formats.md#f64_le)
+    - [S16_LE](./docs/sample_formats.md#s16_le)
+    - [S24_3_LE](./docs/sample_formats.md#s24_3_le)
+    - [S24_4_RJ_LE](./docs/sample_formats.md#s24_4_rj_le)
+    - [S24_4_LJ_LE](./docs/sample_formats.md#s24_4_lj_le)
+    - [S32_LE](./docs/sample_formats.md#s32_le)
+    - [F32_LE](./docs/sample_formats.md#f32_le)
+    - [F64_LE](./docs/sample_formats.md#f64_le)
 
-    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](./backend_asio.md), see the respective backend documentation.
+    For [ALSA](./docs/backend_alsa.md), [CoreAudio](./docs/backend_coreaudio.md), [Wasapi](./docs/backend_wasapi.md) and [ASIO](./docs/backend_asio.md), see the respective backend documentation.
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
@@ -1343,16 +1343,16 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
   ### Wasapi
-  See the [separate readme for Wasapi](./backend_wasapi.md#configuration-of-devices).
+  See the [separate readme for Wasapi](./docs/backend_wasapi.md#configuration-of-devices).
 
   ### Alsa
-  See the [separate readme for ALSA](./backend_alsa.md#configuration-of-devices).
+  See the [separate readme for ALSA](./docs/backend_alsa.md#configuration-of-devices).
 
   ### CoreAudio
-  See the [separate readme for CoreAudio](./backend_coreaudio.md#configuration-of-devices).
+  See the [separate readme for CoreAudio](./docs/backend_coreaudio.md#configuration-of-devices).
 
   ### PipeWire
-  See the [separate readme for PipeWire](./backend_pipewire.md).
+  See the [separate readme for PipeWire](./docs/backend_pipewire.md).
 
   ### Channel labels
   All capture device types have an optional `labels` property.
@@ -1779,7 +1779,7 @@ When used like this, there should only be a single Volume filter assigned to the
 It can also be used with a volume control external to CamillaDSP.
 The fader should then be set to one of the Aux faders, and the external volume control should update
 this fader when the volume setting changes.
-A special websocket command is provided for this, see the [websocket command documentation](websocket.md).
+A special websocket command is provided for this, see the [websocket command documentation](./docs/websocket.md).
 If the external volume control is placed after CamillaDSP in the audio chain,
 then the boost applied at high and low frequencies may cause clipping.
 To avoid this, set `attenuate_mid` to `true`.
@@ -1795,7 +1795,7 @@ The corner frequencies and the Q of the two shelves can be changed with `high_fr
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
 
-![Loudness](loudness.png)
+![Loudness](./docs/loudness.png)
 
 In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB.
 At a gain of 0 and -5, the curve is flat. Below that the boost increases.
@@ -1978,13 +1978,13 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- [S16_LE](sample_formats.md#s16_le)
-- [S24_3_LE](sample_formats.md#s24_3_le)
-- [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
-- [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
-- [S32_LE](sample_formats.md#s32_le)
-- [F32_LE](sample_formats.md#f32_le)
-- [F64_LE](sample_formats.md#f64_le)
+- [S16_LE](./docs/sample_formats.md#s16_le)
+- [S24_3_LE](./docs/sample_formats.md#s24_3_le)
+- [S24_4_RJ_LE](./docs/sample_formats.md#s24_4_rj_le)
+- [S24_4_LJ_LE](./docs/sample_formats.md#s24_4_lj_le)
+- [S32_LE](./docs/sample_formats.md#s32_le)
+- [F32_LE](./docs/sample_formats.md#f32_le)
+- [F64_LE](./docs/sample_formats.md#f64_le)
 
 
 ### IIR
@@ -2546,7 +2546,7 @@ Parameters:
 
 The RACE algorithm is normally used with filters,
 to only process a limited range of the audio spectrum.
-![RACE algoriths](race.png)
+![RACE algoriths](./docs/race.png)
 
 The RACE processor implements the recursive function block
 indicated by the dashed rectangle.
@@ -2834,7 +2834,7 @@ The number of channels must match at every step of the pipeline:
 ## No sound on macOS
 Apps need microphone access to record sound from any source.
 Without it everything seems to run, but only silence is captured.
-See [Microphone access](./backend_coreaudio.md#microphone-access).
+See [Microphone access](./docs/backend_coreaudio.md#microphone-access).
 
 ## Clipping with only negative gain
 The peak amplitude can increase even when all filters only attenuate.
