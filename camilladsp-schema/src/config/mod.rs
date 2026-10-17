@@ -357,7 +357,7 @@ pub enum CaptureDevice {
     RawFile(CaptureDeviceRawFile),
     WavFile(CaptureDeviceWavFile),
     Stdin(CaptureDeviceStdin),
-    CoreAudio(CaptureDeviceCA),
+    CoreAudio(CaptureDeviceCoreAudio),
     Wasapi(CaptureDeviceWasapi),
     Asio(CaptureDeviceAsio),
     SignalGenerator {
@@ -590,7 +590,7 @@ pub struct CaptureDeviceAsio {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CaptureDeviceCA {
+pub struct CaptureDeviceCoreAudio {
     #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
@@ -644,7 +644,7 @@ pub enum PlaybackDevice {
         #[serde(default)]
         wav_header: Option<bool>,
     },
-    CoreAudio(PlaybackDeviceCA),
+    CoreAudio(PlaybackDeviceCoreAudio),
     Wasapi(PlaybackDeviceWasapi),
     Asio(PlaybackDeviceAsio),
     /// Test-only paced playback device, see `src/dummy_backend`.
@@ -748,7 +748,7 @@ pub struct PlaybackDeviceAsio {
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct PlaybackDeviceCA {
+pub struct PlaybackDeviceCoreAudio {
     #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub channels: NonZeroUsize,
     #[serde(default)]
@@ -759,7 +759,7 @@ pub struct PlaybackDeviceCA {
     exclusive: Option<bool>,
 }
 
-impl PlaybackDeviceCA {
+impl PlaybackDeviceCoreAudio {
     pub fn is_exclusive(&self) -> bool {
         self.exclusive.unwrap_or_default()
     }
