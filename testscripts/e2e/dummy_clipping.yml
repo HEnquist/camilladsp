@@ -1,0 +1,39 @@
+---
+# A dummy to dummy config whose playback converts to an integer sample format, and whose
+# pipeline boosts the signal past full scale on the way there. Needs a build with the
+# dummy-backend feature.
+#
+# Both halves are needed to make clipping happen at all: the conversion is where samples
+# are limited to what the format can hold, and the boost is what gives it something to
+# limit. -6 dBFS plus 12 dB of gain is a peak of 1.995, so about two thirds of the samples
+# are over the limit, see test_clipping.py for the exact figure.
+#
+# The two port numbers are placeholders, replaced by the tests with free ports. The
+# playback's frame counter is what the clipped count is compared against.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Dummy
+    channels: 2
+    control_port: 11111
+    signal:
+      type: Sine
+      freq: 1000
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 2
+    format: S16_LE
+    control_port: 22222
+
+filters:
+  boost:
+    type: Gain
+    parameters:
+      gain: 12.0
+
+pipeline:
+  - type: Filter
+    channels: [0, 1]
+    names: [boost]
