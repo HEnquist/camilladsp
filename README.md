@@ -1649,6 +1649,11 @@ The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults
 The gain has the same range as for the [Gain filter](#gain), -150 to +150 in dB and -10.0 to +10.0 when linear.
 A source channel may only be listed once for each output channel.
 
+Downmix weights are often written as linear factors, such as 0.5 or 0.707.
+These need `scale: linear`.
+Without it the value is read as dB, so `gain: 0.5` meant as a factor of one half instead becomes a boost of 0.5 dB.
+Such values are within the allowed dB range, so this is not caught by the config validation.
+
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
 Similar to [capture devices](#channel-labels), the mixer also has a `labels` property.
