@@ -117,6 +117,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - ALSA, threaded backend: restarting playback after an underrun primed the device to the target
   level counting the chunk about to be written. The level is measured just before a chunk is
   written, so it then read a chunk below the target.
+- ALSA, threaded backend: the playback thread busy-waited for data, which kept one CPU core fully
+  loaded at real time priority. That starves everything else scheduled on that core. It now
+  blocks until data arrives, or until the device is about to run low.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,

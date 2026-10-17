@@ -122,6 +122,20 @@ fn recover_playback_error(
     }
 }
 
+/// The number of frames in the device buffer, or `None` when the device is not running.
+fn running_device_delay(
+    pcmdevice: &alsa::PCM,
+    buf_manager: &PlaybackBufferManager,
+) -> Option<usize> {
+    if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        return None;
+    }
+    pcmdevice
+        .avail()
+        .ok()
+        .map(|avail| buf_manager.current_delay(avail).max(0) as usize)
+}
+
 fn prime_playback_delay(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
@@ -538,9 +552,21 @@ fn run_playback_inner_loop<C>(
             }
             break;
         } else {
-            // No data available yet - poll the channel non-blocking.
-            // The RT thread should stay paced by the device state rather than a channel timeout.
-            match rx_play.try_recv() {
+            // No data available yet. Wait for the next message, but only for half the time
+            // the device can play on what it has before it runs low, so that silence can
+            // be written in time. Half, since a device that updates its position once per
+            // period reports up to a period too much. A busy loop here would keep a core
+            // fully loaded at real time priority, and starve everything else on that core.
+            let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
+            let wait = running_device_delay(pcmdevice, buf_manager)
+                .filter(|delay| *delay > low_delay_threshold)
+                .map(|delay| {
+                    Duration::from_secs_f32(
+                        0.5 * (delay - low_delay_threshold) as f32 * millis_per_frame / 1000.0,
+                    )
+                })
+                .unwrap_or_default();
+            match rx_play.recv_timeout(wait) {
                 Ok(PlaybackDeviceMessage::Data(bytes)) => {
                     sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                 }
@@ -570,25 +596,15 @@ fn run_playback_inner_loop<C>(
                     trace!("pcm_drop result {drop_res:?}");
                     break;
                 }
-                Err(crossbeam_channel::TryRecvError::Empty) => {
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     // Only write silence if the device buffer is running low.
                     // The ALSA device buffer may still have plenty of valid audio
                     // even though the ring buffer is momentarily empty (the non-RT
                     // outer thread can be slightly late delivering data).
                     // Writing silence into a healthy buffer corrupts the audio stream
                     // with audible gaps.
-                    let device_delay =
-                        if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                            pcmdevice
-                                .avail()
-                                .ok()
-                                .map(|avail| buf_manager.current_delay(avail))
-                        } else {
-                            None
-                        };
-                    let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
-                    let buffer_low =
-                        device_delay.is_none_or(|delay| (delay as usize) < low_delay_threshold);
+                    let buffer_low = running_device_delay(pcmdevice, buf_manager)
+                        .is_none_or(|delay| delay < low_delay_threshold);
                     if buffer_low {
                         if !playback_interrupted {
                             warn!("PB: Playback interrupted, no data available");
@@ -608,11 +624,9 @@ fn run_playback_inner_loop<C>(
                             buf_manager,
                             &silence_buf,
                         );
-                    } else {
-                        thread::yield_now();
                     }
                 }
-                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     status_channel_inner
                         .send(StatusMessage::PlaybackError(
                             "Playback inner queue disconnected".to_string(),
