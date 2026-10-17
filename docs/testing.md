@@ -99,11 +99,18 @@ and a plain `cargo bench` skips it:
 cargo bench --features bench --bench fftconv_kernels
 ```
 
+### Getting stable results
+
+This is general benchmarking advice, nothing in it is specific to CamillaDSP.
+
 Results are only comparable between runs made under the same conditions.
 On a laptop, running on battery or letting the machine sleep in the middle of a run changes the
 numbers by more than most optimisations do.
 These steps make the results more stable:
 
+- Prefer a stationary computer over a laptop when there is a choice.
+  A laptop is limited by its cooling, so it lowers the clock frequency as it heats up
+  during a long run, while a stationary computer can usually keep its clock steady.
 - Keep a laptop on mains power for every run, and keep power saving modes off.
 - Keep the machine from sleeping during a long run.
   On macOS, run the benchmark under `caffeinate -i`.
