@@ -102,3 +102,23 @@ cargo bench --features bench --bench fftconv_kernels
 Results are only comparable between runs made under the same conditions.
 On a laptop, running on battery or letting the machine sleep in the middle of a run changes the
 numbers by more than most optimisations do.
+These steps make the results more stable:
+
+- Keep a laptop on mains power for every run, and keep power saving modes off.
+- Keep the machine from sleeping during a long run.
+  On macOS, run the benchmark under `caffeinate -i`.
+- Disable turbo boost, since the clock frequency it gives depends on temperature and on what
+  else is running.
+  On Linux with an Intel CPU, write `1` to `/sys/devices/system/cpu/intel_pstate/no_turbo`.
+  With other CPUs, write `0` to `/sys/devices/system/cpu/cpufreq/boost`.
+  On Windows, setting the maximum processor state of the power plan to 99 % disables it.
+  Apple silicon has no setting for it.
+- On Linux, set the CPU frequency governor to `performance`, for example with
+  `cpupower frequency-set -g performance`.
+- Close other programs that use the CPU, such as browsers and music players.
+- Let criterion do the comparison.
+  Save a baseline before the change with `cargo bench -- --save-baseline before`,
+  and compare against it after the change with `cargo bench -- --baseline before`.
+- Repeat the comparison in the order before, after, before.
+  If the second "before" run differs from the first as much as "after" does, the difference is
+  noise.
