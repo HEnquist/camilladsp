@@ -55,6 +55,11 @@ impl DeviceBufferEstimator {
         self.valid.then(|| self.estimate())
     }
 
+    /// The time since the last [`add`](Self::add).
+    pub fn age(&self) -> Duration {
+        self.update_time.elapsed()
+    }
+
     pub fn estimate(&self) -> usize {
         let now = Instant::now();
         let time_passed = now.duration_since(self.update_time).as_secs_f32();

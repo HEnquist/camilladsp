@@ -39,7 +39,7 @@ use std::fmt::Debug;
 use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
 use crate::ProcessingState;
@@ -1198,16 +1198,45 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         );
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
 
+                        // Set while the capture has paused or stalled the stream.
+                        let mut paused = false;
+                        // The inner thread updates the estimate after every write, about once
+                        // per chunk. A much older estimate means the device has stopped taking
+                        // data, before the inner thread has waited long enough to call it a stall.
+                        // Chunks then pile up in the channel, and the level would read far too high.
+                        let max_estimate_age =
+                            Duration::from_secs_f64(2.0 * chunksize as f64 / samplerate as f64)
+                                .max(Duration::from_millis(20));
+
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     // Skip the sample when the callback holds the lock,
                                     // a 0 would drag the average down.
-                                    let estimate = buffer_fill.try_lock().map(|b| b.valid_estimate());
-                                    if let Some(None) = estimate {
+                                    let estimate = buffer_fill
+                                        .try_lock()
+                                        .map(|b| (b.valid_estimate(), b.age()));
+                                    if paused {
+                                        // The first chunk after a pause. The estimate decayed while
+                                        // no chunks arrived and the adjust period has long expired,
+                                        // so start a new period and leave this sample out.
+                                        paused = false;
+                                        rate_reporter.restart();
+                                    } else if let Some((None, _)) = estimate {
                                         // Playback is stalled, the level is not useful to the rate reporter.
                                         rate_reporter.restart();
-                                    } else if let Some(Some(estimated_buffer_fill)) = estimate {
+                                        // Drop the chunk, like the non-threaded backend drains its
+                                        // channel while stalled. Waiting for room in the full ring
+                                        // buffer would hold up the whole pipeline, and the backlog
+                                        // would then be played after the device resumes.
+                                        continue;
+                                    } else if let Some((Some(_), age)) = estimate
+                                        && age > max_estimate_age
+                                    {
+                                        // The device has not taken data for a while, and the level
+                                        // would not be useful to the rate reporter.
+                                        xtrace!("Buffer estimate is {age:?} old, skip buffer level sample.");
+                                    } else if let Some((Some(estimated_buffer_fill), _)) = estimate {
                                         let estimated_buffer_fill = estimated_buffer_fill as f64;
                                         let buffer_level = estimated_buffer_fill
                                             + (channel.len() * chunksize) as f64;
@@ -1260,6 +1289,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
+                                    paused = true;
                                     let _ = send_playback_device_message(
                                         &tx_dev,
                                         PlaybackDeviceMessage::Pause,
@@ -1821,6 +1851,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             if device_stalled {
                                 if state != ProcessingState::Stalled {
                                     state = ProcessingState::Stalled;
+                                    // The periodic status update below is skipped while stalled,
+                                    // so publish the state change here.
+                                    crate::set_capture_state(&capture_status, state);
                                     if channel.send(AudioMessage::Pause).is_err() {
                                         break;
                                     }
