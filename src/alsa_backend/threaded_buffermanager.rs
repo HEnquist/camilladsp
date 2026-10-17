@@ -159,6 +159,10 @@ impl DeviceBufferData {
     pub fn periodsize(&self) -> Frames {
         self.period
     }
+
+    pub fn chunksize(&self) -> Frames {
+        self.chunksize
+    }
 }
 
 #[derive(Debug)]

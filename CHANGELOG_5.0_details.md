@@ -112,6 +112,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   stalled, like in the default backend.
 - ALSA, threaded backend: a stalled capture did not show as `Stalled` in the processing state, and
   after it resumed the first buffer level sample was zero, which sent rate adjust to its limit.
+  Playback also resumed with only the silence that was left in the device, often a chunk or more
+  below the target level. It is now topped up to the target.
+- ALSA, threaded backend: restarting playback after an underrun primed the device to the target
+  level counting the chunk about to be written. The level is measured just before a chunk is
+  written, so it then read a chunk below the target.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,

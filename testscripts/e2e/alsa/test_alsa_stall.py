@@ -29,6 +29,7 @@ tests compare against that rather than against the target.
 
 import statistics
 import time
+from collections import namedtuple
 
 import pytest
 
@@ -46,13 +47,19 @@ from .loopback import (
 
 pytestmark = pytest.mark.alsa
 
-# Large compared to the default, so the device buffer is large too, 8192 frames. A
-# restart lands up to a chunk away from the target, depending on where in a chunk it
-# falls, while zeros left behind by a stall fill most of the device buffer. A big buffer
-# per chunk is what keeps the two apart.
-CHUNKSIZE = 1536
-# The period CamillaDSP picks for this chunk size, see `DummyClock`.
-PERIOD = 1024
+# The chunk size for each direction, the period CamillaDSP picks for it, see
+# `DummyClock`, and how far the level may move over a stall.
+Setup = namedtuple("Setup", ["chunksize", "period", "level_tolerance"])
+SETUPS = {
+    # A large chunk gives a large device buffer, 8192 frames. A restart lands up to a
+    # chunk from the target, depending on where in a chunk it falls, while zeros left
+    # behind by a stall put the level more than 6000 frames too high.
+    "playback": Setup(1536, 1024, 1536),
+    # The playback keeps running here, so its level only shifts by a few hundred frames
+    # over a capture stall, unless the backend resumes without topping the device up
+    # to the target, which leaves it a chunk low.
+    "capture": Setup(1024, 512, 512),
+}
 TARGET_LEVEL = 2048
 ADJUST_INTERVAL = 0.5
 RATE_ADJUST = {
@@ -65,9 +72,6 @@ STALL_TIME = 3.0
 # Comfortably longer than it takes a backend to call the device stalled. The threaded
 # one waits twice the device buffer, a third of a second here.
 DETECT_TIME = 1.0
-# How far the level may move over a stall, a chunk, see CHUNKSIZE. Leftover zeros put
-# it more than 6000 frames too high.
-LEVEL_TOLERANCE = CHUNKSIZE
 # How far from 1 the speed may be to count as settled. The level the threaded backend
 # estimates jitters by a few hundred frames between adjust periods, which moves the
 # speed by up to about 0.3 %.
@@ -89,8 +93,8 @@ def dummy_clock():
         set_rate_shift(cable, NOMINAL_SHIFT, card=STALL_CARD)
     started = []
 
-    def _start():
-        clock = DummyClock(PERIOD)
+    def _start(period):
+        clock = DummyClock(period)
         started.append(clock)
         return clock
 
@@ -145,17 +149,18 @@ def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
     there would measure that. With the capture on the stall card rate adjust has nothing
     to act on, see the module docstring, so settled only means the level stopped moving.
     """
-    clock = dummy_clock()
+    setup = SETUPS[direction]
+    clock = dummy_clock(setup.period)
     if direction == "playback":
         feeder()
         config = alsa_config(
-            playback_device=STALL_PLAYBACK, chunksize=CHUNKSIZE, devices=RATE_ADJUST
+            playback_device=STALL_PLAYBACK, chunksize=setup.chunksize, devices=RATE_ADJUST
         )
     else:
         config = alsa_config(
             capture_device=STALL_CAPTURE,
             playback_device=PLAYBACK,
-            chunksize=CHUNKSIZE,
+            chunksize=setup.chunksize,
             devices=RATE_ADJUST,
         )
     cdsp = start_cdsp(config=config)
@@ -169,10 +174,11 @@ def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
         speed = cdsp.send("GetRateAdjust")
         if direction == "playback":
             settled = (
-                abs(level - TARGET_LEVEL) < LEVEL_TOLERANCE and abs(speed - 1) < SPEED_TOLERANCE
+                abs(level - TARGET_LEVEL) < setup.level_tolerance
+                and abs(speed - 1) < SPEED_TOLERANCE
             )
         else:
-            settled = previous is not None and abs(level - previous) < PERIOD / 2
+            settled = previous is not None and abs(level - previous) < setup.period / 2
         if settled:
             return clock, cdsp, level
         if time.monotonic() > deadline:
@@ -190,7 +196,7 @@ def stall(direction, clock):
 
 
 def resume(direction, dummy_clock):
-    dummy_clock()
+    dummy_clock(SETUPS[direction].period)
     wait_for_hw_ptr(direction, moving=True)
 
 
@@ -250,6 +256,6 @@ def test_the_level_comes_back_after_a_stall(
     resume(direction, dummy_clock)
     time.sleep(2 * ADJUST_INTERVAL)
     level = median_level(cdsp)
-    assert abs(level - settled) < LEVEL_TOLERANCE, (
+    assert abs(level - settled) < SETUPS[direction].level_tolerance, (
         f"the level was {level} after the stall, {settled} before it"
     )

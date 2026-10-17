@@ -131,12 +131,15 @@ fn prime_playback_delay(
     buf_manager: &PlaybackBufferManager,
     silence_buf: &[u8],
 ) -> Res<()> {
-    let target_frames = buf_manager
-        .target_level()
-        .min(buf_manager.data.buffersize()) as usize;
-    if target_frames == 0 {
+    if buf_manager.target_level() == 0 {
         return Ok(());
     }
+    // The level is measured when a chunk arrives, just before it is written, when the
+    // device holds a chunk less than right after a write. `queued_frames` includes the
+    // chunk about to be written, so prime one chunk above the target, to measure the
+    // target at the next arrival.
+    let target_frames = (buf_manager.target_level() + buf_manager.data.chunksize())
+        .min(buf_manager.data.buffersize()) as usize;
 
     let current_delay = pcmdevice
         .avail()
@@ -379,6 +382,7 @@ fn run_playback_inner_loop<C>(
         let have_data = available_bytes >= bytes_per_frame || !write_remainder.is_empty();
 
         if have_data {
+            let resumed = playback_interrupted;
             if playback_interrupted {
                 info!("PB: Normal playback resumes");
                 playback_interrupted = false;
@@ -418,6 +422,22 @@ fn run_playback_inner_loop<C>(
                         break;
                     }
                 }
+            }
+
+            // The device kept running on silence while there was no data, and the level
+            // would resume at whatever was left of it. Top it up to the target, the way a
+            // restart after an underrun does.
+            if resumed && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                prime_playback_delay(
+                    pcmdevice,
+                    io,
+                    millis_per_frame,
+                    bytes_per_frame,
+                    sample_queue_bytes / bytes_per_frame,
+                    buf_manager,
+                    &silence_buf,
+                )
+                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
             }
 
             let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
@@ -582,7 +602,9 @@ fn run_playback_inner_loop<C>(
                             io,
                             millis_per_frame,
                             bytes_per_frame,
-                            0,
+                            // The silence about to be written counts as queued, like a
+                            // chunk of data does.
+                            chunksize,
                             buf_manager,
                             &silence_buf,
                         );
