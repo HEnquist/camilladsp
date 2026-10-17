@@ -9,10 +9,12 @@ the `DummyClock` stalls it and starting a new one resumes it. The other end of
 CamillaDSP is on the first loopback card and keeps running all along, the way the
 microphone or the DAC on the other side of a gadget does.
 
-Two things can go wrong, and each direction has a test for both:
+Three things can go wrong, and each has a test:
 
-- While stalled there is no buffer level to measure. Anything that keeps averaging one
-  anyway feeds the rate controller garbage, and it winds up to the clamp.
+- A stalled capture has to show in the processing state.
+- While a playback is stalled there is no buffer level to measure. Anything that keeps
+  averaging one anyway feeds the rate controller garbage, and it winds up to the clamp.
+  A stalled capture delivers no chunks, so nothing reaches the controller then.
 - On resume, whatever piled up during the stall, zeros in the device and stale chunks in
   the backend's own queues, is played before anything current. The level then starts
   far from where it was, and rate adjust can only move it at half a percent.
@@ -44,9 +46,13 @@ from .loopback import (
 
 pytestmark = pytest.mark.alsa
 
-CHUNKSIZE = 1024
+# Large compared to the default, so the device buffer is large too, 8192 frames. A
+# restart lands up to a chunk away from the target, depending on where in a chunk it
+# falls, while zeros left behind by a stall fill most of the device buffer. A big buffer
+# per chunk is what keeps the two apart.
+CHUNKSIZE = 1536
 # The period CamillaDSP picks for this chunk size, see `DummyClock`.
-PERIOD = 512
+PERIOD = 1024
 TARGET_LEVEL = 2048
 ADJUST_INTERVAL = 0.5
 RATE_ADJUST = {
@@ -56,13 +62,16 @@ RATE_ADJUST = {
 }
 # Six adjust periods, enough for a controller fed garbage to reach the clamp.
 STALL_TIME = 3.0
-# How far the level may move over a stall. A stall that leaves its zeros in the device
-# puts it most of a device buffer, 4096 frames, too high, while a clean resume can
-# land one period, 512 frames, above where it was.
-LEVEL_TOLERANCE = 0.75 * CHUNKSIZE
-# How far from 1 the speed may be to count as settled, and how far it may move during
-# a stall. The clamp is 0.5 % from 1, so a speed that winds up still moves well past it.
-SPEED_TOLERANCE = 0.002
+# Comfortably longer than it takes a backend to call the device stalled. The threaded
+# one waits twice the device buffer, a third of a second here.
+DETECT_TIME = 1.0
+# How far the level may move over a stall, a chunk, see CHUNKSIZE. Leftover zeros put
+# it more than 6000 frames too high.
+LEVEL_TOLERANCE = CHUNKSIZE
+# How far from 1 the speed may be to count as settled. The level the threaded backend
+# estimates jitters by a few hundred frames between adjust periods, which moves the
+# speed by up to about 0.3 %.
+SPEED_TOLERANCE = 0.003
 SETTLE_TIMEOUT = 30.0
 STALL_CABLES = {"playback": 0, "capture": 1}
 
@@ -139,12 +148,20 @@ def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
     clock = dummy_clock()
     if direction == "playback":
         feeder()
-        config = alsa_config(playback_device=STALL_PLAYBACK, devices=RATE_ADJUST)
+        config = alsa_config(
+            playback_device=STALL_PLAYBACK, chunksize=CHUNKSIZE, devices=RATE_ADJUST
+        )
     else:
         config = alsa_config(
-            capture_device=STALL_CAPTURE, playback_device=PLAYBACK, devices=RATE_ADJUST
+            capture_device=STALL_CAPTURE,
+            playback_device=PLAYBACK,
+            chunksize=CHUNKSIZE,
+            devices=RATE_ADJUST,
         )
     cdsp = start_cdsp(config=config)
+    # GetRateAdjust is a status snapshot, and this keeps it a tenth of a second old at
+    # most rather than a second, as in test_alsa_rate_adjust.py.
+    cdsp.send("SetUpdateInterval", 100)
     deadline = time.monotonic() + SETTLE_TIMEOUT
     previous = None
     while True:
@@ -190,22 +207,30 @@ def test_a_stalled_capture_shows_in_the_state(dummy_clock, start_cdsp, alsa_conf
     cdsp.poll_until("GetState", "Running")
 
 
-@pytest.mark.parametrize("direction", ["capture", "playback"])
-def test_rate_adjust_holds_during_a_stall(
-    dummy_clock, start_cdsp, alsa_config, feeder, direction
+def test_nothing_is_adjusted_during_a_playback_stall(
+    dummy_clock, start_cdsp, alsa_config, feeder
 ):
-    """The speed after a stall is the speed from before it.
+    """Once the playback is called stalled, neither the level nor the speed moves.
 
-    Nothing is played during the stall, so there is no drift to correct and no reason
-    for the speed to move. A backend that keeps reporting a level while stalled reports
-    one that decays to nothing or grows without bound, and the controller follows it.
+    Nothing is played during the stall, so there is no level to report and no drift to
+    correct. A backend that keeps reporting a level while stalled reports one that decays
+    to nothing or grows without bound, and the controller follows it to the clamp.
+
+    The time before the stall is called is left out. The device stops taking data before
+    it stops accepting it, so the level rises as the buffer fills, and the controller
+    answers that like it answers a slow device. That is the right thing to do until it
+    is clear that the device is not slow but stopped.
     """
-    clock, cdsp, _ = start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder)
-    speed = cdsp.send("GetRateAdjust")
-    stall(direction, clock)
-    after = cdsp.send("GetRateAdjust")
-    assert abs(after - speed) < SPEED_TOLERANCE, (
-        f"the speed went from {speed} to {after} during the stall"
+    clock, cdsp, _ = start_settled("playback", dummy_clock, start_cdsp, alsa_config, feeder)
+    clock.stop()
+    wait_for_hw_ptr("playback", moving=False)
+    time.sleep(DETECT_TIME)
+    level, speed = cdsp.send("GetBufferLevel"), cdsp.send("GetRateAdjust")
+    time.sleep(STALL_TIME)
+    level_after, speed_after = cdsp.send("GetBufferLevel"), cdsp.send("GetRateAdjust")
+    assert (level_after, speed_after) == (level, speed), (
+        f"during the stall the level went from {level} to {level_after}, "
+        f"and the speed from {speed} to {speed_after}"
     )
 
 

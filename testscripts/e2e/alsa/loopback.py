@@ -315,7 +315,8 @@ class DummyClock:
 
     The period has to match the one CamillaDSP gets on the stall card, see the module
     docstring. The playback backend asks for a buffer of three chunks rounded up to a
-    power of two and a period of an eighth of that, so a chunk size of 1024 gives 512.
+    power of two and a period of an eighth of that, so a chunk size of 1024 gives 512,
+    and one of 1536 gives 1024.
     """
 
     def __init__(self, period, rate=48000):
