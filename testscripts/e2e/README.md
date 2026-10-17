@@ -82,7 +82,7 @@ and this directory in, and runs the suite there, once for each ALSA backend. On 
 your own it is only the modules, with your user in the `audio` group:
 
 ```sh
-sudo modprobe snd-aloop pcm_substreams=2
+sudo modprobe snd-aloop enable=1,1 pcm_substreams=2 timer_source=",Dummy.0.0"
 sudo modprobe snd-dummy
 cargo build --profile e2e              # or with --features threaded-alsa
 pytest -v testscripts/e2e -m alsa
@@ -90,6 +90,11 @@ pytest -v testscripts/e2e -m alsa
 
 Anywhere the two cards are missing the tests skip. They do not care which build they get, since
 both have the ALSA backend, but the other markers do, so run them as their own selection.
+
+The `enable=1,1` and `timer_source` options add a second loopback card, `Loopback_1`, clocked by
+snd-dummy instead of the system timer. It is only used by `alsa/test_alsa_stall.py`, which stops
+the Dummy playback to make a device stall the way a UAC2 gadget does when the host closes its
+stream. Without that card those tests skip.
 
 Rate adjust is tested against a loopback cable whose `PCM Rate Shift 100000` control the test
 skews, not against snd-dummy, which has no control over its clock. The adjust loop then has to

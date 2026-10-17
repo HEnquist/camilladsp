@@ -25,6 +25,22 @@ Three properties of snd-aloop decide how the tests are written:
   tests write the one on the playback cable to skew the sink it is adjusting against.
 - Both cables run on the kernel's system timer, so with no shift set the two ends of
   CamillaDSP run on the same clock and nothing drifts.
+
+A second loopback card, `STALL_CARD`, is there for one thing the first cannot do: stop.
+It is loaded with `timer_source` set to snd-dummy's first playback substream, so its
+cables are clocked by that PCM's period interrupts instead of the system timer. With
+`DummyClock` running on `DUMMY_CLOCK` the card runs, and when it is killed every stream
+on the card stops moving, without an error and without leaving the running state. That
+is what a UAC2 gadget looks like when the host closes its stream. CamillaDSP plays into
+`STALL_PLAYBACK` on cable 0 to stall a playback, and captures from `STALL_CAPTURE` on
+cable 1 to stall a capture. Nothing plays into cable 1, so the capture records silence,
+at the pace of the clock. Two traps come with it:
+
+- The loopback's period has to take exactly as long as the Dummy's, or every tick is
+  rejected as the wrong resolution and the stream is stopped with an xrun. So the
+  Dummy runs with the period size CamillaDSP is going to pick, see `DummyClock`.
+- aplay on a stalled cable fails with EIO after its 100 ms write timeout, so it is no
+  use as the far end there. CamillaDSP waits with a shorter timeout and sees the stall.
 """
 
 import os
@@ -41,6 +57,11 @@ CAPTURE = "hw:Loopback,1,0"
 PLAYBACK = "hw:Loopback,0,1"
 RECORD = "hw:Loopback,1,1"
 DUMMY = "hw:Dummy"
+
+STALL_CARD = "Loopback_1"
+STALL_PLAYBACK = "hw:Loopback_1,0,0"
+STALL_CAPTURE = "hw:Loopback_1,1,1"
+DUMMY_CLOCK = "hw:Dummy,0,0"
 
 CAPTURE_CABLE = 0
 PLAYBACK_CABLE = 1
@@ -65,19 +86,38 @@ def devices_present():
     return os.path.exists(f"/proc/asound/{CARD}") and os.path.exists("/proc/asound/Dummy")
 
 
-def pcm_state(device, stream, subdevice):
-    """The state of one loopback substream, "RUNNING", "PREPARED", "closed" and so on.
+def stall_card_present():
+    """Whether the Dummy clocked loopback card is loaded, see the module docstring."""
+    return os.path.exists(f"/proc/asound/{STALL_CARD}")
+
+
+def _pcm_status(device, stream, subdevice, card):
+    path = f"/proc/asound/{card}/pcm{device}{stream}/sub{subdevice}/status"
+    with open(path) as status:
+        return status.read()
+
+
+def pcm_state(device, stream, subdevice, card=CARD):
+    """The state of one substream, "RUNNING", "PREPARED", "closed" and so on.
 
     Read from procfs rather than asked of alsa-lib, so it can be polled while something
     else holds the device.
     """
-    path = f"/proc/asound/{CARD}/pcm{device}{stream}/sub{subdevice}/status"
-    with open(path) as status:
-        text = status.read()
+    text = _pcm_status(device, stream, subdevice, card)
     if text.strip() == "closed":
         return "closed"
     match = re.search(r"state:\s*(\S+)", text)
     return match.group(1) if match else text.strip()
+
+
+def hw_ptr(device, stream, subdevice, card=CARD):
+    """How many frames the hardware side of a substream has moved since it started.
+
+    This is what shows a stalled stream, since a stalled one stays in the running state.
+    None when the substream is closed.
+    """
+    match = re.search(r"hw_ptr\s*:\s*(\d+)", _pcm_status(device, stream, subdevice, card))
+    return int(match.group(1)) if match else None
 
 
 def wait_for_pcm_state(device, stream, subdevice, state, timeout=5.0):
@@ -107,9 +147,9 @@ def rate_shift(cable):
     return int(re.search(r": values=(\d+)", out).group(1))
 
 
-def set_rate_shift(cable, value):
+def set_rate_shift(cable, value, card=CARD):
     subprocess.run(
-        ["amixer", "-q", "-c", CARD, "cset", _shift_control(cable), str(value)],
+        ["amixer", "-q", "-c", card, "cset", _shift_control(cable), str(value)],
         check=True,
     )
 
@@ -252,9 +292,9 @@ class Feeder:
 
     def wait_until_running(self, timeout=5.0):
         """Wait for the cable end to be running, and fail with aplay's own error if it died."""
-        dev, sub = _device_and_subdevice(self.device)
+        card, dev, sub = _card_device_and_subdevice(self.device)
         deadline = time.monotonic() + timeout
-        while pcm_state(dev, "p", sub) != "RUNNING":
+        while pcm_state(dev, "p", sub, card=card) != "RUNNING":
             if self.process.poll() is not None:
                 raise RuntimeError(f"aplay exited: {self.process.stderr.read().decode().strip()}")
             if time.monotonic() > deadline:
@@ -268,6 +308,37 @@ class Feeder:
             self.process.kill()
         self.process.wait(timeout=5)
         self._thread.join(timeout=5)
+
+
+class DummyClock:
+    """aplay playing silence into `DUMMY_CLOCK`, which is what drives `STALL_CARD`.
+
+    The period has to match the one CamillaDSP gets on the stall card, see the module
+    docstring. The playback backend asks for a buffer of three chunks rounded up to a
+    power of two and a period of an eighth of that, so a chunk size of 1024 gives 512.
+    """
+
+    def __init__(self, period, rate=48000):
+        self.process = subprocess.Popen(
+            [
+                "aplay", "-q", "-D", DUMMY_CLOCK, "-t", "raw", "-f", "S16_LE",
+                "-r", str(rate), "-c", "2",
+                f"--period-size={period}", f"--buffer-size={8 * period}", "/dev/zero",
+            ],
+            stderr=subprocess.PIPE,
+        )
+        deadline = time.monotonic() + 5.0
+        while pcm_state(0, "p", 0, card="Dummy") != "RUNNING":
+            if self.process.poll() is not None:
+                raise RuntimeError(f"aplay exited: {self.process.stderr.read().decode().strip()}")
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"{DUMMY_CLOCK} was not running after 5 s")
+            time.sleep(0.02)
+
+    def stop(self):
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait(timeout=5)
 
 
 def record(frames, fmt="S16_LE", rate=48000, channels=2, device=RECORD):
@@ -286,7 +357,7 @@ def record(frames, fmt="S16_LE", rate=48000, channels=2, device=RECORD):
     return result.stdout
 
 
-def _device_and_subdevice(name):
-    """The device and subdevice numbers of a "hw:Loopback,D,S" name."""
-    _, dev, sub = name.split(",")
-    return int(dev), int(sub)
+def _card_device_and_subdevice(name):
+    """The card name and the device and subdevice numbers of a "hw:Card,D,S" name."""
+    card, dev, sub = name.split(",")
+    return card.removeprefix("hw:"), int(dev), int(sub)
