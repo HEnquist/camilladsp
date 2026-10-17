@@ -113,6 +113,7 @@ fn play_buffer(
     bytes_per_frame: usize,
     buf_manager: &PlaybackBufferManager,
 ) -> Res<PlaybackResult> {
+    let chunk_arrived = Instant::now();
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
     if playback_state < 0 {
@@ -126,15 +127,15 @@ fn play_buffer(
     } else if playback_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
         warn!("PB: Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
     } else if playback_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
         recover_suspended_pcm(pcmdevice, "PB")?;
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
         // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
         // and the next chunk generates the initial target delay.
-        buf_manager.sleep_for_target_delay(millis_per_frame);
+        buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
     } else if playback_state == alsa_sys::SND_PCM_STATE_PAUSED as i32 {
         debug!("PB: Device is in paused state, unpausing.");
         if let Err(err) = pcmdevice.pause(false) {
@@ -182,7 +183,7 @@ fn play_buffer(
                 Errno::ESTRPIPE => {
                     warn!("PB: wait interrupted by suspend, trying to recover. Error: {err}");
                     recover_suspended_pcm(pcmdevice, "PB")?;
-                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                    buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
                 }
                 _ => {
                     warn!(
@@ -219,14 +220,14 @@ fn play_buffer(
                     warn!("PB: write underrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
                     pcmdevice.prepare()?;
-                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                    buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
                     io.writei(buffer)?;
                     break;
                 }
                 Errno::ESTRPIPE => {
                     warn!("PB: write interrupted by suspend, trying to recover. Error: {err}");
                     recover_suspended_pcm(pcmdevice, "PB")?;
-                    buf_manager.sleep_for_target_delay(millis_per_frame);
+                    buf_manager.sleep_for_target_delay(millis_per_frame, chunk_arrived);
                     continue;
                 }
                 _ => {
@@ -580,6 +581,15 @@ fn playback_loop_bytes(
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
                             info!("PB: device resumed normal operation");
+                            // The buffer accumulated outdated samples while the device was
+                            // stalled. Drop them so playback restarts from Prepared at the target
+                            // level, instead of carrying extra stale samples to the rate controller.
+                            pcmdevice
+                                .drop()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                            pcmdevice
+                                .prepare()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
                             timer.restart();
                             buffer_avg.restart();
                         }

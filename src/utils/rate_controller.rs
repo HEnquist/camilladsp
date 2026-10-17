@@ -148,6 +148,12 @@ impl RateAdjustReporter {
         }
     }
 
+    /// Discard the levels collected so far and start a new adjust period.
+    pub fn restart(&mut self) {
+        self.timer.restart();
+        self.averager.restart();
+    }
+
     /// Add a buffer level, in frames. Returns the new capture speed once per adjust period.
     pub fn update(
         &mut self,
