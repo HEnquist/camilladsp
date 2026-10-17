@@ -53,7 +53,30 @@ The tests use the most recently built binary among the `e2e`, `release-fast`, `r
 See `testscripts/e2e/README.md` for the layout, for why the suite is in Python rather than
 Rust, and for what to know before adding tests.
 
-# Benchmarks
+## Running the tests on GitHub Actions
+Some of the tests are difficult to run locally.
+The backend suites in `testscripts/e2e` need sound devices to run against.
+The ALSA suite needs the `snd-aloop` and `snd-dummy` kernel modules,
+the CoreAudio suite needs BlackHole,
+the WASAPI and ASIO suite needs VB-Cable and the Steinberg built-in ASIO Driver,
+and the PipeWire suite needs a running PipeWire with two null sinks.
+The CI checks also build and test on Linux, Windows and macOS, on several CPU architectures,
+while a single machine covers only one of them.
+
+The GitHub Actions workflows of the repository set all of this up on GitHub's runners.
+Each end-to-end workflow only runs when the change touches its backend or the shared code.
+
+The workflows run in a fork too, so they can be used before a pull request is opened.
+GitHub disables the workflows of a new fork, so you first need to enable them in the Actions tab
+of the fork.
+Pushing a branch to the fork then starts them.
+A convenient way to see all the results together is to open a pull request inside your own fork,
+from your branch to the fork's copy of the branch you are targeting.
+This runs the same checks as a pull request to the main repository.
+Once everything passes, close it and open the real pull request.
+The end-to-end workflows can also be started by hand with "Run workflow" in the Actions tab.
+
+## Benchmarks
 
 There are benchmarks to monitor the performance of some filters.
 These use the `criterion` framework.
@@ -62,7 +85,7 @@ Run them with cargo:
 cargo bench
 ```
 
-## FFT Convolution Kernel Benchmarks
+### FFT Convolution Kernel Benchmarks
 
 Micro-benchmarks for the complex-multiply kernels are available.
 They compare scalar against NEON on `aarch64` and AVX+FMA on `x86_64`.
