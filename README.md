@@ -343,6 +343,9 @@ reworked.
 scope rules. Most coding agents read it automatically, otherwise point yours to it. Then challenge
 the result before opening a pull request: is this needed, can it be simpler?
 
+**Run the tests before opening a pull request.** [Testing](./docs/testing.md) describes the Rust
+tests, the end-to-end suite that drives the real binary, and the benchmarks.
+
 # Installing
 
 The easiest way to install CamillaDSP is to download a pre-built binary.
