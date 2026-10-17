@@ -452,6 +452,7 @@ fn run_playback_inner_loop<C>(
                 &silence_buf,
             );
             pcm_paused = false;
+            let was_stalled = device_stalled;
             device_stalled = apply_playback_write_result(
                 playback_res,
                 bytes_to_play,
@@ -462,6 +463,30 @@ fn run_playback_inner_loop<C>(
                 status_channel_inner,
                 Some((pcmdevice, io, buf_manager, bytes_per_frame, &silence_buf)),
             );
+            if device_stalled {
+                // The device is not consuming frames, so estimates of its buffer level
+                // would decay to zero and wind up the rate controller.
+                if let Some(mut est) = buffer_fill.try_lock() {
+                    est.invalidate();
+                }
+            } else if was_stalled {
+                info!("PB: device resumed normal operation");
+                // The device buffer and the ring buffer accumulated outdated samples
+                // while the device was stalled. Drop them so playback restarts from Prepared
+                // at the target level. Otherwise the rate controller sees a bunch of extra
+                // samples and its integral goes up.
+                pcmdevice
+                    .drop()
+                    .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                pcmdevice
+                    .prepare()
+                    .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                let stale_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
+                debug!("PB: dropping {stale_bytes}b to resume from current samples");
+                device_consumer.skip(stale_bytes);
+                sample_queue_bytes -= stale_bytes;
+                write_remainder.clear();
+            }
 
             // Update the buffer level estimator after each write (like WASAPI).
             // This lets the outer thread interpolate accurate fill levels between updates.
@@ -1178,9 +1203,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     // Skip the sample when the callback holds the lock,
                                     // a 0 would drag the average down.
-                                    if let Some(estimated_buffer_fill) =
-                                        buffer_fill.try_lock().map(|b| b.estimate() as f64)
-                                    {
+                                    let estimate = buffer_fill.try_lock().map(|b| b.valid_estimate());
+                                    if let Some(None) = estimate {
+                                        // Playback is stalled, the level is not useful to the rate reporter.
+                                        rate_reporter.restart();
+                                    } else if let Some(Some(estimated_buffer_fill)) = estimate {
+                                        let estimated_buffer_fill = estimated_buffer_fill as f64;
                                         let buffer_level = estimated_buffer_fill
                                             + (channel.len() * chunksize) as f64;
                                         if let Some(speed) =

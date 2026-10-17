@@ -580,6 +580,15 @@ fn playback_loop_bytes(
                     Ok(PlaybackResult::Normal) => {
                         if device_stalled {
                             info!("PB: device resumed normal operation");
+                            // The buffer accumulated outdated samples while the device was
+                            // stalled. Drop them so playback restarts from Prepared at the target
+                            // level, instead of carrying extra stale samples to the rate controller.
+                            pcmdevice
+                                .drop()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                            pcmdevice
+                                .prepare()
+                                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
                             timer.restart();
                             buffer_avg.restart();
                         }

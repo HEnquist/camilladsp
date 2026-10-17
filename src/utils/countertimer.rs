@@ -25,6 +25,7 @@ pub struct DeviceBufferEstimator {
     update_time: Instant,
     frames: usize,
     sample_rate: f32,
+    valid: bool,
 }
 
 impl DeviceBufferEstimator {
@@ -34,12 +35,24 @@ impl DeviceBufferEstimator {
             update_time: Instant::now(),
             frames: 0,
             sample_rate: sample_rate as f32,
+            valid: true,
         }
     }
 
     pub fn add(&mut self, frames: usize) {
         self.update_time = Instant::now();
         self.frames = frames;
+        self.valid = true;
+    }
+
+    /// Mark the estimate as meaningless until the next [`add`](Self::add)
+    pub fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    /// Like [`estimate`](Self::estimate), but `None` while the estimate is invalidated.
+    pub fn valid_estimate(&self) -> Option<usize> {
+        self.valid.then(|| self.estimate())
     }
 
     pub fn estimate(&self) -> usize {
@@ -487,7 +500,8 @@ impl ValueHistory {
 mod tests {
     use crate::ProcessingState;
     use crate::utils::countertimer::{
-        Averager, HistoryRecord, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+        Averager, DeviceBufferEstimator, HistoryRecord, SilenceCounter, Stopwatch, TimeAverage,
+        ValueHistory, ValueWatcher,
     };
     use std::time::{Duration, Instant};
 
@@ -513,6 +527,20 @@ mod tests {
 
     fn last_record(hist: &ValueHistory) -> HistoryRecord {
         hist.last().unwrap()
+    }
+
+    #[test]
+    fn device_buffer_estimator_invalidate() {
+        let mut est = DeviceBufferEstimator::new(48000);
+        est.add(4800);
+        // Backdate the update so the estimate reflects a known amount of consumed frames.
+        est.update_time = instant_in_past(Duration::from_millis(50));
+        let estimate = est.valid_estimate().unwrap();
+        assert!(estimate <= 2400 && estimate > 0);
+        est.invalidate();
+        assert_eq!(est.valid_estimate(), None);
+        est.add(1000);
+        assert!(est.valid_estimate().is_some());
     }
 
     #[test]
