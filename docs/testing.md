@@ -75,18 +75,30 @@ The end-to-end workflows can also be started by hand with "Run workflow" in the 
 
 ## Benchmarks
 
-There are benchmarks to monitor the performance of some filters.
-These use the `criterion` framework.
-Run them with cargo:
+The benchmarks in `benches/` use the `criterion` framework.
+
+| Benchmark | What it measures |
+| --- | --- |
+| `filters` | Single filters: convolution at several lengths, biquad and DiffEq. |
+| `conversions` | Converting between raw sample bytes and audio chunks. |
+| `conv_parallel` | How a convolution filter scales over channels, serial and on the thread pool, with shared or separate coefficients. |
+| `biquad_canon` | The interleaved biquad kernel, for choosing how many channels and stages to run side by side. |
+| `pipeline` | One chunk through complete pipelines of different shapes. |
+| `pipeline_build` | Building a pipeline, and updating the filter parameters of an existing one, as happens on a config reload. |
+| `fftconv_kernels` | The complex multiply kernels of the FFT convolution, scalar against NEON on `aarch64` and AVX+FMA on `x86_64`. |
+
+Run all of them, or a single one, with cargo:
 ```sh
 cargo bench
+cargo bench --bench pipeline
 ```
 
-### FFT Convolution Kernel Benchmarks
-
-Micro-benchmarks for the complex-multiply kernels are available.
-They compare scalar against NEON on `aarch64` and AVX+FMA on `x86_64`.
-The `bench` feature flag is required to expose the kernel functions:
+The `fftconv_kernels` benchmark needs the `bench` feature, which exposes the kernel functions,
+and a plain `cargo bench` skips it:
 ```sh
 cargo bench --features bench --bench fftconv_kernels
 ```
+
+Results are only comparable between runs made under the same conditions.
+On a laptop, running on battery or letting the machine sleep in the middle of a run changes the
+numbers by more than most optimisations do.
