@@ -368,11 +368,9 @@ fn run_playback_inner_loop<C>(
     let bytes_per_frame = channels * bytes_per_sample;
     let millis_per_frame: f32 = 1000.0 / samplerate as f32;
     let mut device_stalled = false;
-    let mut pcm_paused = false;
-    let can_pause = pcmdevice
-        .hw_params_current()
-        .map(|p| p.can_pause())
-        .unwrap_or_default();
+    // Processing is paused. The device is not paused, it keeps running on silence like in
+    // the other backends, and `paused` only quiets the log while that is expected.
+    let mut paused = false;
     // Pre-allocate all buffers to avoid heap allocations on the RT thread.
     // Size buffer generously: the ring buffer can hold several chunks, so
     // available_bytes in prepare_playback_bytes can exceed one chunksize.
@@ -402,6 +400,7 @@ fn run_playback_inner_loop<C>(
                 info!("PB: Normal playback resumes");
                 playback_interrupted = false;
             }
+            paused = false;
             // Drain pending messages non-blocking to keep sample_queue_bytes up to date.
             // The device paces the loop via play_buffer's internal pcmdevice.wait(),
             // so we only need try_recv here - no blocking required.
@@ -412,9 +411,7 @@ fn run_playback_inner_loop<C>(
                         sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                     }
                     Ok(PlaybackDeviceMessage::Pause) => {
-                        if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
-                            pcm_paused = true;
-                        }
+                        paused = true;
                     }
                     Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
                         if let Some(elem_uac2_gadget) = &pitch_elem
@@ -491,7 +488,6 @@ fn run_playback_inner_loop<C>(
                 buf_manager,
                 &silence_buf,
             );
-            pcm_paused = false;
             let was_stalled = device_stalled;
             device_stalled = apply_playback_write_result(
                 playback_res,
@@ -565,9 +561,7 @@ fn run_playback_inner_loop<C>(
                     .send(StatusMessage::PlaybackDone)
                     .unwrap_or(());
             }
-            if !pcm_paused {
-                pcmdevice.drain().unwrap_or_default();
-            }
+            pcmdevice.drain().unwrap_or_default();
             break;
         } else {
             // No data available yet. Wait for the next message, but only for half the time
@@ -589,9 +583,7 @@ fn run_playback_inner_loop<C>(
                     sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                 }
                 Ok(PlaybackDeviceMessage::Pause) => {
-                    if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
-                        pcm_paused = true;
-                    }
+                    paused = true;
                 }
                 Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
                     if let Some(elem_uac2_gadget) = &pitch_elem
@@ -604,9 +596,7 @@ fn run_playback_inner_loop<C>(
                     status_channel_inner
                         .send(StatusMessage::PlaybackDone)
                         .unwrap_or(());
-                    if !pcm_paused {
-                        pcmdevice.drain().unwrap_or_default();
-                    }
+                    pcmdevice.drain().unwrap_or_default();
                     break;
                 }
                 Ok(PlaybackDeviceMessage::Stop) => {
@@ -625,7 +615,11 @@ fn run_playback_inner_loop<C>(
                         .is_none_or(|delay| delay < low_delay_threshold);
                     if buffer_low {
                         if !playback_interrupted {
-                            warn!("PB: Playback interrupted, no data available");
+                            if paused {
+                                debug!("PB: Processing paused, playing silence");
+                            } else {
+                                warn!("PB: Playback interrupted, no data available");
+                            }
                             playback_interrupted = true;
                         }
                         let silence_bytes = chunksize * bytes_per_frame;
@@ -650,9 +644,7 @@ fn run_playback_inner_loop<C>(
                             "Playback inner queue disconnected".to_string(),
                         ))
                         .unwrap_or(());
-                    if !pcm_paused {
-                        pcmdevice.drain().unwrap_or_default();
-                    }
+                    pcmdevice.drain().unwrap_or_default();
                     break;
                 }
             }

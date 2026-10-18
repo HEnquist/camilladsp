@@ -124,6 +124,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   written, so it then read a chunk below the target.
 - ALSA, threaded backend: stopping CamillaDSP while the playback device was stalled hung, since
   the playback thread kept waiting to write to the stalled device.
+- ALSA, threaded backend: on a pause, the playback device was paused, and then unpaused right away
+  to write silence while waiting for data. The pause was still recorded, so further pauses were
+  ignored and the device was not drained at the end of the stream. The device now keeps running on
+  silence during a pause, like in the WASAPI, CoreAudio, ASIO and PipeWire backends.
 - ALSA, threaded backend: the playback thread busy-waited for data, which kept one CPU core fully
   loaded at real time priority. That starves everything else scheduled on that core. It now
   blocks until data arrives, or until the device is about to run low.
