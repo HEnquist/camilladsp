@@ -429,11 +429,19 @@ fn playback_loop(
     // level reaches the target, the excess piles up in the queue until the capture
     // blocks too, and the rate control loop has nothing left to control: the buffer is
     // always exactly full whatever the capture clock does. Putting the target in the
-    // middle of the buffer is what a real device is configured to do.
-    let buffer_size = (2 * params.target_level) as f64;
-    // A real device does not start draining until it is started, which happens once
-    // `target_level` frames have been written to it. Until then the frames only pile up
-    // in the buffer, so there is no pacer to run against.
+    // middle of the buffer is what a real device is configured to do. It also needs room
+    // for a chunk on top of the target, see the start level below.
+    let buffer_size = (2 * params.target_level).max(params.target_level + params.chunksize) as f64;
+    // A real device does not start draining until it is started, which happens once it
+    // holds `target_level` frames plus one chunk. The level is measured as a chunk
+    // arrives, before it is written, when the device holds a chunk less than right after
+    // a write, so starting a chunk above the target is what makes it read the target.
+    // Started at the target, it read a chunk below, which is zero with the default target
+    // of one chunk, and any startup jitter that left the device slightly behind pinned
+    // the reading at zero for good. This matches `prime_playback_delay` in the threaded
+    // ALSA backend. Until then the frames only pile up in the buffer, so there is no
+    // pacer to run against.
+    let start_level = params.target_level + params.chunksize;
     let mut pacer: Option<Pacer> = None;
     let mut prefilled = 0;
     let mut drift_ppm = 0;
@@ -536,7 +544,7 @@ fn playback_loop(
                     }
                     None => {
                         prefilled += frames;
-                        if prefilled >= params.target_level {
+                        if prefilled >= start_level {
                             let mut started = Pacer::new(params.samplerate);
                             started.advance(prefilled);
                             started.set_rate(drifted_rate(params.samplerate, drift_ppm));
