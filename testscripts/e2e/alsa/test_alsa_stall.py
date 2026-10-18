@@ -7,7 +7,8 @@ the host playing into CamillaDSP, is the common setup. A gadget playback is rare
 The stalling device here is the Dummy clocked loopback card, see `loopback.py`. Killing
 the `DummyClock` stalls it and starting a new one resumes it. The other end of
 CamillaDSP is on the first loopback card and keeps running all along, the way the
-microphone or the DAC on the other side of a gadget does.
+microphone or the DAC on the other side of a gadget does. The card can lose time on a
+busy machine, and a test that fails after it did is run again, see `attempts`.
 
 Three things can go wrong, and each has a test:
 
@@ -27,6 +28,7 @@ here is the system's, so the level stays where the start or the last restart put
 """
 
 import statistics
+import threading
 import time
 from collections import namedtuple
 
@@ -40,6 +42,7 @@ from .loopback import (
     STALL_PLAYBACK,
     DummyClock,
     hw_ptr,
+    pcm_state,
     set_rate_shift,
     stall_card_present,
 )
@@ -76,6 +79,9 @@ DETECT_TIME = 1.0
 # speed by up to about 0.3 %.
 SPEED_TOLERANCE = 0.003
 SETTLE_TIMEOUT = 30.0
+# How many times a test is run before a stall card that keeps losing time fails it.
+ATTEMPTS = 3
+EXIT_OK = 0
 STALL_CABLES = {"playback": 0, "capture": 1}
 
 
@@ -139,82 +145,189 @@ def median_level(cdsp, seconds=2.0, interval=0.1):
     return statistics.median(values)
 
 
-def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
-    """Start with the stall card on one end, and wait for the level to settle.
+class TickWatch:
+    """Counts the frames the stall card loses against the Dummy that clocks it.
 
-    Returns the clock and the handle. With the playback on the stall card, settled
-    means the level near the target and the speed near 1. A speed far from
-    1 is the controller still recovering from the start, and a stall test that began
-    there would measure that. With the capture on the stall card rate adjust has nothing
-    to act on, see the module docstring, so settled only means the level stopped moving.
+    See the third trap in loopback.py. A lost period makes the card run slow for a
+    moment, which CamillaDSP rightly answers like a slow device, and the level moves.
+    A test that saw that cannot tell it from a bug, so `attempts` starts it over.
+
+    Only stretches where both streams are running and moving forward count, so a
+    stopped clock, a stall, or a device restarted by CamillaDSP is never taken for one.
+    Both positions move a period at a time, and the card's a moment after the clock's,
+    so within a stretch the card can be a period behind without having lost anything.
     """
-    setup = SETUPS[direction]
-    clock = dummy_clock(setup.period)
-    if direction == "playback":
-        feeder()
-        config = alsa_config(
-            playback_device=STALL_PLAYBACK, chunksize=setup.chunksize, devices=RATE_ADJUST
-        )
-    else:
-        config = alsa_config(
-            capture_device=STALL_CAPTURE,
-            playback_device=PLAYBACK,
-            chunksize=setup.chunksize,
-            devices=RATE_ADJUST,
-        )
-    cdsp = start_cdsp(config=config)
-    # GetRateAdjust is a status snapshot, and this keeps it a tenth of a second old at
-    # most rather than a second, as in test_alsa_rate_adjust.py.
-    cdsp.send("SetUpdateInterval", 100)
-    deadline = time.monotonic() + SETTLE_TIMEOUT
-    previous = None
-    while True:
-        level = median_level(cdsp, seconds=1.0)
-        speed = cdsp.send("GetRateAdjust")
+
+    def __init__(self, direction):
+        self.direction = direction
+        self.lost = 0
+        self._behind = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _positions(self):
+        device, stream = (0, "p") if self.direction == "playback" else (1, "c")
+        sub = STALL_CABLES[self.direction]
+        if pcm_state(0, "p", 0, card="Dummy") != "RUNNING":
+            return None
+        if pcm_state(device, stream, sub, card=STALL_CARD) != "RUNNING":
+            return None
+        return hw_ptr(0, "p", 0, card="Dummy"), hw_ptr(device, stream, sub, card=STALL_CARD)
+
+    def _run(self):
+        previous = None
+        while not self._stop.wait(0.25):
+            try:
+                current = self._positions()
+            except OSError:
+                current = None
+            if previous is not None and current is not None:
+                clock = current[0] - previous[0]
+                card = current[1] - previous[1]
+                if clock > 0 and card >= 0:
+                    self._behind += clock - card
+                    period = SETUPS[self.direction].period
+                    self.lost = max(self.lost, self._behind - period)
+                else:
+                    self._behind = 0
+            else:
+                self._behind = 0
+            previous = current
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+
+class Run:
+    """One start of CamillaDSP with the stall card on one end, and what it was given.
+
+    Each attempt of a test gets its own, so a retry starts from nothing.
+    """
+
+    def __init__(self, direction, dummy_clock, start_cdsp, alsa_config, feeder):
+        self.direction = direction
+        self.setup = SETUPS[direction]
+        self._dummy_clock = dummy_clock
+        self.clock = dummy_clock(self.setup.period)
+        self.feed = None
         if direction == "playback":
-            settled = (
-                abs(level - TARGET_LEVEL) < setup.level_tolerance
-                and abs(speed - 1) < SPEED_TOLERANCE
+            self.feed = feeder()
+            config = alsa_config(
+                playback_device=STALL_PLAYBACK,
+                chunksize=self.setup.chunksize,
+                devices=RATE_ADJUST,
             )
         else:
-            settled = previous is not None and abs(level - previous) < setup.period / 2
-        if settled:
-            return clock, cdsp
-        if time.monotonic() > deadline:
-            raise AssertionError(
-                f"not settled after {SETTLE_TIMEOUT} s, level {level}, speed {speed}"
+            config = alsa_config(
+                capture_device=STALL_CAPTURE,
+                playback_device=PLAYBACK,
+                chunksize=self.setup.chunksize,
+                devices=RATE_ADJUST,
             )
-        previous = level
+        self.cdsp = start_cdsp(config=config)
+        # GetRateAdjust is a status snapshot, and this keeps it a tenth of a second old at
+        # most rather than a second, as in test_alsa_rate_adjust.py.
+        self.cdsp.send("SetUpdateInterval", 100)
+
+    def settle(self):
+        """Wait for the level to settle.
+
+        With the playback on the stall card, settled means the level near the target
+        and the speed near 1. A speed far from 1 is the controller still recovering from
+        the start, and a stall test that began there would measure that. With the
+        capture on the stall card rate adjust has nothing to act on, see the module
+        docstring, so settled only means the level stopped moving.
+        """
+        deadline = time.monotonic() + SETTLE_TIMEOUT
+        previous = None
+        while True:
+            level = median_level(self.cdsp, seconds=1.0)
+            speed = self.cdsp.send("GetRateAdjust")
+            if self.direction == "playback":
+                settled = (
+                    abs(level - TARGET_LEVEL) < self.setup.level_tolerance
+                    and abs(speed - 1) < SPEED_TOLERANCE
+                )
+            else:
+                settled = previous is not None and abs(level - previous) < self.setup.period / 2
+            if settled:
+                return
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"not settled after {SETTLE_TIMEOUT} s, level {level}, speed {speed}"
+                )
+            previous = level
+
+    def stop_clock(self):
+        """Stop the clock and wait for the device to stand still."""
+        self.clock.stop()
+        wait_for_hw_ptr(self.direction, moving=False)
+
+    def stall(self):
+        """Stop the clock and wait out the stall."""
+        self.stop_clock()
+        time.sleep(STALL_TIME)
+
+    def resume(self):
+        self.clock = self._dummy_clock(self.setup.period)
+        wait_for_hw_ptr(self.direction, moving=True)
+
+    def close(self):
+        """Stop everything this run started, CamillaDSP before its clock."""
+        if self.cdsp.is_running():
+            self.cdsp.exit()
+        if self.feed is not None:
+            self.feed.stop()
+        self.clock.stop()
 
 
-def stall(direction, clock):
-    """Stop the clock and wait out the stall, with the device seen to stand still."""
-    clock.stop()
-    wait_for_hw_ptr(direction, moving=False)
-    time.sleep(STALL_TIME)
+@pytest.fixture
+def attempts(dummy_clock, start_cdsp, alsa_config, feeder):
+    """Run a test body on a settled `Run`, and start over if the stall card lost time.
+
+    A body that fails while the card kept time fails the test at once. One that fails
+    after the card lost periods says nothing about CamillaDSP, see `TickWatch`, and is
+    run again on a new `Run`, up to `ATTEMPTS` times.
+    """
+
+    def _attempts(direction, body):
+        for attempt in range(1, ATTEMPTS + 1):
+            watch = TickWatch(direction)
+            run = Run(direction, dummy_clock, start_cdsp, alsa_config, feeder)
+            try:
+                run.settle()
+                body(run)
+                return
+            except (AssertionError, TimeoutError):
+                if watch.lost == 0 or attempt == ATTEMPTS:
+                    raise
+                print(f"attempt {attempt}: the stall card lost {watch.lost} frames, again")
+            finally:
+                watch.stop()
+                run.close()
+
+    return _attempts
 
 
-def resume(direction, dummy_clock):
-    dummy_clock(SETUPS[direction].period)
-    wait_for_hw_ptr(direction, moving=True)
-
-
-def test_a_stalled_capture_shows_in_the_state(dummy_clock, start_cdsp, alsa_config, feeder):
+def test_a_stalled_capture_shows_in_the_state(attempts):
     """A capture that stops delivering stalls the processing, and the engine says so.
 
     This is what a GUI shows for a gadget whose host has stopped playing, and it has to
     go back to Running when the host starts again.
     """
-    clock, cdsp = start_settled("capture", dummy_clock, start_cdsp, alsa_config, feeder)
-    clock.stop()
-    cdsp.poll_until("GetState", "Stalled")
-    resume("capture", dummy_clock)
-    cdsp.poll_until("GetState", "Running")
+
+    def body(run):
+        run.stop_clock()
+        run.cdsp.poll_until("GetState", "Stalled")
+        run.resume()
+        run.cdsp.poll_until("GetState", "Running")
+
+    attempts("capture", body)
 
 
-def test_nothing_is_adjusted_during_a_playback_stall(
-    dummy_clock, start_cdsp, alsa_config, feeder
-):
+def test_nothing_is_adjusted_during_a_playback_stall(attempts):
     """Once the playback is called stalled, neither the level nor the speed moves.
 
     Nothing is played during the stall, so there is no level to report and no drift to
@@ -226,33 +339,53 @@ def test_nothing_is_adjusted_during_a_playback_stall(
     answers that like it answers a slow device. That is the right thing to do until it
     is clear that the device is not slow but stopped.
     """
-    clock, cdsp = start_settled("playback", dummy_clock, start_cdsp, alsa_config, feeder)
-    clock.stop()
-    wait_for_hw_ptr("playback", moving=False)
-    time.sleep(DETECT_TIME)
-    level, speed = cdsp.send("GetBufferLevel"), cdsp.send("GetRateAdjust")
-    time.sleep(STALL_TIME)
-    level_after, speed_after = cdsp.send("GetBufferLevel"), cdsp.send("GetRateAdjust")
-    assert (level_after, speed_after) == (level, speed), (
-        f"during the stall the level went from {level} to {level_after}, "
-        f"and the speed from {speed} to {speed_after}"
-    )
+
+    def body(run):
+        run.stop_clock()
+        time.sleep(DETECT_TIME)
+        level, speed = run.cdsp.send("GetBufferLevel"), run.cdsp.send("GetRateAdjust")
+        time.sleep(STALL_TIME)
+        level_after = run.cdsp.send("GetBufferLevel")
+        speed_after = run.cdsp.send("GetRateAdjust")
+        assert (level_after, speed_after) == (level, speed), (
+            f"during the stall the level went from {level} to {level_after}, "
+            f"and the speed from {speed} to {speed_after}"
+        )
+
+    attempts("playback", body)
 
 
 @pytest.mark.parametrize("direction", ["capture", "playback"])
-def test_the_level_comes_back_after_a_stall(
-    dummy_clock, start_cdsp, alsa_config, feeder, direction
-):
+def test_the_level_comes_back_after_a_stall(attempts, direction):
     """After a stall the level starts at the target again, the way a fresh start does.
 
     The first two adjust periods after the resume are skipped, since the level
     published then can still hold readings from before the stall.
     """
-    clock, cdsp = start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder)
-    stall(direction, clock)
-    resume(direction, dummy_clock)
-    time.sleep(2 * ADJUST_INTERVAL)
-    level = median_level(cdsp)
-    assert abs(level - TARGET_LEVEL) < SETUPS[direction].level_tolerance, (
-        f"the level was {level} after the stall, the target is {TARGET_LEVEL}"
-    )
+
+    def body(run):
+        run.stall()
+        run.resume()
+        time.sleep(2 * ADJUST_INTERVAL)
+        level = median_level(run.cdsp)
+        assert abs(level - TARGET_LEVEL) < SETUPS[direction].level_tolerance, (
+            f"the level was {level} after the stall, the target is {TARGET_LEVEL}"
+        )
+
+    attempts(direction, body)
+
+
+@pytest.mark.parametrize("direction", ["capture", "playback"])
+def test_the_process_exits_while_a_device_is_stalled(attempts, direction):
+    """Exit has to get the device threads out of their waits on a device that has stopped.
+
+    A gadget whose host has closed the stream stays stopped until the host comes back,
+    and stopping CamillaDSP must not wait for that.
+    """
+
+    def body(run):
+        run.stop_clock()
+        time.sleep(DETECT_TIME)
+        assert run.cdsp.exit() == EXIT_OK
+
+    attempts(direction, body)
