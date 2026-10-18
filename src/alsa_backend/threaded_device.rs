@@ -1750,6 +1750,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                         // Sample rate measured over the last completed `rate_measure_interval`
                         // window, kept separate from the short update cadence.
                         let mut measured_rate = 0.0;
+                        // The ring buffer fill after the last chunk was taken, so the rate
+                        // watcher can count what arrived rather than what was taken.
+                        let mut prev_ring_bytes = 0;
                         let mut silence_counter = countertimer::SilenceCounter::new(
                             silence_threshold,
                             silence_timeout,
@@ -1877,6 +1880,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                            // What the device delivered since the last chunk, rather than the
+                            // chunk itself. A chunk can only be taken once the period that
+                            // completes it has arrived, so counting chunks times them up to a
+                            // period late, and with a chunk size that is not a whole number of
+                            // periods that put the measured rate up to a period per window off.
+                            let ring_bytes = device_consumer.occupied_len();
+                            let delivered_bytes = capture_bytes + ring_bytes - prev_ring_bytes;
+                            prev_ring_bytes = ring_bytes;
 
                             averager.add_value(capture_bytes);
                             if let Some(capture_status_guard) = capture_status.try_upgradable_read()
@@ -1893,7 +1904,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             }
 
-                            watcher_averager.add_value(capture_bytes);
+                            watcher_averager.add_value(delivered_bytes);
                             let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                             if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
                                 let bytes_per_sec = watcher_averager.average();

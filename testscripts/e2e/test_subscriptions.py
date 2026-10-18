@@ -103,9 +103,14 @@ def test_vu_max_rate_caps_the_push_rate(cdsp):
     """max_rate is a cap, not a cadence: pushes still land on a chunk boundary."""
     client = subscribed(cdsp, "SubscribeVuLevels", {**VU, "max_rate": 10.0})
     # The first gap is measured from the subscribe, not from a previous push, so drop it.
-    times = [when for when, _ in client.recv_events(6)][1:]
-    gaps = [later - earlier for earlier, later in zip(times, times[1:])]
-    assert min(gaps) > 0.1 - CHUNK_S
+    times = [when for when, _ in client.recv_events(11)][1:]
+    # The server spaces the pushes by at least the interval when it sends them,
+    # `src/websocket_server/mod.rs:218`, but these are arrival times. A client that is
+    # held up for a moment reads two pushes back to back, so a single gap can be a few
+    # ms. Only the total over several is steady. Uncapped, the pushes would come once
+    # per chunk, at a fifth of this.
+    elapsed = times[-1] - times[0]
+    assert elapsed > (len(times) - 1) * (0.1 - CHUNK_S)
     client.stop_subscription()
 
 
