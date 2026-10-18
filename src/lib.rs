@@ -34,6 +34,7 @@
 #[macro_use]
 extern crate log;
 
+use camilladsp_schema::protocol::SpectrumSide;
 use parking_lot::{Mutex, RwLock};
 use std::sync::{
     Arc,
@@ -270,7 +271,7 @@ pub(crate) fn push_capture_audio_buffer(
     capture_status: &Arc<RwLock<CaptureStatus>>,
     chunk: &audiochunk::AudioChunk,
 ) {
-    if !spectrum::spectrum_data_requested() {
+    if !spectrum::spectrum_data_requested(SpectrumSide::Capture) {
         return;
     }
     if let Some(mut status) = capture_status.try_write() {
@@ -282,7 +283,7 @@ pub(crate) fn push_playback_audio_buffer(
     playback_status: &Arc<RwLock<PlaybackStatus>>,
     chunk: &audiochunk::AudioChunk,
 ) {
-    if !spectrum::spectrum_data_requested() {
+    if !spectrum::spectrum_data_requested(SpectrumSide::Playback) {
         return;
     }
     if let Some(mut status) = playback_status.try_write() {

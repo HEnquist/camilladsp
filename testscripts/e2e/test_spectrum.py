@@ -85,6 +85,19 @@ def test_the_buffer_is_not_filled_until_asked(cdsp):
     assert spectrum(cdsp)["magnitudes"]
 
 
+def test_each_side_is_filled_only_once_asked(cdsp):
+    """A request for one side starts the fill on that side alone.
+
+    Once capture has data, the first playback request still finds an empty buffer.
+    """
+    cdsp.poll_until("GetState", "Running")
+    assert spectrum(cdsp)["magnitudes"]
+    first = cdsp.send_raw("GetSpectrum", {**REQUEST, "side": "playback"})
+    assert first["result"] == "InvalidRequestError"
+    assert first["message"] == "No audio data available"
+    assert spectrum(cdsp, side="playback")["magnitudes"]
+
+
 def test_capture_spectrum_peaks_at_the_generator_frequency(cdsp):
     frequency, magnitude = peak_of(spectrum(cdsp))
     assert frequency == pytest.approx(TONE_HZ, rel=BIN_TOLERANCE)

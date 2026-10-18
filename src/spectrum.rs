@@ -12,31 +12,41 @@ use num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
 
 use crate::audiochunk::AudioChunk;
+use camilladsp_schema::protocol::SpectrumSide;
 
 /// Maximum number of frames stored per channel in [`AudioRingBuffer`].
 pub const RING_BUFFER_CAPACITY: usize = 262144;
 
-static SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CAPTURE_SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
+static PLAYBACK_SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Record that a client has asked for spectrum data, so the audio threads start
-/// filling the ring buffer.
-///
-/// Filling costs a pass over every chunk on both the capture and playback
-/// threads, writing through a buffer of [`RING_BUFFER_CAPACITY`] frames per
-/// channel, so it is skipped until something actually wants the data. The flag
-/// is sticky: one-shot spectrum reads need history that is already there, so it
-/// cannot be turned off again when a subscription ends without breaking them.
-///
-/// The first request after startup therefore reports insufficient data until
-/// enough frames have accumulated, the same as a request made immediately after
-/// the process starts.
-pub fn request_spectrum_data() {
-    SPECTRUM_REQUESTED.store(true, Ordering::Relaxed);
+fn requested_flag(side: SpectrumSide) -> &'static AtomicBool {
+    match side {
+        SpectrumSide::Capture => &CAPTURE_SPECTRUM_REQUESTED,
+        SpectrumSide::Playback => &PLAYBACK_SPECTRUM_REQUESTED,
+    }
 }
 
-/// Whether the audio threads should be filling the ring buffer.
-pub fn spectrum_data_requested() -> bool {
-    SPECTRUM_REQUESTED.load(Ordering::Relaxed)
+/// Record that a client has asked for spectrum data on `side`, so the audio
+/// thread of that side starts filling its ring buffer.
+///
+/// Filling costs a pass over every chunk, writing through a buffer of
+/// [`RING_BUFFER_CAPACITY`] frames per channel, so it is skipped until something
+/// actually wants the data, and each side is only filled once something has asked
+/// for that side. The flag is sticky: one-shot spectrum reads need history that is
+/// already there, so it cannot be turned off again when a subscription ends
+/// without breaking them.
+///
+/// The first request for a side therefore reports insufficient data until enough
+/// frames have accumulated, the same as a request made immediately after the
+/// process starts.
+pub fn request_spectrum_data(side: SpectrumSide) {
+    requested_flag(side).store(true, Ordering::Relaxed);
+}
+
+/// Whether the audio thread of `side` should be filling its ring buffer.
+pub fn spectrum_data_requested(side: SpectrumSide) -> bool {
+    requested_flag(side).load(Ordering::Relaxed)
 }
 
 /// Circular ring buffer storing the last [`RING_BUFFER_CAPACITY`] frames per channel.

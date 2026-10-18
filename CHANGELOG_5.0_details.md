@@ -219,11 +219,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   and computes filter coefficients exactly like a normal build, and rounds only once when the
   finished coefficients enter the processing path. This noticeably improves f32 accuracy for
   low-frequency biquads.
-- The audio buffer used for spectrum analysis is now only filled after a client has asked for
-  spectrum data. It was previously written on every chunk, on both the capture and playback
-  threads, whether or not anything was reading it. Setups that never use the spectrum no longer
-  pay for it. The first spectrum request after startup can report insufficient data until enough
-  audio has accumulated, typically well under a tenth of a second.
+- The audio buffers used for spectrum analysis are now only filled after a client has asked for
+  spectrum data, and only on the side that was asked for.
+  They were previously written on every chunk, on both the capture and playback threads,
+  whether or not anything was reading them.
+  Setups that never use the spectrum no longer pay for it,
+  and a client that only looks at one side does not pay for the other.
+  The first spectrum request for a side can report insufficient data until enough audio has
+  accumulated, typically well under a tenth of a second.
 - Spectrum analysis is done in 32-bit float, which halves the memory used by its audio buffer.
   The numerical noise floor stays far below the displayed range.
 - The pre-built Linux binaries now need glibc 2.34 or newer, meaning Raspberry Pi OS Bookworm
