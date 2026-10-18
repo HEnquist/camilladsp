@@ -21,6 +21,7 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::countertimer::BufferEstimate;
 use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -1119,7 +1120,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 
                 let status_channel_inner = status_channel.clone();
                 let buffer_fill = Arc::new(Mutex::new(
-                    countertimer::DeviceBufferEstimator::new(samplerate),
+                    countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_inner = buffer_fill.clone();
 
@@ -1251,64 +1252,33 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         );
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
 
-                        // Set while the capture has paused or stalled the stream.
-                        let mut paused = false;
-                        // The inner thread updates the estimate after every write, about once
-                        // per chunk. A much older estimate means the device has stopped taking
-                        // data, before the inner thread has waited long enough to call it a stall.
-                        // Chunks then pile up in the channel, and the level would read far too high.
-                        let max_estimate_age =
-                            Duration::from_secs_f64(2.0 * chunksize as f64 / samplerate as f64)
-                                .max(Duration::from_millis(20));
-
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    // Skip the sample when the callback holds the lock,
-                                    // a 0 would drag the average down.
-                                    let estimate = buffer_fill
-                                        .try_lock()
-                                        .map(|b| (b.valid_estimate(), b.age()));
-                                    if paused {
-                                        // The first chunk after a pause. The estimate decayed while
-                                        // no chunks arrived and the adjust period has long expired,
-                                        // so start a new period and leave this sample out.
-                                        paused = false;
-                                        rate_reporter.restart();
-                                    } else if let Some((None, _)) = estimate {
-                                        // Playback is stalled, the level is not useful to the rate reporter.
-                                        rate_reporter.restart();
-                                        // Drop the chunk, like the non-threaded backend drains its
-                                        // channel while stalled. Waiting for room in the full ring
-                                        // buffer would hold up the whole pipeline, and the backlog
-                                        // would then be played after the device resumes.
-                                        continue;
-                                    } else if let Some((Some(_), age)) = estimate
-                                        && age > max_estimate_age
-                                    {
-                                        // The device has not taken data for a while, and the level
-                                        // would not be useful to the rate reporter.
-                                        xtrace!("Buffer estimate is {age:?} old, skip buffer level sample.");
-                                    } else if let Some((Some(estimated_buffer_fill), _)) = estimate {
-                                        let estimated_buffer_fill = estimated_buffer_fill as f64;
-                                        let buffer_level = estimated_buffer_fill
-                                            + (channel.len() * chunksize) as f64;
-                                        if let Some(speed) =
-                                            rate_reporter.update(buffer_level, &playback_status)
-                                        {
-                                            if pitch_supported {
-                                                let _ = send_playback_device_message(
-                                                    &tx_dev,
-                                                    PlaybackDeviceMessage::SetPitch(speed),
-                                                );
-                                            } else {
-                                                status_channel
-                                                    .send(StatusMessage::SetSpeed(speed))
-                                                    .unwrap_or(());
-                                            }
+                                    let estimate =
+                                        buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                    if let Some(speed) = rate_reporter.update_from_estimate(
+                                        estimate,
+                                        channel.len() * chunksize,
+                                        &playback_status,
+                                    ) {
+                                        if pitch_supported {
+                                            let _ = send_playback_device_message(
+                                                &tx_dev,
+                                                PlaybackDeviceMessage::SetPitch(speed),
+                                            );
+                                        } else {
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap_or(());
                                         }
-                                    } else {
-                                        xtrace!("Buffer estimator busy, skip buffer level sample.");
+                                    }
+                                    if estimate == Some(BufferEstimate::Invalid) {
+                                        // Playback is stalled. Drop the chunk, like the non-threaded
+                                        // backend drains its channel while stalled. Waiting for room
+                                        // in the full ring buffer would hold up the whole pipeline,
+                                        // and the backlog would then be played after the device resumes.
+                                        continue;
                                     }
 
                                     chunk.update_stats(&mut chunk_stats);
@@ -1342,7 +1312,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
-                                    paused = true;
+                                    rate_reporter.interrupt();
                                     let _ = send_playback_device_message(
                                         &tx_dev,
                                         PlaybackDeviceMessage::Pause,

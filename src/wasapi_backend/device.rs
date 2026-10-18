@@ -840,7 +840,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_disconnectreason, rx_disconnectreason) = unbounded();
                 let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(
-                    samplerate,
+                    samplerate, chunksize,
                 )));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut chunk_stats = ChunkStats {
@@ -977,22 +977,15 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            // Skip the sample when the callback holds the lock,
-                            // a 0 would drag the average down.
-                            if let Some(estimated_buffer_fill) =
-                                buffer_fill.try_lock().map(|b| b.estimate() as f64)
-                            {
-                                let buffer_level =
-                                    estimated_buffer_fill + (channel.len() * chunksize) as f64;
-                                if let Some(speed) =
-                                    rate_reporter.update(buffer_level, &playback_status)
-                                {
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                }
-                            } else {
-                                xtrace!("Buffer estimator busy, skip buffer level sample.");
+                            let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            if let Some(speed) = rate_reporter.update_from_estimate(
+                                estimate,
+                                channel.len() * chunksize,
+                                &playback_status,
+                            ) {
+                                status_channel
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
                             }
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_playback_audio_buffer(&playback_status, &chunk);
@@ -1025,6 +1018,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                         }
                         Ok(AudioMessage::Pause) => {
                             trace!("Playback, pause message received.");
+                            rate_reporter.interrupt();
                         }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel

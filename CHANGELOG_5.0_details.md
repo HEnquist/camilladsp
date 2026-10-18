@@ -107,9 +107,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - ALSA, threaded backend: while the playback device was stalled, the estimated buffer level decayed
   to zero, and rate adjust wound up to its limit. Chunks also kept queueing for the stalled device,
   holding up capture and processing, and were all played after it resumed, many times the target
-  level. Rate adjust now ignores the level while stalled, and while the device has not taken data
-  for two chunks, which covers the time it takes to detect the stall. Chunks are dropped while
-  stalled, like in the default backend.
+  level. Rate adjust now ignores the level while stalled. Chunks are dropped while stalled, like in
+  the default backend.
+- Rate adjust ignores the playback buffer level when the device has not updated it for more than
+  twice the usual time, and at least two chunks. This happens when a device stops taking data,
+  and the level then decays to zero, which wound up rate adjust. After that, and after a pause, a
+  new adjust period starts. Before, the first level after a pause went into an adjust period that
+  had expired long ago, together with the levels from before the pause.
 - ALSA, threaded backend: a stalled capture did not show as `Stalled` in the processing state, and
   after it resumed the first buffer level sample was zero, which sent rate adjust to its limit.
   Playback also resumed with only the silence that was left in the device, often a chunk or more
