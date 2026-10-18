@@ -197,6 +197,7 @@ alone, and the two null sinks stay in the graph until the daemon restarts.
 - `alsa/` — the ALSA suite, see "ALSA on real devices" above
 - `coreaudio/` — the CoreAudio suite, see "CoreAudio on BlackHole" above
 - `pipewire/` — the PipeWire suite, see "PipeWire on null sinks" above
+- `wasapi/`: the WASAPI and ASIO suite on VB-Cable, see `wasapi/cable.py`
 - `pytest.ini` — the global timeout, which makes every test a hang check, and the markers
 
 ## Writing more
