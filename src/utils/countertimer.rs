@@ -295,15 +295,22 @@ impl Default for TimeAverage {
 }
 
 /// Check if a value stays within a given range.
+///
+/// Only values that are off in the same direction count as in a row.
+/// A measured rate is quantised to whole chunks per window, so a window that got an extra
+/// chunk is followed by one that got one fewer, and that noise alternates in sign.
+/// A real change is off the same way every time.
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
     count_limit: usize,
     count: usize,
+    above: bool,
 }
 
 impl ValueWatcher {
-    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`.
+    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`,
+    /// all on the same side.
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
         let min_value = target_value / (1.0 + max_rel_diff);
         let max_value = target_value * (1.0 + max_rel_diff);
@@ -312,6 +319,7 @@ impl ValueWatcher {
             max_value,
             count_limit,
             count: 0,
+            above: false,
         }
     }
 
@@ -320,12 +328,18 @@ impl ValueWatcher {
     }
 
     pub fn check_value(&mut self, value: f32) -> bool {
-        if value < self.min_value || value > self.max_value {
-            self.count += 1;
+        let above = value > self.max_value;
+        if above || value < self.min_value {
+            if self.count > 0 && above == self.above {
+                self.count += 1;
+            } else {
+                self.count = 1;
+                self.above = above;
+            }
         } else {
             self.count = 0;
         }
-        self.count > self.count_limit
+        self.count >= self.count_limit
     }
 }
 
@@ -738,19 +752,49 @@ mod tests {
             let val = 48000.0 * (1.0 - 0.004 * n as f32);
             assert!(!watcher.check_value(val));
         }
-        for _ in 0..limit_nbr {
+        for _ in 0..limit_nbr - 1 {
             assert!(!watcher.check_value(44100.0));
         }
         for _ in 0..5 {
             assert!(watcher.check_value(44100.0));
         }
         assert!(!watcher.check_value(48000.0));
-        for _ in 0..limit_nbr {
+        for _ in 0..limit_nbr - 1 {
             assert!(!watcher.check_value(88200.0));
         }
         for _ in 0..5 {
             assert!(watcher.check_value(88200.0));
         }
+    }
+
+    #[test]
+    fn test_valuewatcher_ignores_alternating_values() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        for _ in 0..20 {
+            assert!(!watcher.check_value(48000.0 * 1.1));
+            assert!(!watcher.check_value(48000.0 * 0.9));
+        }
+    }
+
+    #[test]
+    fn test_valuewatcher_restarts_count_on_direction_change() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        assert!(!watcher.check_value(52000.0));
+        assert!(!watcher.check_value(52000.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0));
+    }
+
+    #[test]
+    fn test_valuewatcher_reset() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        watcher.reset();
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0));
     }
 
     #[test]

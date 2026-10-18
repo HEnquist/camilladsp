@@ -127,6 +127,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - ALSA, threaded backend: the playback thread busy-waited for data, which kept one CPU core fully
   loaded at real time priority. That starves everything else scheduled on that core. It now
   blocks until data arrives, or until the device is about to run low.
+- `stop_on_rate_change` could stop processing on its own with a short `rate_measure_interval_s`.
+  Data arrives a chunk at a time, so each measurement is off by up to a chunk, about 10 % for
+  0.2 s windows with 1024-frame chunks at 48 kHz. That noise alternates in sign, but measurements
+  outside the limit in either direction counted as in a row. Now only measurements off in the same
+  direction count. It also stopped after four measurements instead of the documented three.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,

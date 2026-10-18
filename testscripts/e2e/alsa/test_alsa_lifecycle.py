@@ -244,16 +244,16 @@ def test_a_capture_clock_that_jumps_stops_the_session(start_cdsp, alsa_config, f
     watcher allows, so with `stop_on_rate_change` set the engine has to stop and report
     the rate it measured. On real hardware this is an S/PDIF source changing rate.
 
-    The reported rate is one short measurement window, 0.5 s here, and that holds only
-    about 23 chunks, so it is quantised by about a chunk and lands a few percent either
+    The reported rate is one short measurement window, 0.2 s here, and that holds only
+    about 9 chunks, so it is quantised by about a chunk and lands up to 10 % either
     side of the true rate. What it has to be is clearly on the far side of the
-    threshold, not close to the shifted rate. A shorter window stops the session on its
-    own now and then: the watcher fires after four windows in a row outside the limit,
-    and the hiccups of a start in a VM can fill four windows of 0.2 s.
+    threshold, not close to the shifted rate. The short window also checks that the
+    watcher ignores that noise, which alternates in sign, and does not stop the
+    session on its own.
     """
     feeder()
     config = alsa_config(
-        devices={"stop_on_rate_change": True, "rate_measure_interval_s": 0.5}
+        devices={"stop_on_rate_change": True, "rate_measure_interval_s": 0.2}
     )
     cdsp = start_cdsp(config=config, extra_args=["--wait"])
     wait_for_peak(cdsp, "GetCaptureSignalPeak")
