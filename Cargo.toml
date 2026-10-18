@@ -34,7 +34,7 @@ members = ["camilladsp-schema"]
 # Both crates are released in lockstep with the same version.
 # The exact pin on camilladsp-schema in the dependencies must be bumped along with this.
 [workspace.package]
-version = "5.0.0-beta.1"
+version = "5.0.0-beta.2"
 
 [features]
 threaded-alsa = []
@@ -87,7 +87,7 @@ windows = {version = "0.62.0", features = ["Win32_System_Threading", "Win32_Syst
 azo = "0.1.0"
 
 [dependencies]
-camilladsp-schema = { version = "=5.0.0-beta.1", path = "camilladsp-schema" }
+camilladsp-schema = { version = "=5.0.0-beta.2", path = "camilladsp-schema" }
 serde ={ version = "1.0", features = ["derive", "rc"] }
 yaml_serde = "0.10.3"
 serde_json = "1.0"
