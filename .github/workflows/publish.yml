@@ -299,8 +299,12 @@ jobs:
 
       # Follows the links from the readme, so a new document only needs to be linked there.
       # Fails on a broken link.
+      # The readme in the zip gets a note with the release tag, or the commit for a push build.
       - name: Build documentation zip
-        run: python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION:-commit ${GITHUB_SHA::7}}"
+          python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip --version "$VERSION"
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v6

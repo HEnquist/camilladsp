@@ -9,8 +9,11 @@ so the links between the documents keep working.
 A link to a file that does not exist is an error, which makes this double as a link check.
 Instruction files and config folders of AI coding tools are never included,
 even if they are linked.
+With --version, a note naming the version is added below the title of the start file,
+so the unpacked docs tell which release they belong to.
+The start file in the repo is not changed.
 
-Usage: make_docs_zip.py README.md camilladsp-docs.zip
+Usage: make_docs_zip.py README.md camilladsp-docs.zip [--version v5.0.0]
 """
 
 import argparse
@@ -84,20 +87,35 @@ def collect(start):
     return root, sorted(found), errors
 
 
+def add_version_note(text, version):
+    """Insert the version note below the first-line title, or at the top if there is none."""
+    note = f"> Documentation for CamillaDSP {version}.\n\n"
+    title, _, rest = text.partition("\n")
+    if title.startswith("# "):
+        return f"{title}\n\n{note}{rest}"
+    return note + text
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("start", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--version", help="version to note at the top of the start file")
     args = parser.parse_args()
 
     root, files, errors = collect(args.start)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         sys.exit(1)
+    start = args.start.resolve()
     with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in files:
             name = path.relative_to(root).as_posix()
-            archive.write(path, f"camilladsp-docs/{name}")
+            if args.version and path == start:
+                text = add_version_note(path.read_text(encoding="utf-8"), args.version)
+                archive.writestr(f"camilladsp-docs/{name}", text)
+            else:
+                archive.write(path, f"camilladsp-docs/{name}")
             print(name)
 
 
