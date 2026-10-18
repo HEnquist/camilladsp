@@ -23,8 +23,7 @@ Rate adjust writes the capture cable's rate shift, as in test_alsa_rate_adjust.p
 the stall card that control does nothing, since a cable on a card timer moves one
 period per tick whatever the shift. So with the capture on the stall card the
 controller runs and reports, but cannot move the level. Nothing drifts, every clock
-here is the system's, so the level stays where the start put it, and the capture
-tests compare against that rather than against the target.
+here is the system's, so the level stays where the start or the last restart put it.
 """
 
 import statistics
@@ -48,17 +47,17 @@ from .loopback import (
 pytestmark = pytest.mark.alsa
 
 # The chunk size for each direction, the period CamillaDSP picks for it, see
-# `DummyClock`, and how far the level may move over a stall.
+# `DummyClock`, and how far from the target the level may come back after a stall.
 Setup = namedtuple("Setup", ["chunksize", "period", "level_tolerance"])
 SETUPS = {
     # A large chunk gives a large device buffer, 8192 frames. A restart lands up to a
     # chunk from the target, depending on where in a chunk it falls, while zeros left
-    # behind by a stall put the level more than 6000 frames too high.
+    # behind by a stall put the level more than 4000 frames too high.
     "playback": Setup(1536, 1024, 1536),
-    # The playback keeps running here, so its level only shifts by a few hundred frames
-    # over a capture stall, unless the backend resumes without topping the device up
-    # to the target, which leaves it a chunk low.
-    "capture": Setup(1024, 512, 512),
+    # A resume after a capture stall restarts the playback, and in the VM that lands
+    # within about 450 frames of the target. A backend that resumes without topping
+    # the device up to the target comes back most of a chunk low.
+    "capture": Setup(1024, 512, 600),
 }
 TARGET_LEVEL = 2048
 ADJUST_INTERVAL = 0.5
@@ -143,8 +142,8 @@ def median_level(cdsp, seconds=2.0, interval=0.1):
 def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
     """Start with the stall card on one end, and wait for the level to settle.
 
-    Returns the clock, the handle and the settled level. With the playback on the stall
-    card, settled means the level near the target and the speed near 1. A speed far from
+    Returns the clock and the handle. With the playback on the stall card, settled
+    means the level near the target and the speed near 1. A speed far from
     1 is the controller still recovering from the start, and a stall test that began
     there would measure that. With the capture on the stall card rate adjust has nothing
     to act on, see the module docstring, so settled only means the level stopped moving.
@@ -180,7 +179,7 @@ def start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder):
         else:
             settled = previous is not None and abs(level - previous) < setup.period / 2
         if settled:
-            return clock, cdsp, level
+            return clock, cdsp
         if time.monotonic() > deadline:
             raise AssertionError(
                 f"not settled after {SETTLE_TIMEOUT} s, level {level}, speed {speed}"
@@ -206,7 +205,7 @@ def test_a_stalled_capture_shows_in_the_state(dummy_clock, start_cdsp, alsa_conf
     This is what a GUI shows for a gadget whose host has stopped playing, and it has to
     go back to Running when the host starts again.
     """
-    clock, cdsp, _ = start_settled("capture", dummy_clock, start_cdsp, alsa_config, feeder)
+    clock, cdsp = start_settled("capture", dummy_clock, start_cdsp, alsa_config, feeder)
     clock.stop()
     cdsp.poll_until("GetState", "Stalled")
     resume("capture", dummy_clock)
@@ -227,7 +226,7 @@ def test_nothing_is_adjusted_during_a_playback_stall(
     answers that like it answers a slow device. That is the right thing to do until it
     is clear that the device is not slow but stopped.
     """
-    clock, cdsp, _ = start_settled("playback", dummy_clock, start_cdsp, alsa_config, feeder)
+    clock, cdsp = start_settled("playback", dummy_clock, start_cdsp, alsa_config, feeder)
     clock.stop()
     wait_for_hw_ptr("playback", moving=False)
     time.sleep(DETECT_TIME)
@@ -244,18 +243,16 @@ def test_nothing_is_adjusted_during_a_playback_stall(
 def test_the_level_comes_back_after_a_stall(
     dummy_clock, start_cdsp, alsa_config, feeder, direction
 ):
-    """After a stall the level starts where it was before it, the way a fresh start does.
+    """After a stall the level starts at the target again, the way a fresh start does.
 
     The first two adjust periods after the resume are skipped, since the level
     published then can still hold readings from before the stall.
     """
-    clock, cdsp, settled = start_settled(
-        direction, dummy_clock, start_cdsp, alsa_config, feeder
-    )
+    clock, cdsp = start_settled(direction, dummy_clock, start_cdsp, alsa_config, feeder)
     stall(direction, clock)
     resume(direction, dummy_clock)
     time.sleep(2 * ADJUST_INTERVAL)
     level = median_level(cdsp)
-    assert abs(level - settled) < SETUPS[direction].level_tolerance, (
-        f"the level was {level} after the stall, {settled} before it"
+    assert abs(level - TARGET_LEVEL) < SETUPS[direction].level_tolerance, (
+        f"the level was {level} after the stall, the target is {TARGET_LEVEL}"
     )

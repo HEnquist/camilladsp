@@ -34,13 +34,18 @@ on the card stops moving, without an error and without leaving the running state
 is what a UAC2 gadget looks like when the host closes its stream. CamillaDSP plays into
 `STALL_PLAYBACK` on cable 0 to stall a playback, and captures from `STALL_CAPTURE` on
 cable 1 to stall a capture. Nothing plays into cable 1, so the capture records silence,
-at the pace of the clock. Two traps come with it:
+at the pace of the clock. Three traps come with it:
 
 - The loopback's period has to take exactly as long as the Dummy's, or every tick is
   rejected as the wrong resolution and the stream is stopped with an xrun. So the
   Dummy runs with the period size CamillaDSP is going to pick, see `DummyClock`.
 - aplay on a stalled cable fails with EIO after its 100 ms write timeout, so it is no
   use as the far end there. CamillaDSP waits with a shorter timeout and sees the stall.
+- The ticks reach the loopback through kernel work, which runs at normal priority, and
+  the loopback moves one period per callback however many ticks it was late for. A
+  callback that runs late loses periods for good, and the card then runs slow. A real
+  time thread that keeps a core busy can hold that work back, and once stopped the card
+  completely, which is how the threaded backend's busy wait was found.
 """
 
 import os
