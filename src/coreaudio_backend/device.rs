@@ -545,7 +545,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
-                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate)));
+                let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate, chunksize)));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut chunk_stats = ChunkStats {
                     rms: vec![0.0; channels],
@@ -722,14 +722,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            // Skip the sample when the callback holds the lock, a 0 would drag the average down.
-                            if let Some(estimated_buffer_fill) = buffer_fill.try_lock().map(|b| b.estimate() as f64) {
-                                let buffer_level = estimated_buffer_fill + (channel.len() * chunksize) as f64;
-                                if let Some(speed) = rate_reporter.update(buffer_level, &playback_status) {
-                                    status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
-                                }
-                            } else {
-                                xtrace!("Buffer estimator busy, skip buffer level sample.");
+                            let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            if let Some(speed) = rate_reporter.update_from_estimate(estimate, channel.len() * chunksize, &playback_status) {
+                                status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                             }
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_playback_audio_buffer(&playback_status, &chunk);
@@ -763,6 +758,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                         Ok(AudioMessage::Pause) => {
                             trace!("Pause message received.");
+                            rate_reporter.interrupt();
                         }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel

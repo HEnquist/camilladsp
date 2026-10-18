@@ -1126,8 +1126,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `rate_measure_interval_s` setting is used for adjusting the measurement period.
   A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
   The default is 1.0 seconds.
-  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
+  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate,
+  all in the same direction.
   The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
+  Data arrives a chunk at a time, so a single measurement can be off by about one chunk per interval.
+  That noise alternates, one measurement high and the next low, while a real rate change is off the same way every time.
+  Measurements that alternate between too high and too low therefore never stop the processing,
+  even when each of them is more than 4% off.
 
 * `volume_ramp_time_ms` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.

@@ -225,14 +225,21 @@ impl PlaybackBufferManager {
     }
 
     /// Sleep until the target level worth of time has passed since `since`.
-    pub fn sleep_for_target_delay(&self, millis_per_frame: f32, since: Instant) {
-        let align_target_micros = self.target_level as f32 * millis_per_frame * 1000.0;
-        let target = Duration::from_micros(align_target_micros as u64);
+    /// The `queued_frames` already waiting to be written count towards the target,
+    /// so a backlog shortens the sleep instead of adding to the level.
+    pub fn sleep_for_target_delay(
+        &self,
+        millis_per_frame: f32,
+        since: Instant,
+        queued_frames: Frames,
+    ) {
+        let missing_frames = (self.target_level - queued_frames).max(0);
+        let target = Duration::from_secs_f32(missing_frames as f32 * millis_per_frame / 1000.0);
         let elapsed = since.elapsed();
         let remaining = target.saturating_sub(elapsed);
         trace!(
-            "Sleeping for {} frames = {:?} target, {:?} already passed, sleeping {:?}",
-            self.target_level, target, elapsed, remaining
+            "Sleeping for {} of {} frames = {:?} target, {:?} already passed, sleeping {:?}",
+            missing_frames, self.target_level, target, elapsed, remaining
         );
         thread::sleep(remaining);
     }

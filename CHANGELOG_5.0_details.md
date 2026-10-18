@@ -97,6 +97,45 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   and the delayed start could then fail with EPIPE, which stopped processing.
 - ALSA, threaded backend: a capture read that returned nothing after recovering from an overrun
   was handled as a stall, which paused playback. Capture now just reads again.
+- ALSA: playback that resumed after the device stalled, for example a UAC2 gadget whose host
+  closed and reopened the stream, started with the zeros written while stalled still in the device
+  buffer. The level then started near the full buffer size, and rate adjust slowly drained it
+  towards an underrun. The device is now restarted on resume, and starts at the target level.
+- ALSA: restarting playback after an underrun waited the whole target delay on top of the time
+  spent preparing the device and the chunks already queued, so it started above the target level.
+  Both are now subtracted from the wait.
+- ALSA, threaded backend: while the playback device was stalled, the estimated buffer level decayed
+  to zero, and rate adjust wound up to its limit. Chunks also kept queueing for the stalled device,
+  holding up capture and processing, and were all played after it resumed, many times the target
+  level. Rate adjust now ignores the level while stalled. Chunks are dropped while stalled, like in
+  the default backend.
+- Rate adjust ignores the playback buffer level when the device has not updated it for more than
+  twice the usual time, and at least two chunks. This happens when a device stops taking data,
+  and the level then decays to zero, which wound up rate adjust. After that, and after a pause, a
+  new adjust period starts. Before, the first level after a pause went into an adjust period that
+  had expired long ago, together with the levels from before the pause.
+- WASAPI: a stalled capture did not show as `Stalled` in the processing state.
+- ALSA, threaded backend: a stalled capture did not show as `Stalled` in the processing state, and
+  after it resumed the first buffer level sample was zero, which sent rate adjust to its limit.
+  Playback also resumed with only the silence that was left in the device, often a chunk or more
+  below the target level. It is now topped up to the target.
+- ALSA, threaded backend: restarting playback after an underrun primed the device to the target
+  level counting the chunk about to be written. The level is measured just before a chunk is
+  written, so it then read a chunk below the target.
+- ALSA, threaded backend: stopping CamillaDSP while the playback device was stalled hung, since
+  the playback thread kept waiting to write to the stalled device.
+- ALSA, threaded backend: on a pause, the playback device was paused, and then unpaused right away
+  to write silence while waiting for data. The pause was still recorded, so further pauses were
+  ignored and the device was not drained at the end of the stream. The device now keeps running on
+  silence during a pause, like in the WASAPI, CoreAudio, ASIO and PipeWire backends.
+- ALSA, threaded backend: the playback thread busy-waited for data, which kept one CPU core fully
+  loaded at real time priority. That starves everything else scheduled on that core. It now
+  blocks until data arrives, or until the device is about to run low.
+- `stop_on_rate_change` could stop processing on its own with a short `rate_measure_interval_s`.
+  Data arrives a chunk at a time, so each measurement is off by up to a chunk, about 10 % for
+  0.2 s windows with 1024-frame chunks at 48 kHz. That noise alternates in sign, but measurements
+  outside the limit in either direction counted as in a row. Now only measurements off in the same
+  direction count. It also stopped after four measurements instead of the documented three.
 - PipeWire: losing the connection to the processing thread is now reported as a playback error
   rather than as a normal end of playback, like the other backends do.
 - WASAPI exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form,

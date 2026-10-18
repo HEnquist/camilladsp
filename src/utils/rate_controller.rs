@@ -17,7 +17,7 @@
 use parking_lot::RwLock;
 
 use crate::PlaybackStatus;
-use crate::utils::countertimer::{Averager, Stopwatch};
+use crate::utils::countertimer::{Averager, BufferEstimate, Stopwatch};
 
 /// PI controller that adjusts the resampling ratio to keep the capture buffer at a target level.
 pub struct PIRateController {
@@ -125,12 +125,18 @@ impl PIRateController {
 /// the average level as the playback buffer level, and returns the capture speed the
 /// [`PIRateController`] asks for. When rate adjust is disabled it does nothing, and no buffer
 /// level is published.
+///
+/// After an interruption, such as a pause or a device that stopped taking data, the first level
+/// is left out, and a new adjust period starts there. The levels collected before the
+/// interruption are old by then, and the first one after it is measured while the buffer
+/// is still filling up.
 pub struct RateAdjustReporter {
     controller: PIRateController,
     averager: Averager,
     timer: Stopwatch,
     period_millis: u64,
     enabled: bool,
+    interrupted: bool,
 }
 
 impl RateAdjustReporter {
@@ -145,6 +151,43 @@ impl RateAdjustReporter {
             timer: Stopwatch::new(),
             period_millis: (1000.0 * adjust_period) as u64,
             enabled: enabled && adjust_period > 0.0,
+            interrupted: false,
+        }
+    }
+
+    /// The stream was interrupted, start a new adjust period at the next level.
+    pub fn interrupt(&mut self) {
+        self.interrupted = true;
+    }
+
+    /// Add the level from a device buffer estimate, plus the `queued_frames` waiting in front
+    /// of the device. An estimate that is `None`, because the device side held the lock,
+    /// is skipped. A stale or invalid estimate counts as an interruption.
+    /// Returns the new capture speed once per adjust period.
+    pub fn update_from_estimate(
+        &mut self,
+        estimate: Option<BufferEstimate>,
+        queued_frames: usize,
+        playback_status: &RwLock<PlaybackStatus>,
+    ) -> Option<f64> {
+        match estimate {
+            Some(BufferEstimate::Level(frames)) => {
+                self.update((frames + queued_frames) as f64, playback_status)
+            }
+            Some(BufferEstimate::Stale) => {
+                xtrace!("Buffer estimate is stale, skip buffer level sample.");
+                self.interrupt();
+                None
+            }
+            Some(BufferEstimate::Invalid) => {
+                xtrace!("Buffer estimate is invalid, skip buffer level sample.");
+                self.interrupt();
+                None
+            }
+            None => {
+                xtrace!("Buffer estimator busy, skip buffer level sample.");
+                None
+            }
         }
     }
 
@@ -161,6 +204,11 @@ impl RateAdjustReporter {
         playback_status: &RwLock<PlaybackStatus>,
     ) -> Option<f64> {
         if !self.enabled {
+            return None;
+        }
+        if self.interrupted {
+            self.interrupted = false;
+            self.restart();
             return None;
         }
         self.averager.add_value(buffer_level);

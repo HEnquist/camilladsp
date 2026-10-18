@@ -30,6 +30,7 @@ Bugfixes:
 - PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.
 - File playback writes correct wav header sizes.
 - Alsa: a capture overrun no longer stops processing when capture and playback share a USB device.
+- Alsa: playback resumes at the target level after the device stalls, such as a UAC2 gadget.
 - Various smaller fixes, see the [detailed changelog](CHANGELOG_5.0_details.md#bugfixes).
 
 Config changes (breaking):

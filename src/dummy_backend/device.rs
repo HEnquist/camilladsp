@@ -572,6 +572,7 @@ fn playback_loop(
             Ok(AudioMessage::Pause) => {
                 params.control.count_pause();
                 trace!("Pause message received");
+                rate_reporter.interrupt();
             }
             Ok(AudioMessage::EndOfStream) => {
                 break StatusMessage::PlaybackDone;
