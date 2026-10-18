@@ -78,12 +78,39 @@ See also [Device names](#device-names) for more details on how to build the devi
 In loopback mode the audio is captured from a Playback device.
 This allows capturing the sound that a card is playing.
 In this mode, a spare unused sound card is used (note that this card can be either real or virtual).
-The built in audio of the computer should work. The quality of the card doesn't matter,
+The quality of the card doesn't matter,
 since the audio data will not be routed through it. This requires using [Shared mode](#shared-mode).
 
 Open the Sound Control Panel app, and locate the unused card in the "Playback" tab.
 Set it as default device. See [Device names](#device-names) for how to write
 the device name to enter in the CamillaDSP configuration.
+
+#### Differences between drivers
+The loopback capture is fed by the Windows audio engine, from the mix it sends to the playback device.
+How this behaves depends on the driver of the card, and varies a lot between drivers.
+There is no way to tell in advance, it can only be found out by trying.
+If predictable behaviour is important, use a [virtual sound card](#virtual-sound-card) instead.
+
+When nothing plays to the device, three different behaviours have been seen:
+- No data is delivered, and the capture resumes once something plays again.
+  CamillaDSP shows this as the `Stalled` processing state.
+  This is the behaviour described in the Windows documentation.
+  Seen with a MOTU M Series, and with Virtual Audio Cable 4.70.
+- Silence is delivered, so the capture never stalls and the state stays `Running`.
+  Seen with VB-CABLE 3.3.1.7 and the VB-Audio Voicemeeter virtual inputs.
+- The capture stays in the state it had when it was opened.
+  If nothing was playing when CamillaDSP started, no data ever arrives, not even once playback starts.
+  If something was playing, the capture never stalls after it stops.
+  Seen with the built in speakers of a Snapdragon laptop, with Qualcomm Aqstic driver 1.0.4516.6300.
+  Starting playback before starting CamillaDSP works around it.
+
+The captured level can also depend on the volume control of the playback device.
+When the driver handles the volume itself, the captured level stays the same at any volume setting.
+When it doesn't, Windows applies the volume to the mix before the loopback capture gets it,
+and the captured level follows the volume setting.
+Seen with a MOTU M Series, while Virtual Audio Cable and VB-CABLE capture the full level at any setting.
+Set the volume of the playback device to 100% to always capture the full level,
+and use the [volume control](../README.md#volume-control) of CamillaDSP instead.
 
 ## Configuration of devices
 
