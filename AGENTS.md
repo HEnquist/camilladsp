@@ -55,6 +55,11 @@ updating, and scripts and tools that use the websocket API or the crates stop wo
 ## Code
 
 - Read the surrounding code first and match it: structure, naming, comment density, idiom.
+- The backends are being brought closer together, with more shared code and traits. A change to one
+  backend must not take it further from the others. A fix for something that is not specific to
+  one device API, such as rate adjust, buffer levels or pause and stall handling, goes in the
+  shared helpers in `src/utils/` and is used by all backends. Keep backend-specific code for real
+  quirks of that API, with a comment saying which quirk it is.
 - Do not allocate or lock in the per-chunk processing path of filters, processors and mixers.
   Allocate buffers in the constructor and on config updates.
 - Setup and coefficient math run in `f64`, processing runs in `CamillaFloat`, and values that are
