@@ -1,6 +1,6 @@
 [package]
 name = "camilladsp"
-version = "5.0.0-beta.1"
+version.workspace = true
 authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
 edition = "2024"
 description = "A flexible tool for processing audio"
@@ -30,6 +30,11 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-
 
 [workspace]
 members = ["camilladsp-schema"]
+
+# Both crates are released in lockstep with the same version.
+# The exact pin on camilladsp-schema in the dependencies must be bumped along with this.
+[workspace.package]
+version = "5.0.0-beta.1"
 
 [features]
 threaded-alsa = []

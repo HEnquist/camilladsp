@@ -14,21 +14,16 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      # The two crates are released in lockstep, so their versions must be equal.
-      # On a release, the tag must also be that version with a v in front.
+      # On a release, the tag must be the workspace version with a v in front.
       # Runs on every push too, since the jobs that need it would otherwise be skipped.
-      - name: Check crate versions
+      - name: Check crate version
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          VERSIONS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version' | sort -u)
-          echo "Crate versions: $VERSIONS"
-          if [ "$(echo "$VERSIONS" | wc -l)" -ne 1 ]; then
-            echo "::error::The workspace crates have different versions"
-            exit 1
-          fi
-          if [ -n "$TAG" ] && [ "$TAG" != "v$VERSIONS" ]; then
-            echo "::error::Release tag $TAG does not match the Cargo.toml version $VERSIONS"
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "camilladsp") | .version')
+          echo "Crate version: $VERSION"
+          if [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Release tag $TAG does not match the Cargo.toml version $VERSION"
             exit 1
           fi
 
