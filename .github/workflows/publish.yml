@@ -7,8 +7,34 @@ on:
       - created
 
 jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # The two crates are released in lockstep, so their versions must be equal.
+      # On a release, the tag must also be that version with a v in front.
+      # Runs on every push too, since the jobs that need it would otherwise be skipped.
+      - name: Check crate versions
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSIONS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version' | sort -u)
+          echo "Crate versions: $VERSIONS"
+          if [ "$(echo "$VERSIONS" | wc -l)" -ne 1 ]; then
+            echo "::error::The workspace crates have different versions"
+            exit 1
+          fi
+          if [ -n "$TAG" ] && [ "$TAG" != "v$VERSIONS" ]; then
+            echo "::error::Release tag $TAG does not match the Cargo.toml version $VERSIONS"
+            exit 1
+          fi
+
   linux_amd64:
     name: Linux amd64
+    needs: version
     runs-on: ubuntu-latest
     #container: ubuntu:20.04
     steps:
@@ -76,6 +102,7 @@ jobs:
 
   linux_aarch64:
     name: Linux aarch64
+    needs: version
     runs-on: ubuntu-24.04-arm
     #container: ubuntu:20.04
     steps:
@@ -143,6 +170,7 @@ jobs:
 
   linux_armv7:
     name: Linux armv7
+    needs: version
     runs-on: ubuntu-latest
     # Cross compiled in a Debian container, see the matching job in ci_test.yml.
     # The container release sets the glibc floor of the released binary, so keep
@@ -195,6 +223,7 @@ jobs:
 
   windows:
     name: Windows
+    needs: version
     runs-on: windows-latest
     steps:
       - name: Checkout sources
@@ -227,6 +256,7 @@ jobs:
 
   macos:
     name: macOS Intel
+    needs: version
     runs-on: macos-15-intel
     steps:
       - name: Checkout sources
@@ -260,6 +290,7 @@ jobs:
 
   macos_arm:
     name: macOS Arm
+    needs: version
     runs-on: macos-latest
     steps:
       - name: Checkout sources
@@ -292,6 +323,7 @@ jobs:
 
   docs:
     name: Documentation
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
