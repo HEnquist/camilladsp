@@ -117,6 +117,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - ALSA, threaded backend: restarting playback after an underrun primed the device to the target
   level counting the chunk about to be written. The level is measured just before a chunk is
   written, so it then read a chunk below the target.
+- ALSA, threaded backend: stopping CamillaDSP while the playback device was stalled hung, since
+  the playback thread kept waiting to write to the stalled device.
 - ALSA, threaded backend: the playback thread busy-waited for data, which kept one CPU core fully
   loaded at real time priority. That starves everything else scheduled on that core. It now
   blocks until data arrives, or until the device is about to run low.

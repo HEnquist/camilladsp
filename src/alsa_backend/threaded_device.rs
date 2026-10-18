@@ -404,6 +404,7 @@ fn run_playback_inner_loop<C>(
             // Drain pending messages non-blocking to keep sample_queue_bytes up to date.
             // The device paces the loop via play_buffer's internal pcmdevice.wait(),
             // so we only need try_recv here - no blocking required.
+            let mut stop_requested = false;
             loop {
                 match rx_play.try_recv() {
                     Ok(PlaybackDeviceMessage::Data(bytes)) => {
@@ -428,6 +429,7 @@ fn run_playback_inner_loop<C>(
                     Ok(PlaybackDeviceMessage::Stop) => {
                         let drop_res = pcmdevice.drop();
                         trace!("pcm_drop result {drop_res:?}");
+                        stop_requested = true;
                         break;
                     }
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
@@ -436,6 +438,9 @@ fn run_playback_inner_loop<C>(
                         break;
                     }
                 }
+            }
+            if stop_requested {
+                break;
             }
 
             // The device kept running on silence while there was no data, and the level
@@ -520,6 +525,18 @@ fn run_playback_inner_loop<C>(
                 device_consumer.skip(stale_bytes);
                 sample_queue_bytes -= stale_bytes;
                 write_remainder.clear();
+            }
+            if device_stalled && (end_of_stream || channel_disconnected) {
+                // A stalled device will not take what is left, and waiting for it would
+                // keep the thread from ever ending. Drop it instead of draining.
+                let status = if channel_disconnected {
+                    StatusMessage::PlaybackError("Playback inner queue disconnected".to_string())
+                } else {
+                    StatusMessage::PlaybackDone
+                };
+                status_channel_inner.send(status).unwrap_or(());
+                pcmdevice.drop().unwrap_or_default();
+                break;
             }
 
             // Update the buffer level estimator after each write (like WASAPI).
