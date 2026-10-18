@@ -1313,6 +1313,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                                         trace!("Capture device became inactive.");
                                         saved_state = state;
                                         state = ProcessingState::Stalled;
+                                        // The periodic status update below is skipped while stalled,
+                                        // so publish the state change here.
+                                        crate::set_capture_state(&capture_status, state);
                                     }
                                     break;
                                 }

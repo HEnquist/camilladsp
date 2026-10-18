@@ -114,6 +114,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   and the level then decays to zero, which wound up rate adjust. After that, and after a pause, a
   new adjust period starts. Before, the first level after a pause went into an adjust period that
   had expired long ago, together with the levels from before the pause.
+- WASAPI: a stalled capture did not show as `Stalled` in the processing state.
 - ALSA, threaded backend: a stalled capture did not show as `Stalled` in the processing state, and
   after it resumed the first buffer level sample was zero, which sent rate adjust to its limit.
   Playback also resumed with only the silence that was left in the device, often a chunk or more
