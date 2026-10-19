@@ -50,8 +50,10 @@ The commands that return a value also include a "value" field:
 }
 ```
 
-When a command fails, the `"result"` field holds the error name instead of `"Ok"`,
-and there is no `"value"` field. Some errors are just the name:
+When a command fails, the `"result"` field holds the error name instead of `"Ok"`.
+Most commands that return a value still include the `"value"` field,
+holding a placeholder that should be ignored.
+Some errors are just the name:
 ```json
 {
   "reply": "SetFaderVolume",
@@ -68,6 +70,11 @@ Errors that carry a description add a top-level `"message"` field:
 ```
 See [Error responses](#error-responses) for the full list.
 
+The messages are also available as JSON Schema, in [websocket_schema.json](./websocket_schema.json).
+Validate a command against `#/components/schemas/WsCommand`
+and a reply against `#/components/schemas/WsReply`.
+Objects with fields that are not in the schema fail validation.
+
 Command names and field names are case sensitive.
 A message that can't be parsed as a command, for example because of a misspelled command name,
 gets an `Invalid` reply with an `"error"` field describing the problem:
@@ -75,6 +82,14 @@ gets an `Invalid` reply with an `"error"` field describing the problem:
 {
   "reply": "Invalid",
   "error": "unknown variant `StopSubScription`, expected one of `SetConfigFilePath`, ..."
+}
+```
+A command with a field that it does not take is rejected the same way,
+so that a misspelled field name gives an error instead of being silently ignored:
+```json
+{
+  "reply": "Invalid",
+  "error": "unknown field `valeu`, expected `value`"
 }
 ```
 

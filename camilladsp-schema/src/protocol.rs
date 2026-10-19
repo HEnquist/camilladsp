@@ -213,6 +213,7 @@ pub enum SpectrumSide {
 /// Output bins are logarithmically spaced between `min_freq` and `max_freq`.
 /// Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SpectrumRequest {
     /// Which side to analyze: `"capture"` or `"playback"`.
@@ -231,6 +232,7 @@ pub struct SpectrumRequest {
 ///
 /// Same fields as [`SpectrumRequest`] plus an optional `max_rate` cap.
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema, utoipa::IntoParams))]
 pub struct SpectrumSubscription {
     /// Which side to analyze: `"capture"` or `"playback"`.
@@ -254,6 +256,7 @@ pub struct SpectrumSubscription {
 ///
 /// Controls smoothing and rate-limiting of pushed level events.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VuSubscription {
     /// Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
@@ -330,14 +333,19 @@ macro_rules! ws_protocol {
         /// Commands with arguments carry them in additional named fields, e.g.
         /// `{"command": "SetUpdateInterval", "value": 500}`.
         ///
+        /// A command with a field that it does not take is rejected, so that a misspelled field
+        /// name gives an error instead of being ignored.
+        ///
         /// See the [module-level documentation](self) for the general message format.
+        // The commands without arguments are empty struct variants, since serde does not check
+        // the fields of a unit variant.
         #[derive(Debug, PartialEq, Deserialize, Serialize)]
-        #[serde(tag = "command")]
+        #[serde(tag = "command", deny_unknown_fields)]
         #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
         pub enum WsCommand {
             $($(
                 $(#[$cmeta])*
-                $cmd $({ $($args)* })?,
+                $cmd { $($($args)*)? },
             )*)*
             $(
                 $(#[$imeta])*
@@ -1261,7 +1269,7 @@ mod tests {
 
     #[test]
     fn commands_round_trip() {
-        round_trip_command(WsCommand::GetVersion);
+        round_trip_command(WsCommand::GetVersion {});
         round_trip_command(WsCommand::SetUpdateInterval { value: 500 });
         round_trip_command(WsCommand::SetFaderVolume {
             fader: 2,
@@ -1404,7 +1412,7 @@ mod tests {
     #[test]
     fn command_name_is_the_tag() {
         for command in [
-            WsCommand::GetVersion,
+            WsCommand::GetVersion {},
             WsCommand::SetConfigJson {
                 value: "{}".to_string(),
             },
@@ -1423,6 +1431,36 @@ mod tests {
     #[test]
     fn internal_command_is_not_accepted_from_clients() {
         assert!(serde_json::from_str::<WsCommand>(r#"{"command": "None"}"#).is_err());
+    }
+
+    #[test]
+    fn unknown_command_fields_are_rejected() {
+        for json in [
+            r#"{"command": "GetVersion", "value": 1}"#,
+            r#"{"command": "SetUpdateInterval", "valeu": 500}"#,
+            r#"{"command": "SetUpdateInterval", "value": 500, "extra": 1}"#,
+            r#"{"command": "AdjustVolume", "value": -3.0, "minimum": -50.0}"#,
+            r#"{"command": "SubscribeVuLevels",
+                "value": {"max_rate": 10.0, "attack": 0.0, "relase": 0.0}}"#,
+            r#"{"command": "SubscribeVuLevels",
+                "value": {"max_rate": 10.0, "attack": 0.0, "release": 0.0, "extra": 1}}"#,
+            r#"{"command": "GetSpectrum", "value": {"side": "capture", "channel": null,
+                "min_freq": 20.0, "max_freq": 20000.0, "n_bins": 10, "extra": 1}}"#,
+            r#"{"command": "SubscribeSpectrum", "value": {"side": "capture", "channel": null,
+                "min_freq": 20.0, "max_freq": 20000.0, "n_binz": 10}}"#,
+        ] {
+            assert!(serde_json::from_str::<WsCommand>(json).is_err(), "{json}");
+        }
+        for json in [
+            r#"{"command": "GetVersion"}"#,
+            r#"{"command": "AdjustVolume", "value": -3.0, "min": -50.0}"#,
+            r#"{"command": "SubscribeVuLevels",
+                "value": {"max_rate": 10.0, "attack": 0.0, "release": 0.0}}"#,
+            r#"{"command": "SubscribeSpectrum", "value": {"side": "capture", "channel": null,
+                "min_freq": 20.0, "max_freq": 20000.0, "n_bins": 10}}"#,
+        ] {
+            assert!(serde_json::from_str::<WsCommand>(json).is_ok(), "{json}");
+        }
     }
 
     #[test]

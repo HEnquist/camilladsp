@@ -8,6 +8,7 @@ New features:
 - Websocket commands for streaming signal levels and state change events.
 - Websocket commands for reading spectrum data, single read and streaming.
 - Websocket command for getting device capabilities.
+- JSON Schema of the websocket messages, for validating clients.
 - RF64 support for reading and writing wav files larger than 4 GB.
 - Adjustable corner frequencies and Q for the `Loudness` shelves.
 - ASIO: capture and playback can use two different devices.
@@ -56,6 +57,7 @@ Websocket protocol changes (breaking):
   See the [detailed changelog](CHANGELOG_5.0_details.md#websocket-protocol-changes-breaking)
   for the full description. Users of pycamilladsp won't notice this,
   as long as they update to pycamilladsp 5.0.
+- Commands with unknown fields are rejected, so that a misspelled field name gives an error.
 
 Build changes (breaking):
 - The `websocket` feature is gone, the websocket server is always included.
