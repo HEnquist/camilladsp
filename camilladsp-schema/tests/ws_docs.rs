@@ -686,6 +686,11 @@ fn close_objects(schema: &mut Value, open: bool) {
         return;
     }
     let map = schema.as_object_mut().expect("unhandled schema shape");
+    // utoipa gives a struct with `deny_unknown_fields` `additionalProperties: false`, which the
+    // `unevaluatedProperties` added below replaces.
+    if map.get("additionalProperties") == Some(&json!(false)) {
+        map.remove("additionalProperties");
+    }
     for key in map.keys() {
         assert!(
             SCHEMA_KEYWORDS.contains(&key.as_str()),
