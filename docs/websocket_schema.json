@@ -2099,7 +2099,7 @@
             "unevaluatedProperties": false
           }
         ],
-        "description": "All commands accepted by the websocket server.\n\nEvery command is a JSON object with a `\"command\"` field holding the command name.\nCommands with arguments carry them in additional named fields, e.g.\n`{\"command\": \"SetUpdateInterval\", \"value\": 500}`.\n\nSee the [module-level documentation](self) for the general message format."
+        "description": "All commands accepted by the websocket server.\n\nEvery command is a JSON object with a `\"command\"` field holding the command name.\nCommands with arguments carry them in additional named fields, e.g.\n`{\"command\": \"SetUpdateInterval\", \"value\": 500}`.\n\nA command with a field that it does not take is rejected, so that a misspelled field\nname gives an error instead of being ignored.\n\nSee the [module-level documentation](self) for the general message format."
       },
       "WsReply": {
         "oneOf": [

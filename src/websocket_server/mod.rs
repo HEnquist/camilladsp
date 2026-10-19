@@ -589,7 +589,7 @@ macro_rules! make_handler {
                                         if active_stream.is_some() {
                                             if cmd == WsCommand::None {
                                                 None
-                                            } else if cmd != WsCommand::StopSubscription {
+                                            } else if !matches!(cmd, WsCommand::StopSubscription {}) {
                                                 Some(stream_invalid_reply())
                                             } else {
                                                 active_stream = None;
@@ -657,7 +657,7 @@ macro_rules! make_handler {
                                                         }
                                                     }
                                                 }
-                                                WsCommand::SubscribeState => {
+                                                WsCommand::SubscribeState {} => {
                                                     active_stream = Some(ActiveStream::State);
                                                     set_stream_timeout(
                                                         &mut websocket,
@@ -699,7 +699,7 @@ macro_rules! make_handler {
                                                         }
                                                     }
                                                 }
-                                                WsCommand::StopSubscription => {
+                                                WsCommand::StopSubscription {} => {
                                                     Some(WsReply::Invalid {
                                                         error: "No active subscription".to_string(),
                                                     })
@@ -757,7 +757,7 @@ fn handle_command(
     local_data: &mut LocalData,
 ) -> Option<WsReply> {
     match command {
-        WsCommand::Reload => {
+        WsCommand::Reload {} => {
             let cfg_path = shared_data_inst.active_config_path.lock().clone();
             match cfg_path {
                 Some(path) => match config::load_config(path.as_str()) {
@@ -814,21 +814,21 @@ fn handle_command(
                 }
             }
         }
-        WsCommand::GetCaptureRate => {
+        WsCommand::GetCaptureRate {} => {
             let capstat = shared_data_inst.capture_status.read();
             Some(WsReply::GetCaptureRate {
                 result: WsResult::Ok,
                 value: capstat.measured_samplerate,
             })
         }
-        WsCommand::GetSignalRange => {
+        WsCommand::GetSignalRange {} => {
             let capstat = shared_data_inst.capture_status.read();
             Some(WsReply::GetSignalRange {
                 result: WsResult::Ok,
                 value: capstat.signal_range,
             })
         }
-        WsCommand::GetCaptureSignalRms => {
+        WsCommand::GetCaptureSignalRms {} => {
             let values = capture_signal_rms(shared_data_inst);
             Some(WsReply::GetCaptureSignalRms {
                 result: WsResult::Ok,
@@ -842,14 +842,14 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetCaptureSignalRmsSinceLast => {
+        WsCommand::GetCaptureSignalRmsSinceLast {} => {
             let values = capture_signal_rms_since_last(shared_data_inst, local_data);
             Some(WsReply::GetCaptureSignalRmsSinceLast {
                 result: WsResult::Ok,
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalRms => {
+        WsCommand::GetPlaybackSignalRms {} => {
             let values = playback_signal_rms(shared_data_inst);
             Some(WsReply::GetPlaybackSignalRms {
                 result: WsResult::Ok,
@@ -863,14 +863,14 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalRmsSinceLast => {
+        WsCommand::GetPlaybackSignalRmsSinceLast {} => {
             let values = playback_signal_rms_since_last(shared_data_inst, local_data);
             Some(WsReply::GetPlaybackSignalRmsSinceLast {
                 result: WsResult::Ok,
                 value: values,
             })
         }
-        WsCommand::GetCaptureSignalPeak => {
+        WsCommand::GetCaptureSignalPeak {} => {
             let values = capture_signal_peak(shared_data_inst);
             Some(WsReply::GetCaptureSignalPeak {
                 result: WsResult::Ok,
@@ -884,14 +884,14 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetCaptureSignalPeakSinceLast => {
+        WsCommand::GetCaptureSignalPeakSinceLast {} => {
             let values = capture_signal_peak_since_last(shared_data_inst, local_data);
             Some(WsReply::GetCaptureSignalPeakSinceLast {
                 result: WsResult::Ok,
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalPeak => {
+        WsCommand::GetPlaybackSignalPeak {} => {
             let values = playback_signal_peak(shared_data_inst);
             Some(WsReply::GetPlaybackSignalPeak {
                 result: WsResult::Ok,
@@ -905,14 +905,14 @@ fn handle_command(
                 value: values,
             })
         }
-        WsCommand::GetPlaybackSignalPeakSinceLast => {
+        WsCommand::GetPlaybackSignalPeakSinceLast {} => {
             let values = playback_signal_peak_since_last(shared_data_inst, local_data);
             Some(WsReply::GetPlaybackSignalPeakSinceLast {
                 result: WsResult::Ok,
                 value: values,
             })
         }
-        WsCommand::GetSignalLevels => {
+        WsCommand::GetSignalLevels {} => {
             let levels = AllLevels {
                 playback_rms: playback_signal_rms(shared_data_inst),
                 playback_peak: playback_signal_peak(shared_data_inst),
@@ -938,7 +938,7 @@ fn handle_command(
             };
             Some(result)
         }
-        WsCommand::GetSignalLevelsSinceLast => {
+        WsCommand::GetSignalLevelsSinceLast {} => {
             let levels = AllLevels {
                 playback_rms: playback_signal_rms_since_last(shared_data_inst, local_data),
                 playback_peak: playback_signal_peak_since_last(shared_data_inst, local_data),
@@ -958,16 +958,16 @@ fn handle_command(
         WsCommand::SubscribeVuLevels { .. } => Some(WsReply::Invalid {
             error: "SubscribeVuLevels can only be handled by the websocket stream loop".to_string(),
         }),
-        WsCommand::SubscribeState => Some(WsReply::Invalid {
+        WsCommand::SubscribeState {} => Some(WsReply::Invalid {
             error: "SubscribeState can only be handled by the websocket stream loop".to_string(),
         }),
         WsCommand::SubscribeSpectrum { .. } => Some(WsReply::Invalid {
             error: "SubscribeSpectrum can only be handled by the websocket stream loop".to_string(),
         }),
-        WsCommand::StopSubscription => Some(WsReply::Invalid {
+        WsCommand::StopSubscription {} => Some(WsReply::Invalid {
             error: "No active subscription".to_string(),
         }),
-        WsCommand::GetSignalPeaksSinceStart => {
+        WsCommand::GetSignalPeaksSinceStart {} => {
             let levels = PbCapLevels {
                 playback: playback_signal_global_peak(shared_data_inst),
                 capture: capture_signal_global_peak(shared_data_inst),
@@ -978,7 +978,7 @@ fn handle_command(
             };
             Some(result)
         }
-        WsCommand::ResetSignalPeaksSinceStart => {
+        WsCommand::ResetSignalPeaksSinceStart {} => {
             reset_playback_signal_global_peak(shared_data_inst);
             reset_capture_signal_global_peak(shared_data_inst);
             let result = WsReply::ResetSignalPeaksSinceStart {
@@ -986,7 +986,7 @@ fn handle_command(
             };
             Some(result)
         }
-        WsCommand::GetChannelLabels => {
+        WsCommand::GetChannelLabels {} => {
             let optional_config = shared_data_inst.active_config.lock();
             Some(WsReply::GetChannelLabels {
                 result: WsResult::Ok,
@@ -996,18 +996,18 @@ fn handle_command(
                 },
             })
         }
-        WsCommand::GetVersion => Some(WsReply::GetVersion {
+        WsCommand::GetVersion {} => Some(WsReply::GetVersion {
             result: WsResult::Ok,
             value: crate_version!().to_string(),
         }),
-        WsCommand::GetState => {
+        WsCommand::GetState {} => {
             let capstat = shared_data_inst.capture_status.read();
             Some(WsReply::GetState {
                 result: WsResult::Ok,
                 value: capstat.state,
             })
         }
-        WsCommand::GetStopReason => {
+        WsCommand::GetStopReason {} => {
             let stat = shared_data_inst.processing_status.read();
             let value = stat.stop_reason.clone();
             Some(WsReply::GetStopReason {
@@ -1015,35 +1015,35 @@ fn handle_command(
                 value,
             })
         }
-        WsCommand::GetRateAdjust => {
+        WsCommand::GetRateAdjust {} => {
             let capstat = shared_data_inst.capture_status.read();
             Some(WsReply::GetRateAdjust {
                 result: WsResult::Ok,
                 value: capstat.rate_adjust,
             })
         }
-        WsCommand::GetClippedSamples => {
+        WsCommand::GetClippedSamples {} => {
             let pbstat = shared_data_inst.playback_status.read();
             Some(WsReply::GetClippedSamples {
                 result: WsResult::Ok,
                 value: pbstat.clipped_samples.load(Ordering::Relaxed),
             })
         }
-        WsCommand::ResetClippedSamples => {
+        WsCommand::ResetClippedSamples {} => {
             let pbstat = shared_data_inst.playback_status.read();
             pbstat.clipped_samples.store(0, Ordering::Relaxed);
             Some(WsReply::ResetClippedSamples {
                 result: WsResult::Ok,
             })
         }
-        WsCommand::GetBufferLevel => {
+        WsCommand::GetBufferLevel {} => {
             let pbstat = shared_data_inst.playback_status.read();
             Some(WsReply::GetBufferLevel {
                 result: WsResult::Ok,
                 value: pbstat.buffer_level,
             })
         }
-        WsCommand::GetUpdateInterval => {
+        WsCommand::GetUpdateInterval {} => {
             let capstat = shared_data_inst.capture_status.read();
             Some(WsReply::GetUpdateInterval {
                 result: WsResult::Ok,
@@ -1061,7 +1061,7 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::GetVolume => Some(WsReply::GetVolume {
+        WsCommand::GetVolume {} => Some(WsReply::GetVolume {
             result: WsResult::Ok,
             value: shared_data_inst.processing_params.target_volume(0),
         }),
@@ -1119,7 +1119,7 @@ fn handle_command(
                 value: tempvol,
             })
         }
-        WsCommand::GetMute => Some(WsReply::GetMute {
+        WsCommand::GetMute {} => Some(WsReply::GetMute {
             result: WsResult::Ok,
             value: shared_data_inst.processing_params.is_mute(0),
         }),
@@ -1136,7 +1136,7 @@ fn handle_command(
                 result: WsResult::Ok,
             })
         }
-        WsCommand::ToggleMute => {
+        WsCommand::ToggleMute {} => {
             let tempmute = shared_data_inst.processing_params.toggle_mute(0);
             shared_data_inst
                 .unsaved_state_change
@@ -1150,7 +1150,7 @@ fn handle_command(
                 value: !tempmute,
             })
         }
-        WsCommand::GetFaders => {
+        WsCommand::GetFaders {} => {
             let volumes = shared_data_inst.processing_params.volumes();
             let mutes = shared_data_inst.processing_params.mutes();
             let faders = volumes
@@ -1330,7 +1330,7 @@ fn handle_command(
                 value: (ctrl, !tempmute),
             })
         }
-        WsCommand::GetConfig => Some(WsReply::GetConfig {
+        WsCommand::GetConfig {} => Some(WsReply::GetConfig {
             result: WsResult::Ok,
             value: yaml_serde::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
@@ -1351,7 +1351,7 @@ fn handle_command(
                 }),
             }
         }
-        WsCommand::GetConfigTitle => {
+        WsCommand::GetConfigTitle {} => {
             let optional_config = shared_data_inst.active_config.lock();
             let value = if let Some(config) = &*optional_config {
                 config.title.clone().unwrap_or_default()
@@ -1363,7 +1363,7 @@ fn handle_command(
                 value,
             })
         }
-        WsCommand::GetConfigDescription => {
+        WsCommand::GetConfigDescription {} => {
             let optional_config = shared_data_inst.active_config.lock();
             let value = if let Some(config) = &*optional_config {
                 config.description.clone().unwrap_or_default()
@@ -1375,15 +1375,15 @@ fn handle_command(
                 value,
             })
         }
-        WsCommand::GetPreviousConfig => Some(WsReply::GetPreviousConfig {
+        WsCommand::GetPreviousConfig {} => Some(WsReply::GetPreviousConfig {
             result: WsResult::Ok,
             value: yaml_serde::to_string(&*shared_data_inst.previous_config.lock()).unwrap(),
         }),
-        WsCommand::GetConfigJson => Some(WsReply::GetConfigJson {
+        WsCommand::GetConfigJson {} => Some(WsReply::GetConfigJson {
             result: WsResult::Ok,
             value: serde_json::to_string(&*shared_data_inst.active_config.lock()).unwrap(),
         }),
-        WsCommand::GetConfigFilePath => Some(WsReply::GetConfigFilePath {
+        WsCommand::GetConfigFilePath {} => Some(WsReply::GetConfigFilePath {
             result: WsResult::Ok,
             value: shared_data_inst
                 .active_config_path
@@ -1391,11 +1391,11 @@ fn handle_command(
                 .as_ref()
                 .map(|s| s.to_string()),
         }),
-        WsCommand::GetStateFilePath => Some(WsReply::GetStateFilePath {
+        WsCommand::GetStateFilePath {} => Some(WsReply::GetStateFilePath {
             result: WsResult::Ok,
             value: shared_data_inst.state_file_path.clone(),
         }),
-        WsCommand::GetStateFileUpdated => Some(WsReply::GetStateFileUpdated {
+        WsCommand::GetStateFileUpdated {} => Some(WsReply::GetStateFileUpdated {
             result: WsResult::Ok,
             value: !shared_data_inst
                 .unsaved_state_change
@@ -1738,7 +1738,7 @@ fn handle_command(
                 }
             }
         }
-        WsCommand::Stop => {
+        WsCommand::Stop {} => {
             match shared_data_inst
                 .command_sender
                 .try_send(ControllerMessage::Stop)
@@ -1760,7 +1760,7 @@ fn handle_command(
                 }
             }
         }
-        WsCommand::Exit => {
+        WsCommand::Exit {} => {
             match shared_data_inst
                 .command_sender
                 .try_send(ControllerMessage::Exit)
@@ -1782,7 +1782,7 @@ fn handle_command(
                 }
             }
         }
-        WsCommand::GetSupportedDeviceTypes => {
+        WsCommand::GetSupportedDeviceTypes {} => {
             let devs = list_supported_devices();
             Some(WsReply::GetSupportedDeviceTypes {
                 result: WsResult::Ok,
@@ -1859,14 +1859,14 @@ fn handle_command(
                 })
             }
         },
-        WsCommand::GetProcessingLoad => {
+        WsCommand::GetProcessingLoad {} => {
             let load = shared_data_inst.processing_params.processing_load();
             Some(WsReply::GetProcessingLoad {
                 result: WsResult::Ok,
                 value: load,
             })
         }
-        WsCommand::GetResamplerLoad => {
+        WsCommand::GetResamplerLoad {} => {
             let load = shared_data_inst.processing_params.resampler_load();
             Some(WsReply::GetResamplerLoad {
                 result: WsResult::Ok,
@@ -2051,11 +2051,20 @@ mod tests {
     fn parse_commands() {
         let cmd = Message::text("{\"command\": \"Reload\"}");
         let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::Reload);
+        assert_eq!(res, WsCommand::Reload {});
         let cmd = Message::text("asdfasdf");
         let res = parse_command(cmd);
         assert!(res.is_err());
         let cmd = Message::text("");
+        let res = parse_command(cmd);
+        assert!(res.is_err());
+        let cmd = Message::text("{\"command\": \"SetUpdateInterval\", \"valeu\": 500}");
+        let res = parse_command(cmd);
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            "unknown field `valeu`, expected `value`"
+        );
+        let cmd = Message::text("{\"command\": \"Reload\", \"value\": 1}");
         let res = parse_command(cmd);
         assert!(res.is_err());
         let cmd = Message::text("{\"command\": \"SetConfigFilePath\", \"value\": \"somefile\"}");
@@ -2077,7 +2086,7 @@ mod tests {
         );
         let cmd = Message::text("{\"command\": \"StopSubscription\"}");
         let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::StopSubscription);
+        assert_eq!(res, WsCommand::StopSubscription {});
         let cmd = Message::text("{\"command\": \"SubscribeSignalLevels\", \"value\": \"both\"}");
         let res = parse_command(cmd).unwrap();
         assert_eq!(
@@ -2102,7 +2111,7 @@ mod tests {
         );
         let cmd = Message::text("{\"command\": \"SubscribeState\"}");
         let res = parse_command(cmd).unwrap();
-        assert_eq!(res, WsCommand::SubscribeState);
+        assert_eq!(res, WsCommand::SubscribeState {});
     }
 
     #[test]

@@ -287,6 +287,9 @@ These apply to the optional `threaded-alsa` build feature.
     in a `message` field, replacing the previous double-nested shape.
   - Commands that took multiple arguments now use named fields instead of an array, for example
     `AdjustVolume` takes `value` plus optional `min` and `max`.
+- A command with a field that it does not take gets an `Invalid` reply. Previously unknown fields
+  were ignored, so a misspelled optional field, like `minimum` instead of `min` for
+  `AdjustVolume`, was silently dropped and the command ran without it.
 
 ## Build changes (breaking)
 - The `websocket` build feature is gone. The websocket server is now always built in, since every

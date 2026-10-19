@@ -85,6 +85,14 @@ gets an `Invalid` reply with an `"error"` field describing the problem:
   "error": "unknown variant `StopSubScription`, expected one of `SetConfigFilePath`, ..."
 }
 ```
+A command with a field that it does not take is rejected the same way,
+so that a misspelled field name gives an error instead of being silently ignored:
+```json
+{
+  "reply": "Invalid",
+  "error": "unknown field `valeu`, expected `value`"
+}
+```
 
 ## Message encoding
 

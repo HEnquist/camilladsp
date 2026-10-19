@@ -57,6 +57,7 @@ Websocket protocol changes (breaking):
   See the [detailed changelog](CHANGELOG_5.0_details.md#websocket-protocol-changes-breaking)
   for the full description. Users of pycamilladsp won't notice this,
   as long as they update to pycamilladsp 5.0.
+- Commands with unknown fields are rejected, so that a misspelled field name gives an error.
 
 Build changes (breaking):
 - The `websocket` feature is gone, the websocket server is always included.
