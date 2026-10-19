@@ -1,6 +1,7 @@
 # Skips a change that is only to the docs or the example configs. README.crates.md
-# is the crate's rustdoc, see src/lib.rs, so it stays in. websocket.md is checked against
-# the generated version by a test, so it stays in too.
+# is the crate's rustdoc, see src/lib.rs, so it stays in. websocket.md and
+# websocket_schema.json are checked against the generated versions by a test, so they stay in
+# too.
 on:
   push:
     paths: &paths
@@ -10,6 +11,7 @@ on:
       - "!exampleconfigs/**"
       - README.crates.md
       - docs/websocket.md
+      - docs/websocket_schema.json
   pull_request:
     paths: *paths
 
@@ -78,7 +80,7 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
       # The ws_docs test needs the utoipa feature, so the plain cargo test skips it.
-      - name: Check that websocket.md is up to date
+      - name: Check that websocket.md and websocket_schema.json are up to date
         run: cargo test -p camilladsp-schema --features utoipa --test ws_docs
 
       # camilladsp never enables the utoipa feature, so the schema crate needs

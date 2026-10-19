@@ -14,12 +14,13 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-//! Generates websocket.md from the OpenAPI schemas of the protocol types, and checks that the
-//! file in the repository is up to date.
+//! Generates websocket.md and websocket_schema.json from the OpenAPI schemas of the protocol
+//! types, and checks that the files in the repository are up to date.
 //!
 //! The schemas are derived by utoipa from the Rust types and their serde attributes, so all
-//! names are the wire names. The sections follow `WS_COMMAND_GROUPS`, and the text around them
-//! is in `ws_template.md.j2`. Regenerate the file with
+//! names are the wire names. The sections of websocket.md follow `WS_COMMAND_GROUPS`, and the
+//! text around them is in `ws_template.md.j2`. websocket_schema.json holds the message schemas
+//! as JSON Schema, for clients to validate their messages against. Regenerate the files with
 //!
 //! ```sh
 //! UPDATE_DOCS=1 cargo test -p camilladsp-schema --features utoipa --test ws_docs
@@ -652,15 +653,126 @@ fn render() -> String {
         .unwrap()
 }
 
-#[test]
-fn websocket_md_is_up_to_date() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/websocket.md");
-    let generated = render();
-    if std::env::var_os("UPDATE_DOCS").is_some_and(|v| !v.is_empty()) {
-        std::fs::write(&path, &generated).unwrap();
+// ── JSON Schema ─────────────────────────────────────────────────────────────
+
+/// The keywords the generated schemas may use. Anything else is a new utoipa construct, which
+/// `close_objects` would need to learn about.
+const SCHEMA_KEYWORDS: [&str; 12] = [
+    "$ref",
+    "type",
+    "description",
+    "enum",
+    "format",
+    "minimum",
+    "required",
+    "properties",
+    "items",
+    "prefixItems",
+    "oneOf",
+    "allOf",
+];
+
+/// Adds `unevaluatedProperties: false` to every object schema, so that a message with an unknown
+/// field fails validation.
+///
+/// A reply flattens WsResult in, which becomes `allOf: [{$ref: WsResult}, {...}, {reply}]`. An
+/// `unevaluatedProperties` inside one part of the `allOf` only sees the properties of that part,
+/// so the parts, and the schemas referenced from them, are left `open`, and the keyword goes on
+/// the schema holding the `allOf`. That one sees the properties evaluated by all the parts.
+fn close_objects(schema: &mut Value, open: bool) {
+    // A boolean schema accepts anything or nothing, like `items: false` after the `prefixItems`
+    // of a tuple, and has nothing to close.
+    if schema.is_boolean() {
         return;
     }
-    // The published package does not contain websocket.md, only the repository does.
+    let map = schema.as_object_mut().expect("unhandled schema shape");
+    for key in map.keys() {
+        assert!(
+            SCHEMA_KEYWORDS.contains(&key.as_str()),
+            "unhandled schema keyword {key}"
+        );
+    }
+    if !open && (map.contains_key("allOf") || map.get("type") == Some(&json!("object"))) {
+        map.insert("unevaluatedProperties".to_string(), json!(false));
+    }
+    if let Some(Value::Array(parts)) = map.get_mut("allOf") {
+        for part in parts {
+            close_objects(part, true);
+        }
+    }
+    if let Some(Value::Array(options)) = map.get_mut("oneOf") {
+        for option in options {
+            close_objects(option, open);
+        }
+    }
+    if let Some(Value::Object(properties)) = map.get_mut("properties") {
+        for property in properties.values_mut() {
+            close_objects(property, false);
+        }
+    }
+    if let Some(items) = map.get_mut("items") {
+        close_objects(items, false);
+    }
+    if let Some(Value::Array(items)) = map.get_mut("prefixItems") {
+        for item in items {
+            close_objects(item, false);
+        }
+    }
+}
+
+/// Renders websocket_schema.json: the message schemas and all the types they use, as
+/// `components.schemas` with the references in OpenAPI form, `#/components/schemas/X`.
+fn render_schema() -> String {
+    let api = serde_json::to_value(WsApi::openapi()).unwrap();
+    let mut schemas = api["components"]["schemas"].clone();
+
+    // The types that are flattened into other messages, and must stay open.
+    let mut flattened = Vec::new();
+    for schema in schemas.as_object().unwrap().values() {
+        for part in schema
+            .get("oneOf")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|o| o.get("allOf")?.as_array())
+            .flatten()
+        {
+            flattened.extend(ref_name(part).map(String::from));
+        }
+    }
+    let mut referenced = Vec::new();
+    for (name, schema) in schemas.as_object_mut().unwrap() {
+        close_objects(schema, flattened.contains(name));
+        referenced_types(schema, &mut referenced);
+    }
+    for name in &referenced {
+        assert!(schemas.get(name).is_some(), "type {name} has no schema");
+    }
+
+    let document = json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Messages of the CamillaDSP websocket protocol. Generated from the \
+            protocol types by the ws_docs test of the camilladsp-schema crate. Validate a \
+            command against #/components/schemas/WsCommand and a reply against \
+            #/components/schemas/WsReply.",
+        "components": { "schemas": schemas },
+    });
+    let mut text = serde_json::to_string_pretty(&document).unwrap();
+    text.push('\n');
+    text
+}
+
+/// Writes a generated file when UPDATE_DOCS is set, and otherwise checks that the file in the
+/// repository matches.
+fn check_generated(file_name: &str, generated: &str) {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs")
+        .join(file_name);
+    if std::env::var_os("UPDATE_DOCS").is_some_and(|v| !v.is_empty()) {
+        std::fs::write(&path, generated).unwrap();
+        return;
+    }
+    // The published package does not contain the docs, only the repository does.
     if !path.exists() {
         eprintln!(
             "{} not found, skipping the up-to-date check",
@@ -674,6 +786,16 @@ fn websocket_md_is_up_to_date() {
         .replace("\r\n", "\n");
     assert!(
         current == generated,
-        "websocket.md is out of date. Regenerate it with:\n\n    {REGENERATE}\n"
+        "{file_name} is out of date. Regenerate it with:\n\n    {REGENERATE}\n"
     );
+}
+
+#[test]
+fn websocket_md_is_up_to_date() {
+    check_generated("websocket.md", &render());
+}
+
+#[test]
+fn websocket_schema_json_is_up_to_date() {
+    check_generated("websocket_schema.json", &render_schema());
 }

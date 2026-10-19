@@ -8,6 +8,7 @@ New features:
 - Websocket commands for streaming signal levels and state change events.
 - Websocket commands for reading spectrum data, single read and streaming.
 - Websocket command for getting device capabilities.
+- JSON Schema of the websocket messages, for validating clients.
 - RF64 support for reading and writing wav files larger than 4 GB.
 - Adjustable corner frequencies and Q for the `Loudness` shelves.
 - ASIO: capture and playback can use two different devices.

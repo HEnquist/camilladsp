@@ -6,6 +6,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - Websocket commands for streaming signal level and state change events.
 - Websocket commands for audio spectrum data (single read & streaming).
 - Websocket command for getting device capabilities.
+- The websocket messages are published as JSON Schema in `docs/websocket_schema.json`, generated
+  from the protocol types like `docs/websocket.md`. Clients can validate the commands they send and
+  the replies they handle against it. Fields that are not in the schema fail validation.
 - New `Slip` resampler for very cheap rate adjust between independent clocks at the same nominal rate.
 - RF64 support for reading and writing wav files larger than 4 GB (`use_rf64` for File playback).
 - New `LookaheadLimiter`, as a single-channel filter and as a multichannel processor with
