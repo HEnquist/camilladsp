@@ -3,6 +3,50 @@
   "description": "Messages of the CamillaDSP websocket protocol. Generated from the protocol types by the ws_docs test of the camilladsp-schema crate. Validate a command against #/components/schemas/WsCommand and a reply against #/components/schemas/WsReply.",
   "components": {
     "schemas": {
+      "AdaptCheck": {
+        "type": "object",
+        "description": "The entry config that the Adapt provider starts from, and what is wrong with it, if\nanything. The format is the one the config is written for, after the command line\noverrides. Adapt changes the rate and the sample format, but not the channel count.",
+        "properties": {
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Path of the entry config file, `null` for a config that was sent over the websocket."
+          },
+          "samplerate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Capture sample rate, `null` when no config is loaded.",
+            "minimum": 0
+          },
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Capture channels, `null` when no config is loaded.",
+            "minimum": 0
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Capture sample format, `null` when it is automatic or no config is loaded."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What is wrong with the config, `null` if it is usable."
+          }
+        },
+        "unevaluatedProperties": false
+      },
       "AllLevels": {
         "type": "object",
         "description": "Combined RMS and peak levels for both sides, returned by the `GetSignalLevels*` commands.\n\nAll values are in dB (0 dB = full level), one entry per channel.",
@@ -140,6 +184,34 @@
               ]
             },
             "description": "Labels for capture channels. Same structure as `playback`."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "ControllerFileChecks": {
+        "type": "object",
+        "description": "Value of the `CheckControllerFiles` reply, one section per follow provider.",
+        "properties": {
+          "specific": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/FileCheck"
+            },
+            "description": "Each file the Specific template matches, with the format read from its name and the\nproblem found, if any. `null` when Specific is off."
+          },
+          "adapt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdaptCheck",
+                "description": "The entry config Adapt starts from. `null` when Adapt is off."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "unevaluatedProperties": false
@@ -2146,7 +2218,7 @@
           },
           {
             "type": "object",
-            "description": "Check every file the Specific template can match, and report what is wrong with\neach one. Loads every file, so it is meant to be run on demand rather than polled.",
+            "description": "Check the configs the follow providers can use: every file the Specific template\ncan match, and the entry config that Adapt starts from. Loads every file, so it is\nmeant to be run on demand rather than polled.",
             "required": [
               "command"
             ],
@@ -4685,11 +4757,8 @@
                 ],
                 "properties": {
                   "value": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/FileCheck"
-                    },
-                    "description": "Each file the Specific template matches, with the format read from its name\nand the problem found, if any. Empty when Specific is off."
+                    "$ref": "#/components/schemas/ControllerFileChecks",
+                    "description": "One section per provider, `null` for a provider that is off."
                   }
                 }
               },

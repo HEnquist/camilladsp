@@ -35,8 +35,8 @@ use std::time::Instant;
 use crate::config::{self, Configuration};
 use crate::filters::fftconv::ImpulseCache;
 pub use camilladsp_schema::protocol::{
-    ControllerSettings, FileCheck, FollowCapture, SourceFormat, TOKEN_CHANNELS, TOKEN_FORMAT,
-    TOKEN_SAMPLERATE, TOKENS,
+    AdaptCheck, ControllerFileChecks, ControllerSettings, FileCheck, FollowCapture, SourceFormat,
+    TOKEN_CHANNELS, TOKEN_FORMAT, TOKEN_SAMPLERATE, TOKENS,
 };
 
 /// How close a reported rate has to be to a standard rate to be snapped to it, relative.
@@ -569,6 +569,45 @@ pub fn preflight(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck>
     let mut checks = check_template_files(template, entry);
     checks.extend(check_entry_name(template, entry, &checks));
     checks
+}
+
+/// Check the configs each enabled follow provider can use, see [`ControllerFileChecks`].
+pub fn check_files(
+    settings: &ControllerSettings,
+    entry: Option<&ConfigSource>,
+) -> ControllerFileChecks {
+    ControllerFileChecks {
+        specific: settings
+            .specific_template()
+            .map(|template| preflight(template, entry)),
+        adapt: settings.adapt_enabled().then(|| check_adapt(entry)),
+    }
+}
+
+/// Check the entry config that Adapt starts from, and read the format it is written for.
+///
+/// The format is read after validation, so that it includes the command line overrides.
+fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
+    let Some(entry) = entry else {
+        return AdaptCheck {
+            file: None,
+            samplerate: None,
+            channels: None,
+            format: None,
+            problem: Some("no config is loaded".to_string()),
+        };
+    };
+    let mut conf = entry.raw.clone();
+    let problem = config::validate_config(&mut conf, entry.filename.as_deref())
+        .err()
+        .map(|err| err.to_string());
+    AdaptCheck {
+        file: entry.filename.clone(),
+        samplerate: Some(capture_rate_of(&conf)),
+        channels: Some(conf.devices.capture.channels()),
+        format: conf.devices.capture.format_name(),
+        problem,
+    }
 }
 
 /// Report an entry config file that isn't one of the files the template matches.
@@ -1201,5 +1240,41 @@ pipeline:
         let checks = preflight(&template, None);
         assert_eq!(checks.len(), 2);
         assert!(checks.iter().all(|c| c.problem.is_none()));
+    }
+
+    #[test]
+    fn check_files_has_a_section_per_enabled_provider() {
+        let dir = temp_dir("check_files");
+        write_config(&dir, "conf_44100.yml", &base_config(44100, 2, ""));
+        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
+        let e = entry(base_config(44100, 2, ""));
+
+        let adapt_only = check_files(&settings(None, Some(true)), Some(&e));
+        assert_eq!(adapt_only.specific, None);
+        assert_eq!(
+            adapt_only.adapt,
+            Some(AdaptCheck {
+                file: None,
+                samplerate: Some(44100),
+                channels: Some(2),
+                format: Some("S32_LE".to_string()),
+                problem: None,
+            })
+        );
+
+        let specific_only = check_files(&settings(Some(&template), None), Some(&e));
+        assert_eq!(specific_only.adapt, None);
+        assert_eq!(specific_only.specific.unwrap().len(), 1);
+
+        let both = check_files(&settings(Some(&template), Some(true)), Some(&e));
+        assert!(both.specific.is_some() && both.adapt.is_some());
+
+        let no_entry = check_files(&settings(None, Some(true)), None);
+        let adapt = no_entry.adapt.unwrap();
+        assert_eq!(adapt.samplerate, None);
+        assert!(adapt.problem.is_some());
+
+        let off = check_files(&ControllerSettings::default(), Some(&e));
+        assert_eq!((off.specific, off.adapt), (None, None));
     }
 }

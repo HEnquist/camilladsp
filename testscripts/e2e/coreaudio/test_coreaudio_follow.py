@@ -144,11 +144,14 @@ def test_specific_switches_between_files(start_cdsp, feeder, variants):
     wait_for_signal(cdsp)
     # The entry is selected for its own rate like any other variant.
     assert status(cdsp)["active_config_file"].endswith("variant_48000.yml")
-    assert cdsp.send("CheckControllerFiles") == [
-        {"file": variant(template, rate), "samplerate": rate, "channels": None,
-         "format": None, "problem": None}
-        for rate in (44100, 48000, 96000)
-    ]
+    assert cdsp.send("CheckControllerFiles") == {
+        "specific": [
+            {"file": variant(template, rate), "samplerate": rate, "channels": None,
+             "format": None, "problem": None}
+            for rate in (44100, 48000, 96000)
+        ],
+        "adapt": None,
+    }
     for rate in (44100, 96000, 48000):
         switch_source(rate)
         wait_for_rate(cdsp, rate)
@@ -210,8 +213,12 @@ def test_specific_falls_back_to_adapt(start_cdsp, ca_config, feeder, variants):
         extra_args=["--wait", "--follow_specific", template, "--follow_adapt"],
     )
     wait_for_signal(cdsp)
-    misnamed = [c for c in cdsp.send("CheckControllerFiles") if c["file"] == entry]
+    checks = cdsp.send("CheckControllerFiles")
+    misnamed = [c for c in checks["specific"] if c["file"] == entry]
     assert "template" in misnamed[0]["problem"]
+    # Adapt starts from the same entry, which is fine as it is.
+    assert checks["adapt"]["file"] == entry
+    assert checks["adapt"]["problem"] is None
     switch_source(44100)
     wait_for_rate(cdsp, 44100)
     assert status(cdsp)["active_config_file"] is None
@@ -230,7 +237,8 @@ def test_a_variant_at_the_wrong_rate_is_rejected(start_cdsp, ca_config, feeder, 
         config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
     )
     wait_for_signal(cdsp)
-    problems = {c["samplerate"]: c["problem"] for c in cdsp.send("CheckControllerFiles")}
+    checks = cdsp.send("CheckControllerFiles")["specific"]
+    problems = {c["samplerate"]: c["problem"] for c in checks}
     assert problems[48000] is None
     assert "rate" in problems[44100]
     switch_source(44100)

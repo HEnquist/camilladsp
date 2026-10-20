@@ -366,6 +366,35 @@ pub struct FileCheck {
     pub problem: Option<String>,
 }
 
+/// The entry config that the Adapt provider starts from, and what is wrong with it, if
+/// anything. The format is the one the config is written for, after the command line
+/// overrides. Adapt changes the rate and the sample format, but not the channel count.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AdaptCheck {
+    /// Path of the entry config file, `null` for a config that was sent over the websocket.
+    pub file: Option<String>,
+    /// Capture sample rate, `null` when no config is loaded.
+    pub samplerate: Option<usize>,
+    /// Capture channels, `null` when no config is loaded.
+    pub channels: Option<usize>,
+    /// Capture sample format, `null` when it is automatic or no config is loaded.
+    pub format: Option<String>,
+    /// What is wrong with the config, `null` if it is usable.
+    pub problem: Option<String>,
+}
+
+/// Value of the `CheckControllerFiles` reply, one section per follow provider.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ControllerFileChecks {
+    /// Each file the Specific template matches, with the format read from its name and the
+    /// problem found, if any. `null` when Specific is off.
+    pub specific: Option<Vec<FileCheck>>,
+    /// The entry config Adapt starts from. `null` when Adapt is off.
+    pub adapt: Option<AdaptCheck>,
+}
+
 /// The state of the built-in controller, returned by the `GetControllerStatus` command.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1200,12 +1229,12 @@ ws_protocol! {
             value: ControllerStatusReport,
         },
 
-        /// Check every file the Specific template can match, and report what is wrong with
-        /// each one. Loads every file, so it is meant to be run on demand rather than polled.
+        /// Check the configs the follow providers can use: every file the Specific template
+        /// can match, and the entry config that Adapt starts from. Loads every file, so it is
+        /// meant to be run on demand rather than polled.
         CheckControllerFiles -> {
-            /// Each file the Specific template matches, with the format read from its name
-            /// and the problem found, if any. Empty when Specific is off.
-            value: Vec<FileCheck>,
+            /// One section per provider, `null` for a provider that is off.
+            value: ControllerFileChecks,
         },
     }
 

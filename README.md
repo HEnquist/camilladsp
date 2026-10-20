@@ -816,8 +816,12 @@ A rate measured by the backend, like 44097, is snapped to the nearest standard r
 A Specific file is only used if it captures from the same device as the entry config,
 and if its capture rate, channels and format match what the source reported.
 A file that doesn't match is logged as an error and skipped.
-The websocket command `CheckControllerFiles` checks every file the template can match,
-and reports the problems found.
+
+The websocket command `CheckControllerFiles` checks the configs the providers can use.
+It has one section per provider, and the section of a provider that is off is `null`.
+The Specific section lists every file the template can match,
+with the format read from its name and the problem found, if any.
+The Adapt section gives the entry config, the format it is written for, and its problem, if any.
 
 If no provider has a config for the new format, the controller waits for the source to change.
 It asks the backend what the source is doing once per second, and starts the matching config

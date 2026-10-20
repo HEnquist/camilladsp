@@ -756,10 +756,11 @@ Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller st
 
 #### `CheckControllerFiles`
 
-Check every file the Specific template can match, and report what is wrong with
-each one. Loads every file, so it is meant to be run on demand rather than polled.
+Check the configs the follow providers can use: every file the Specific template
+can match, and the entry config that Adapt starts from. Loads every file, so it is
+meant to be run on demand rather than polled.
 
-Returns (array of [`FileCheck`](#filecheck)): Each file the Specific template matches, with the format read from its name and the problem found, if any. Empty when Specific is off.
+Returns ([`ControllerFileChecks`](#controllerfilechecks)): One section per provider, `null` for a provider that is off.
 
 ### Config reading and checking
 
@@ -1078,17 +1079,14 @@ Fields:
 - `error_recovery` (`boolean`): Whether error recovery is on, enabled and in wait mode.
 - `stop_reason` ([`StopReason`](#stopreason)): Why processing last stopped.
 
-### `FileCheck`
+### `ControllerFileChecks`
 
-One file the Specific template matches, and what is wrong with it, if anything.
+Value of the `CheckControllerFiles` reply, one section per follow provider.
 
 Fields:
 
-- `file` (`string`): Path of the file.
-- `samplerate` (non-negative `integer` or `null`, optional): Sample rate read from the file name, if the template has the token.
-- `channels` (non-negative `integer` or `null`, optional): Channels read from the file name, if the template has the token.
-- `format` (`string` or `null`, optional): Sample format read from the file name, if the template has the token.
-- `problem` (`string` or `null`, optional): What is wrong with the file, `null` if it is usable.
+- `specific` (array of [`FileCheck`](#filecheck) or `null`, optional): Each file the Specific template matches, with the format read from its name and the problem found, if any. `null` when Specific is off.
+- `adapt` ([`AdaptCheck`](#adaptcheck) or `null`, optional): The entry config Adapt starts from. `null` when Adapt is off.
 
 ### `AudioDeviceDescriptor`
 
@@ -1166,6 +1164,32 @@ Fields:
 
 - `specific` (`string` or `null`, optional): Template for the Specific provider, absent to disable it.
 - `adapt` (`boolean` or `null`, optional): Enable the Adapt provider.
+
+### `FileCheck`
+
+One file the Specific template matches, and what is wrong with it, if anything.
+
+Fields:
+
+- `file` (`string`): Path of the file.
+- `samplerate` (non-negative `integer` or `null`, optional): Sample rate read from the file name, if the template has the token.
+- `channels` (non-negative `integer` or `null`, optional): Channels read from the file name, if the template has the token.
+- `format` (`string` or `null`, optional): Sample format read from the file name, if the template has the token.
+- `problem` (`string` or `null`, optional): What is wrong with the file, `null` if it is usable.
+
+### `AdaptCheck`
+
+The entry config that the Adapt provider starts from, and what is wrong with it, if
+anything. The format is the one the config is written for, after the command line
+overrides. Adapt changes the rate and the sample format, but not the channel count.
+
+Fields:
+
+- `file` (`string` or `null`, optional): Path of the entry config file, `null` for a config that was sent over the websocket.
+- `samplerate` (non-negative `integer` or `null`, optional): Capture sample rate, `null` when no config is loaded.
+- `channels` (non-negative `integer` or `null`, optional): Capture channels, `null` when no config is loaded.
+- `format` (`string` or `null`, optional): Capture sample format, `null` when it is automatic or no config is loaded.
+- `problem` (`string` or `null`, optional): What is wrong with the config, `null` if it is usable.
 
 ### `DeviceCapabilitySet`
 

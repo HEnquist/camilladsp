@@ -1480,13 +1480,8 @@ fn handle_command(
         }
         WsCommand::CheckControllerFiles {} => {
             let shared = &shared_data_inst.controller;
-            let value = match shared.settings().specific_template() {
-                Some(template) => {
-                    let entry = shared.entry.lock().clone();
-                    controller::preflight(template, entry.as_ref())
-                }
-                None => Vec::new(),
-            };
+            let entry = shared.entry.lock().clone();
+            let value = controller::check_files(&shared.settings(), entry.as_ref());
             Some(WsReply::CheckControllerFiles {
                 result: WsResult::Ok,
                 value,
