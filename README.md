@@ -814,12 +814,17 @@ Some only support the 48 kHz family, for example.
 For these, the entry config can give `samplerate` as a list of the rates the device runs natively:
 ```yaml
 devices:
-  samplerate: [48000, 96000]
+  samplerate: [96000, 48000]
 ```
 A source at a listed rate then runs natively at that rate.
 A source at any other rate is resampled to the first rate in the list,
 so put the preferred rate first.
-In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resampled to 48 kHz.
+In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resampled to 96 kHz.
+96 kHz is first because resampling up loses nothing.
+Resampling 88.2 kHz down to 48 kHz would have to remove everything above 24 kHz,
+while at 96 kHz all of it is kept.
+The cost is that the processing runs at the higher rate, which takes about twice the CPU time of 48 kHz.
+If that is too much, put 48 kHz first instead.
 The config's own resampler is used for this.
 If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
 or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
