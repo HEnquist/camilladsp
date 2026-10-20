@@ -135,7 +135,7 @@ jobs:
             sudo apt-get install -y -q --no-install-recommends "linux-modules-extra-$(uname -r)"
           fi
           sudo apt-get install -y -q --no-install-recommends alsa-utils \
-            python3-pytest python3-pytest-timeout python3-numpy python3-websocket
+            python3-pytest python3-pytest-timeout python3-numpy python3-websocket python3-yaml
           # The second loopback card is clocked by snd-dummy, so stopping the Dummy
           # playback stalls it, see alsa/loopback.py.
           sudo modprobe snd-aloop enable=1,1 pcm_substreams=2 timer_source=",Dummy.0.0"

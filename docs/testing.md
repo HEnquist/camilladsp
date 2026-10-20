@@ -21,12 +21,12 @@ in every combination of a paced and a free-running end.
 
 Most of the tests run on the test-only dummy capture and playback devices,
 so they need a build with the `dummy-backend` feature.
-They also need the Python packages `pytest`, `pytest-timeout`, `websocket-client`
-and `numpy`.
+They also need the Python packages `pytest`, `pytest-timeout`, `websocket-client`,
+`numpy` and `pyyaml`.
 
 ```sh
 cargo build --profile e2e --features dummy-backend
-pip install pytest pytest-timeout websocket-client numpy
+pip install pytest pytest-timeout websocket-client numpy pyyaml
 pytest -v testscripts/e2e -m "not stock"
 ```
 

@@ -78,7 +78,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-timeout websocket-client numpy sounddevice
+        run: pip install pytest pytest-timeout websocket-client numpy pyyaml sounddevice
 
       - name: Run the CoreAudio tests
         run: pytest -v testscripts/e2e -m coreaudio

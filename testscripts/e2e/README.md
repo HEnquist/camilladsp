@@ -35,7 +35,7 @@ forwards whatever command name it is handed, so it cannot lag.
 
 ```sh
 cargo build --profile e2e --features dummy-backend
-pip install pytest pytest-timeout websocket-client numpy
+pip install pytest pytest-timeout websocket-client numpy pyyaml
 pytest -v testscripts/e2e -m "not stock"
 ```
 

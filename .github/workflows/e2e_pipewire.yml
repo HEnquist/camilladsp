@@ -51,7 +51,7 @@ jobs:
             ca-certificates curl git zstd build-essential pkg-config clang libclang-dev \
             libasound2-dev libpipewire-0.3-dev libdbus-1-dev \
             dbus-daemon pipewire pipewire-bin wireplumber \
-            python3-pytest python3-pytest-timeout python3-numpy python3-websocket
+            python3-pytest python3-pytest-timeout python3-numpy python3-websocket python3-yaml
 
       - name: Checkout sources
         uses: actions/checkout@v5
