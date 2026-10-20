@@ -1154,19 +1154,19 @@ impl CaptureDevice for WasapiCaptureDevice {
             .name("WasapiCapture".to_string())
             .spawn(move || {
                 let mut resampler = new_resampler(
-                        &resampler_conf,
-                        channels,
-                        samplerate,
-                        capture_samplerate,
-                        chunksize,
+                    &resampler_conf,
+                    channels,
+                    samplerate,
+                    capture_samplerate,
+                    chunksize,
                     processing_params.clone(),
                 );
                 // Devices typically give around 1000 frames per buffer, set a reasonable capacity for the channel
                 let channel_capacity = if let Some(resamp) = &resampler {
                     let max_input_frames = resamp.resampler.input_frames_max();
-                    32*(chunksize + max_input_frames)/1024 + 10
+                    32 * (chunksize + max_input_frames) / 1024 + 10
                 } else {
-                    32*chunksize/1024 + 10
+                    32 * chunksize / 1024 + 10
                 };
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
@@ -1192,12 +1192,26 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let innerhandle = thread::Builder::new()
                     .name("WasapiCaptureInner".to_string())
                     .spawn(move || {
-                        let (_device, audio_client, capture_client, handle, _binary_format, wave_format) =
-                        match open_capture(&devname, capture_samplerate, channels, &sample_format, exclusive, polling, loopback) {
+                        let (
+                            _device,
+                            audio_client,
+                            capture_client,
+                            handle,
+                            _binary_format,
+                            wave_format,
+                        ) = match open_capture(
+                            &devname,
+                            capture_samplerate,
+                            channels,
+                            &sample_format,
+                            exclusive,
+                            polling,
+                            loopback,
+                        ) {
                             Ok(result) => {
                                 tx_state_dev.send(DeviceState::Ok(result.4)).unwrap_or(());
                                 result
-                            },
+                            }
                             Err(err) => {
                                 error!("Failed to open capture device, error: {err}");
                                 let msg = format!("Capture error: {err}");
@@ -1206,41 +1220,61 @@ impl CaptureDevice for WasapiCaptureDevice {
                             }
                         };
                         let blockalign = wave_format.get_blockalign();
-                        let channels =  CaptureChannels {
+                        let channels = CaptureChannels {
                             tx_filled: tx_dev,
                             ringbuf: device_producer,
                         };
                         let _rx_res = rx_start_inner.recv();
-                        let result = capture_loop(audio_client, capture_client, handle, channels, tx_disconnectreason, blockalign as usize, stop_signal_inner);
+                        let result = capture_loop(
+                            audio_client,
+                            capture_client,
+                            handle,
+                            channels,
+                            tx_disconnectreason,
+                            blockalign as usize,
+                            stop_signal_inner,
+                        );
                         if let Err(err) = result {
                             let msg = format!("Capture failed with error: {err}");
                             //error!("{}", msg);
                             tx_state_dev.send(DeviceState::Error(msg)).unwrap_or(());
                         }
-                    }).unwrap();
+                    })
+                    .unwrap();
                 let binary_format = match rx_state_dev.recv() {
                     Ok(DeviceState::Ok(fmt)) => fmt,
                     Ok(DeviceState::Error(err)) => {
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                        status_channel.send(StatusMessage::CaptureError(err)).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(err))
+                            .unwrap_or(());
                         barrier.wait();
                         return;
-                     },
+                    }
                     Err(err) => {
                         channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                        status_channel.send(StatusMessage::CaptureError(err.to_string() )).unwrap_or(());
+                        status_channel
+                            .send(StatusMessage::CaptureError(err.to_string()))
+                            .unwrap_or(());
                         barrier.wait();
                         return;
-                    },
+                    }
                 };
                 let bytes_per_sample = binary_format.bytes_per_sample();
 
                 let mut capture_frames = chunksize;
                 let mut averager = countertimer::TimeAverage::new();
                 let mut watcher_averager = countertimer::TimeAverage::new();
-                let mut valuewatcher = countertimer::ValueWatcher::new(capture_samplerate as f32, RATE_CHANGE_THRESHOLD_VALUE, RATE_CHANGE_THRESHOLD_COUNT);
+                let mut valuewatcher = countertimer::ValueWatcher::new(
+                    capture_samplerate as f32,
+                    RATE_CHANGE_THRESHOLD_VALUE,
+                    RATE_CHANGE_THRESHOLD_COUNT,
+                );
                 let mut value_range = 0.0;
-                let mut chunk_stats = ChunkStats{rms: vec![0.0; channels], peak: vec![0.0; channels]};
+                let mut chunk_stats = ChunkStats {
+                    rms: vec![0.0; channels],
+                    peak: vec![0.0; channels],
+                };
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
                 let used_channels = capture_status.read().used_channels.clone();
@@ -1249,10 +1283,15 @@ impl CaptureDevice for WasapiCaptureDevice {
                 // Sample rate measured over the last completed `rate_measure_interval` window,
                 // kept separate from the short update cadence.
                 let mut measured_rate = 0.0;
-                let mut silence_counter = countertimer::SilenceCounter::new(silence_threshold, silence_timeout, capture_samplerate, chunksize);
+                let mut silence_counter = countertimer::SilenceCounter::new(
+                    silence_threshold,
+                    silence_timeout,
+                    capture_samplerate,
+                    chunksize,
+                );
                 let mut state = ProcessingState::Running;
                 let mut saved_state = state;
-                let blockalign = bytes_per_sample*channels;
+                let blockalign = bytes_per_sample * channels;
                 // TODO check if this ever needs to be resized
                 let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                 let mut expected_chunk_nbr = 0;
@@ -1277,7 +1316,13 @@ impl CaptureDevice for WasapiCaptureDevice {
                 let _send_res = tx_start_inner.send(());
                 debug!("Capture device starts now!");
                 loop {
-                    match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, false) {
+                    match handle_capture_command(
+                        command_channel.try_recv(),
+                        &mut rate_adjust,
+                        &mut resampler,
+                        async_src,
+                        false,
+                    ) {
                         CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
                         CommandOutcome::Exit => {
                             send_capture_done(&channel, &status_channel);
@@ -1286,26 +1331,33 @@ impl CaptureDevice for WasapiCaptureDevice {
                         CommandOutcome::Disconnected => break,
                     }
                     match rx_state_dev.try_recv() {
-                        Ok(DeviceState::Ok(_)) => {},
+                        Ok(DeviceState::Ok(_)) => {}
                         Ok(DeviceState::Error(err)) => {
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            send_error_or_captureformatchange(&status_channel, &rx_disconnectreason, err);
+                            send_error_or_captureformatchange(
+                                &status_channel,
+                                &rx_disconnectreason,
+                                err,
+                            );
                             break;
-                        },
+                        }
                         Err(TryRecvError::Empty) => {}
                         Err(TryRecvError::Disconnected) => {
                             channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            send_error_or_captureformatchange(&status_channel, &rx_disconnectreason, "Inner capture thread exited.".to_string());
+                            send_error_or_captureformatchange(
+                                &status_channel,
+                                &rx_disconnectreason,
+                                "Inner capture thread exited.".to_string(),
+                            );
                             break;
                         }
                     }
-                    capture_frames = nbr_capture_frames(
-                        &resampler,
-                        capture_frames,
-                    );
+                    capture_frames = nbr_capture_frames(&resampler, capture_frames);
                     let capture_bytes = blockalign * capture_frames;
                     while device_consumer.occupied_len() < (blockalign * capture_frames) {
-                        trace!("Capture device needs more samples to make chunk, reading from channel.");
+                        trace!(
+                            "Capture device needs more samples to make chunk, reading from channel."
+                        );
                         match rx_dev.recv() {
                             Ok((chunk_nbr, data_bytes)) => {
                                 trace!("Capture, received chunk, length {data_bytes} bytes.");
@@ -1320,20 +1372,26 @@ impl CaptureDevice for WasapiCaptureDevice {
                                         crate::set_capture_state(&capture_status, state);
                                     }
                                     break;
-                                }
-                                else if state == ProcessingState::Stalled {
+                                } else if state == ProcessingState::Stalled {
                                     trace!("Capture device became active.");
                                     state = saved_state;
                                 }
                                 if chunk_nbr > expected_chunk_nbr {
-                                    warn!("Capture, samples were dropped, missing {} buffers.", chunk_nbr - expected_chunk_nbr);
+                                    warn!(
+                                        "Capture, samples were dropped, missing {} buffers.",
+                                        chunk_nbr - expected_chunk_nbr
+                                    );
                                     expected_chunk_nbr = chunk_nbr;
                                 }
                             }
                             Err(err) => {
                                 error!("Capture, channel is closed.");
                                 channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                                send_error_or_captureformatchange(&status_channel, &rx_disconnectreason, err.to_string());
+                                send_error_or_captureformatchange(
+                                    &status_channel,
+                                    &rx_disconnectreason,
+                                    err.to_string(),
+                                );
                                 return;
                             }
                         }
@@ -1347,40 +1405,40 @@ impl CaptureDevice for WasapiCaptureDevice {
                         device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
                         averager.add_value(capture_frames);
                         if let Some(capture_status) = capture_status.try_upgradable_read() {
-                            if averager.larger_than_millis(capture_status.update_interval as u64)
-                            {
+                            if averager.larger_than_millis(capture_status.update_interval as u64) {
                                 averager.restart();
-                                if let Ok(mut capture_status) = RwLockUpgradableReadGuard::try_upgrade(capture_status) {
+                                if let Ok(mut capture_status) =
+                                    RwLockUpgradableReadGuard::try_upgrade(capture_status)
+                                {
                                     capture_status.measured_samplerate = measured_rate as usize;
                                     capture_status.signal_range = value_range.to_f32();
                                     capture_status.rate_adjust = rate_adjust as f32;
                                     crate::update_capture_state(&mut capture_status, state);
-                                }
-                                else {
+                                } else {
                                     xtrace!("Capture status upgrade blocked, skip update.");
                                 }
                             }
-                        }
-                        else {
+                        } else {
                             xtrace!("Capture status blocked, skip update.");
                         }
                         watcher_averager.add_value(capture_frames);
-                        if watcher_averager.larger_than_millis(rate_measure_interval)
-                        {
+                        if watcher_averager.larger_than_millis(rate_measure_interval) {
                             let samples_per_sec = watcher_averager.average();
                             watcher_averager.restart();
                             let measured_rate_f = samples_per_sec;
                             measured_rate = measured_rate_f;
-                            debug!(
-                                "Capture, measured sample rate is {measured_rate_f:.1} Hz."
-                            );
-                            let changed = valuewatcher.check_value(measured_rate_f as f32);
-                            if changed {
-                                warn!("Sample rate change detected, last rate was {measured_rate_f} Hz.");
+                            debug!("Capture, measured sample rate is {measured_rate_f:.1} Hz.");
+                            if let Some(new_rate) = valuewatcher.check_value(measured_rate_f as f32)
+                            {
+                                warn!(
+                                    "Sample rate change detected, the rate is now {new_rate:.1} Hz."
+                                );
                                 if stop_on_rate_change {
                                     let msg = AudioMessage::EndOfStream;
                                     channel.send(msg).unwrap_or(());
-                                    status_channel.send(StatusMessage::capture_rate_change(measured_rate_f as usize)).unwrap_or(());
+                                    status_channel
+                                        .send(StatusMessage::capture_rate_change(new_rate as usize))
+                                        .unwrap_or(());
                                     break;
                                 }
                             }
@@ -1429,7 +1487,9 @@ impl CaptureDevice for WasapiCaptureDevice {
                             debug!("Capture outer thread returned to normal priority.")
                         }
                         Err(_) => {
-                            warn!("Could not bring the outer capture thread back to normal priority.")
+                            warn!(
+                                "Could not bring the outer capture thread back to normal priority."
+                            )
                         }
                     };
                 }

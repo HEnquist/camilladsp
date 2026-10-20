@@ -300,12 +300,20 @@ impl Default for TimeAverage {
 /// A measured rate is quantised to whole chunks per window, so a window that got an extra
 /// chunk is followed by one that got one fewer, and that noise alternates in sign.
 /// A real change is off the same way every time.
+///
+/// When it fires, it gives the median of the values that made it fire, rather than the last
+/// one. A single window can be far off, for example when the measuring thread was delayed, and
+/// the median of a few windows outvotes it.
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
     count_limit: usize,
     count: usize,
     above: bool,
+    /// The last values of the current run, at most `count_limit` of them.
+    recent: Vec<f32>,
+    /// Space for sorting `recent`, allocated up front.
+    sorted: Vec<f32>,
 }
 
 impl ValueWatcher {
@@ -314,20 +322,26 @@ impl ValueWatcher {
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
         let min_value = target_value / (1.0 + max_rel_diff);
         let max_value = target_value * (1.0 + max_rel_diff);
+        let count_limit = count_limit.max(1);
         ValueWatcher {
             min_value,
             max_value,
             count_limit,
             count: 0,
             above: false,
+            recent: Vec::with_capacity(count_limit + 1),
+            sorted: Vec::with_capacity(count_limit + 1),
         }
     }
 
     pub fn reset(&mut self) {
         self.count = 0;
+        self.recent.clear();
     }
 
-    pub fn check_value(&mut self, value: f32) -> bool {
+    /// Check a value. Returns the median of the last `count_limit` values once that many in
+    /// a row are outside the range on the same side, and `None` before that.
+    pub fn check_value(&mut self, value: f32) -> Option<f32> {
         let above = value > self.max_value;
         if above || value < self.min_value {
             if self.count > 0 && above == self.above {
@@ -335,11 +349,29 @@ impl ValueWatcher {
             } else {
                 self.count = 1;
                 self.above = above;
+                self.recent.clear();
+            }
+            self.recent.push(value);
+            if self.recent.len() > self.count_limit {
+                self.recent.remove(0);
             }
         } else {
             self.count = 0;
+            self.recent.clear();
         }
-        self.count >= self.count_limit
+        (self.count >= self.count_limit).then(|| self.median())
+    }
+
+    fn median(&mut self) -> f32 {
+        self.sorted.clear();
+        self.sorted.extend_from_slice(&self.recent);
+        self.sorted.sort_by(f32::total_cmp);
+        let mid = self.sorted.len() / 2;
+        if self.sorted.len().is_multiple_of(2) {
+            (self.sorted[mid - 1] + self.sorted[mid]) / 2.0
+        } else {
+            self.sorted[mid]
+        }
     }
 }
 
@@ -748,22 +780,22 @@ mod tests {
         let mut watcher = ValueWatcher::new(48000.0, 0.05, limit_nbr);
         for n in 0..10 {
             let val = 48000.0 * (1.0 + 0.004 * n as f32);
-            assert!(!watcher.check_value(val));
+            assert!(watcher.check_value(val).is_none());
             let val = 48000.0 * (1.0 - 0.004 * n as f32);
-            assert!(!watcher.check_value(val));
+            assert!(watcher.check_value(val).is_none());
         }
         for _ in 0..limit_nbr - 1 {
-            assert!(!watcher.check_value(44100.0));
+            assert!(watcher.check_value(44100.0).is_none());
         }
         for _ in 0..5 {
-            assert!(watcher.check_value(44100.0));
+            assert!(watcher.check_value(44100.0).is_some());
         }
-        assert!(!watcher.check_value(48000.0));
+        assert!(watcher.check_value(48000.0).is_none());
         for _ in 0..limit_nbr - 1 {
-            assert!(!watcher.check_value(88200.0));
+            assert!(watcher.check_value(88200.0).is_none());
         }
         for _ in 0..5 {
-            assert!(watcher.check_value(88200.0));
+            assert!(watcher.check_value(88200.0).is_some());
         }
     }
 
@@ -771,30 +803,41 @@ mod tests {
     fn test_valuewatcher_ignores_alternating_values() {
         let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
         for _ in 0..20 {
-            assert!(!watcher.check_value(48000.0 * 1.1));
-            assert!(!watcher.check_value(48000.0 * 0.9));
+            assert!(watcher.check_value(48000.0 * 1.1).is_none());
+            assert!(watcher.check_value(48000.0 * 0.9).is_none());
         }
     }
 
     #[test]
     fn test_valuewatcher_restarts_count_on_direction_change() {
         let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
-        assert!(!watcher.check_value(52000.0));
-        assert!(!watcher.check_value(52000.0));
-        assert!(!watcher.check_value(44100.0));
-        assert!(!watcher.check_value(44100.0));
-        assert!(watcher.check_value(44100.0));
+        assert!(watcher.check_value(52000.0).is_none());
+        assert!(watcher.check_value(52000.0).is_none());
+        assert!(watcher.check_value(44100.0).is_none());
+        assert!(watcher.check_value(44100.0).is_none());
+        assert!(watcher.check_value(44100.0).is_some());
+    }
+
+    #[test]
+    fn test_valuewatcher_gives_the_median() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        assert_eq!(watcher.check_value(44100.0), None);
+        // A window that came out low, as when the measuring thread was delayed.
+        assert_eq!(watcher.check_value(39558.0), None);
+        assert_eq!(watcher.check_value(44098.0), Some(44098.0));
+        // The run goes on, with the last three values.
+        assert_eq!(watcher.check_value(44102.0), Some(44098.0));
     }
 
     #[test]
     fn test_valuewatcher_reset() {
         let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
-        assert!(!watcher.check_value(44100.0));
-        assert!(!watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0).is_none());
+        assert!(watcher.check_value(44100.0).is_none());
         watcher.reset();
-        assert!(!watcher.check_value(44100.0));
-        assert!(!watcher.check_value(44100.0));
-        assert!(watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0).is_none());
+        assert!(watcher.check_value(44100.0).is_none());
+        assert!(watcher.check_value(44100.0).is_some());
     }
 
     #[test]

@@ -1228,13 +1228,12 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         debug!(
                             "Rate watcher, measured sample rate is {measured_rate_f:.1} Hz."
                         );
-                        let changed = valuewatcher.check_value(measured_rate_f as f32);
-                        if changed {
-                            warn!("sample rate change detected, last rate was {measured_rate_f} Hz.");
+                        if let Some(new_rate) = valuewatcher.check_value(measured_rate_f as f32) {
+                            warn!("Sample rate change detected, the rate is now {new_rate:.1} Hz.");
                             if stop_on_rate_change {
                                 let msg = AudioMessage::EndOfStream;
                                 channel.send(msg).unwrap_or(());
-                                status_channel.send(StatusMessage::capture_rate_change(measured_rate_f as usize)).unwrap_or(());
+                                status_channel.send(StatusMessage::capture_rate_change(new_rate as usize)).unwrap_or(());
                                 break;
                             }
                         }

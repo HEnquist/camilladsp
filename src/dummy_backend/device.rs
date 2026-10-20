@@ -389,12 +389,12 @@ fn capture_loop(
         if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
             let measured_rate = watcher_averager.average();
             watcher_averager.restart();
-            if valuewatcher.check_value(measured_rate as f32) {
-                warn!("Sample rate change detected, last rate was {measured_rate:.1} Hz");
+            if let Some(new_rate) = valuewatcher.check_value(measured_rate as f32) {
+                warn!("Sample rate change detected, the rate is now {new_rate:.1} Hz");
                 if params.stop_on_rate_change {
                     msg_channels
                         .status
-                        .send(StatusMessage::capture_rate_change(measured_rate as usize))
+                        .send(StatusMessage::capture_rate_change(new_rate as usize))
                         .unwrap_or(());
                     msg_channels
                         .audio

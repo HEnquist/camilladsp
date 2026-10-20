@@ -566,15 +566,14 @@ fn capture_loop(
                     let measured_rate_f =
                         bytes_per_sec / (params.channels * params.store_bytes_per_sample) as f64;
                     measured_rate = measured_rate_f;
-                    let changed = valuewatcher.check_value(measured_rate_f as f32);
-                    if changed {
-                        warn!("sample rate change detected, last rate was {measured_rate_f} Hz");
+                    if let Some(new_rate) = valuewatcher.check_value(measured_rate_f as f32) {
+                        warn!("Sample rate change detected, the rate is now {new_rate:.1} Hz");
                         if params.stop_on_rate_change {
                             let msg = AudioMessage::EndOfStream;
                             msg_channels.audio.send(msg).unwrap_or(());
                             msg_channels
                                 .status
-                                .send(StatusMessage::capture_rate_change(measured_rate_f as usize))
+                                .send(StatusMessage::capture_rate_change(new_rate as usize))
                                 .unwrap_or(());
                             break;
                         }

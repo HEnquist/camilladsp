@@ -1969,12 +1969,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let measured_rate_f =
                                     bytes_per_sec / (channels * bytes_per_sample) as f64;
                                 measured_rate = measured_rate_f;
-                                let changed = valuewatcher.check_value(measured_rate_f as f32);
-                                if changed && stop_on_rate_change {
+                                if let Some(new_rate) =
+                                    valuewatcher.check_value(measured_rate_f as f32)
+                                    && stop_on_rate_change
+                                {
                                     channel.send(AudioMessage::EndOfStream).unwrap_or(());
                                     status_channel
                                         .send(StatusMessage::capture_rate_change(
-                                            measured_rate_f as usize,
+                                            new_rate as usize,
                                         ))
                                         .unwrap_or(());
                                     break;
