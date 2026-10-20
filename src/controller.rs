@@ -272,6 +272,9 @@ pub fn check_variant(
             ));
         }
     }
+    if variant.devices.samplerate_list().is_some() {
+        return Err("its samplerate is a list, which only the entry config can have".to_string());
+    }
     if let Some(expected) = format.samplerate {
         let rate = capture_rate_of(variant);
         if rate != expected {
@@ -392,12 +395,20 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
 ///
 /// `format` is `None` when following is off or no format is known, and then the entry
 /// runs as is. `validated` is the entry already validated as is, reused if given.
+/// `settings` are the ones in effect, with following removed when it is off, since an
+/// entry with a list of sample rates is only accepted while Adapt follows the source.
 pub fn select_config(
     entry: &ConfigSource,
     format: Option<&SourceFormat>,
     settings: &ControllerSettings,
     validated: Option<(Configuration, ImpulseCache)>,
 ) -> Selection {
+    if entry.raw.devices.samplerate_list().is_some() && !settings.adapt_enabled() {
+        return Selection::Invalid(
+            "samplerate is a list, which needs the controller to follow the source with Adapt"
+                .to_string(),
+        );
+    }
     let running = RunningSource {
         source: entry.clone(),
         kind: LoadKind::Entry,
@@ -1276,5 +1287,109 @@ pipeline:
 
         let off = check_files(&ControllerSettings::default(), Some(&e));
         assert_eq!((off.specific, off.adapt), (None, None));
+    }
+
+    fn with_rate_list(mut conf: Configuration, rates: &[usize]) -> Configuration {
+        conf.devices.samplerate = config::SampleRates::List(
+            rates
+                .iter()
+                .map(|r| NonZeroUsize::new(*r).unwrap())
+                .collect(),
+        );
+        conf
+    }
+
+    #[test]
+    fn a_listed_rate_runs_natively() {
+        let extra = "  resampler:\n    type: Synchronous\n";
+        let conf = with_rate_list(base_config(48000, 2, extra), &[48000, 44100, 96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(96000, None)),
+            &settings(None, Some(true)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
+        assert_eq!(selected.config.devices.chunksize(), 2048);
+        assert_eq!(selected.config.devices.resampler, None);
+    }
+
+    #[test]
+    fn a_listed_rate_keeps_the_resampler_for_rate_adjust() {
+        let extra = "  resampler:\n    type: Slip\n  enable_rate_adjust: true\n";
+        let conf = with_rate_list(base_config(48000, 2, extra), &[48000, 96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(96000, None)),
+            &settings(None, Some(true)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
+        assert_eq!(
+            selected.config.devices.resampler,
+            Some(config::Resampler::Slip)
+        );
+    }
+
+    #[test]
+    fn an_unlisted_rate_is_resampled_to_the_first() {
+        let conf = with_rate_list(base_config(48000, 2, ""), &[48000, 96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(44100, None)),
+            &settings(None, Some(true)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 48000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 44100);
+        assert_eq!(selected.config.devices.chunksize(), 1024);
+        assert_eq!(
+            selected.config.devices.resampler,
+            Some(config::Resampler::Synchronous)
+        );
+    }
+
+    #[test]
+    fn a_rate_list_starts_at_the_first_rate() {
+        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
+        let selected = run(select_config(
+            &entry(conf),
+            None,
+            &settings(None, Some(true)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.resampler, None);
+    }
+
+    #[test]
+    fn a_rate_list_needs_adapt() {
+        let conf = with_rate_list(base_config(48000, 2, ""), &[48000, 96000]);
+        let dir = temp_dir("rate_list");
+        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
+        for settings in [
+            ControllerSettings::default(),
+            settings(Some(&template), None),
+        ] {
+            let selection = select_config(&entry(conf.clone()), None, &settings, None);
+            assert!(matches!(selection, Selection::Invalid(ref e) if e.contains("Adapt")));
+        }
+    }
+
+    #[test]
+    fn a_rate_list_parses_and_rejects_an_empty_one() {
+        let parsed = |rates: &str| {
+            let yaml = format!(
+                "samplerate: {rates}\nchunksize: 1024\ncapture: {{type: Stdin, channels: 2, format: S16_LE}}\nplayback: {{type: Stdout, channels: 2, format: S16_LE}}\n"
+            );
+            yaml_serde::from_str::<config::Devices>(&yaml)
+        };
+        assert_eq!(parsed("44100").unwrap().samplerate(), 44100);
+        let list = parsed("[96000, 44100]").unwrap();
+        assert_eq!(list.samplerate(), 96000);
+        assert_eq!(list.samplerate_list().unwrap().len(), 2);
+        assert!(parsed("[]").is_err());
     }
 }

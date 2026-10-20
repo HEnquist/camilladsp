@@ -268,7 +268,13 @@ impl Controller {
                 } else {
                     None
                 };
-                controller::select_config(&entry, format.as_ref(), &settings, validated)
+                // Without following, the providers are off, see `select_config`.
+                let in_effect = if following {
+                    settings
+                } else {
+                    ControllerSettings::default()
+                };
+                controller::select_config(&entry, format.as_ref(), &in_effect, validated)
             }
         }
     }

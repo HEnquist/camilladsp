@@ -389,14 +389,53 @@ pub fn set_capture_format_by_name(capture: &mut CaptureDevice, name: &str) -> Re
 /// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk
 /// duration about the same. With a resampler, `capture_samplerate` is changed, and the
 /// resampler is dropped if that leaves a 1:1 conversion and rate adjust is off.
+///
+/// When `samplerate` is a list, a listed rate runs natively, and any other rate is resampled
+/// to the first one in the list, adding a resampler if the config has none that can do it.
 pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsize) {
     let cfg_rate = configuration.devices.samplerate();
     let cfg_chunksize = configuration.devices.chunksize();
     let rate_value = rate.get();
 
+    if let Some(rates) = configuration.devices.samplerate_list() {
+        let first = rates[0];
+        let listed = rates.contains(&rate);
+        let rate_adjust = configuration.devices.rate_adjust();
+        configuration.devices.samplerate = SampleRates::Single(first);
+        configuration.devices.capture_samplerate = None;
+        if listed {
+            // Without the resampler, the plain path below changes samplerate and scales
+            // chunksize. Rate adjust still needs it, converting 1:1.
+            debug!("{rate_value} Hz is in the samplerate list, running at it natively");
+            let resampler = configuration.devices.resampler.take();
+            adapt_to_capture_rate(configuration, rate);
+            if rate_adjust && resampler.is_some() {
+                configuration.devices.resampler = resampler;
+                configuration.devices.capture_samplerate = Some(rate);
+            }
+        } else {
+            debug!("{rate_value} Hz is not in the samplerate list, resampling it to {first}");
+            configuration.devices.capture_samplerate = Some(rate);
+            // Slip only corrects drift, it can't convert between rates.
+            if matches!(
+                configuration.devices.resampler,
+                None | Some(Resampler::Slip)
+            ) {
+                configuration.devices.resampler = Some(if rate_adjust {
+                    Resampler::AsyncSinc(AsyncSincParameters::Profile {
+                        profile: AsyncSincProfile::Balanced,
+                    })
+                } else {
+                    Resampler::Synchronous
+                });
+            }
+        }
+        return;
+    }
+
     if configuration.devices.resampler.is_none() {
         debug!("Adapt samplerate to {rate_value}");
-        configuration.devices.samplerate = rate;
+        configuration.devices.samplerate = SampleRates::Single(rate);
         let scaled_chunksize = if rate_value > cfg_rate {
             cfg_chunksize * (rate_value as f32 / cfg_rate as f32).round() as usize
         } else {
