@@ -773,7 +773,7 @@ The settings are kept in a `controller` section of the statefile:
 config_path: /home/user/configs/conf_48000.yml
 controller:
   follow_capture:
-    specific: /home/user/configs/conf_$samplerate$.yml
+    specific: null
     adapt: true
   error_recovery: true
 mute: [false, false, false, false, false]
@@ -796,18 +796,30 @@ The config that is loaded explicitly, from the command line, the statefile, `Set
 When the capture device reports that the source changed format, the controller asks two
 config providers for a config to run for the new format:
 
+- __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
+  `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
 - __Specific__ (`specific`): a file name template with one or more of the tokens
   `$samplerate$`, `$channels$` and `$format$`.
   The tokens are replaced by the values the backend reported, and that file is loaded.
   A relative template is resolved from the directory of the entry config file,
   but absolute paths are recommended.
-  This is the provider to use when the channel count changes with the rate,
-  as with ADAT S/MUX, since then the mixers have to change as well.
   The entry config should be one of these files, the one for the format it is written for.
   It is then selected like any other file. If it isn't, there is a warning, and with Specific
   alone, the controller waits for the source to change until a file matches.
-- __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
-  `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
+
+Adapt is by far the easier one to set up, and should be used whenever it can be.
+It needs a single config, and the usual per-rate needs are already covered:
+`$samplerate$` tokens in filter file names load the right FIR filters for each rate,
+and a `samplerate` list, described below, resamples the rates the hardware can't run.
+
+Specific is much more involved. It needs a complete config file for every format,
+and every one of them has to be kept in sync when something changes.
+It is only needed when Adapt can't work, which is when the channel count changes.
+This is the case with ADAT S/MUX, where an interface has fewer channels at the higher rates,
+or with a player that switches between stereo and 5.1 on a loopback.
+The capture channels and the mixers then have to change as well.
+Use both together for this: Specific files for the formats where the channel count is different,
+and Adapt for everything else.
 
 Not every device runs at every rate.
 Some only support the 48 kHz family, for example.

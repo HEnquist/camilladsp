@@ -209,8 +209,9 @@ Recommended settings when following a loopback:
 - Leave the capture `format` out of the config. A sample format change from the player then
   only reopens the capture with the new format, with the same config.
   Nothing else in a config depends on the capture format.
-- Use `$samplerate$` in the Specific template, or only Adapt, unless the player also changes
-  the channel count. See `exampleconfigs/follow_loopback.yml` for a config to start from.
+- Use Adapt. It only needs the one config, see `exampleconfigs/follow_loopback.yml` for one to
+  start from. Specific is only needed if the player also changes the channel count, for example
+  between stereo music and 5.1 films, since then the mixers have to change too.
 
 Following also works with the USB gadget and other ALSA devices, on any kernel.
 The gadget reports the rate the host plays at.
