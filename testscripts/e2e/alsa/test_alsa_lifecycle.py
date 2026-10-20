@@ -74,26 +74,8 @@ def holder():
         process.wait(timeout=5)
 
 
-def test_stop_on_inactive_ends_the_session_when_the_source_stops(
-    start_cdsp, alsa_config, feeder
-):
-    """The player quitting is the end of the stream, when the config asks for that.
-
-    The loopback reports it through the `PCM Slave Active` control, which the capture
-    subscribes to, so this is the only test that exercises the backend's control event
-    handling. It ends like a file reaching its end, with `Done` rather than an error.
-    """
-    feed = feeder()
-    config = alsa_config(capture={"stop_on_inactive": True})
-    cdsp = start_cdsp(config=config, extra_args=["--wait"])
-    wait_for_peak(cdsp, "GetCaptureSignalPeak")
-    feed.stop()
-    assert wait_for_stop(cdsp) == "Done"
-    assert cdsp.exit() == EXIT_OK
-
-
-def test_without_stop_on_inactive_a_stopped_source_is_silence(start_cdsp, alsa_config, feeder):
-    """By default the capture outlives the player, and a new player is picked up again.
+def test_a_stopped_source_is_silence(start_cdsp, alsa_config, feeder):
+    """The capture outlives the player, and a new player is picked up again.
 
     With nothing playing into it the loopback capture keeps running on its own timer
     and delivers silence, so the engine stays up. A player that starts again has to

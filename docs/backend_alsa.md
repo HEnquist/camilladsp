@@ -183,7 +183,7 @@ To also start CamillaDSP automatically, run it as a systemd service, see [Using 
 #### Following the player's sample rate and format
 CamillaDSP can follow a player that changes sample rate, sample format or channel count,
 using the built-in controller, see
-[Following the capture source](./README.md#following-the-capture-source-and-error-recovery).
+[Following the capture source](../README.md#following-the-capture-source-and-error-recovery).
 The capture side stays open the whole time, also between tracks and while nothing plays.
 
 While following, CamillaDSP sets the `PCM Notify` control of the loopback cable it captures from,
@@ -212,8 +212,6 @@ Recommended settings when following a loopback:
 - Use `$samplerate$` in the Specific template, or only Adapt, unless the player also changes
   the channel count. See `exampleconfigs/follow_loopback.yml` for a config to start from.
 
-The `stop_on_inactive` option is not needed with following, and is ignored while following is on.
-
 Following also works with the USB gadget and other ALSA devices, on any kernel.
 The gadget reports the rate the host plays at.
 Other devices are followed by measuring the incoming sample rate,
@@ -239,8 +237,7 @@ This example configuration will be used to explain the various options specific 
     channels: 2
     device: "hw:0,1"
     format: S16_LE (*)
-    stop_on_inactive: false (*)
-    follow_volume_control: "PCM Playback Volume" (*)
+    link_volume_control: "PCM Playback Volume" (*)
   playback:
     type: Alsa
     channels: 2
@@ -311,19 +308,17 @@ numid=6,iface=MIXER,name='PCM Capture Switch'
 ```
 
 ### Subscribe to ALSA control events
-The ALSA capture device subscribes to control events from the USB Gadget and Loopback devices.
-For the loopback, it subscribes to events from the `PCM Slave Active` control,
-and for the gadget it subscribes to events from `Capture Rate`.
-Both of these can indicate when playback has stopped.
-If CamillaDSP should stop when that happens, set `stop_on_inactive` to `true`.
-For the loopback, this means that CamillaDSP releases the capture side,
-making it possible for a player application to re-open at another sample rate.
-With a kernel where `PCM Notify` works, following the player is the better way to do this,
-see [Following the player's sample rate and format](#following-the-players-sample-rate-and-format).
-
-For the gadget, the control can also indicate that the sample rate changed.
-When this happens, the capture can no longer continue and CamillaDSP will stop.
+The ALSA capture device subscribes to control events from the USB Gadget,
+from its `Capture Rate` control.
+This control tells when the host changes the sample rate.
+When this happens, the capture can no longer continue and CamillaDSP stops.
 The new sample rate can then be read by the `GetStopReason` websocket command.
+With following enabled, CamillaDSP instead switches to a config for the new rate.
+When the host stops playing, the control drops to zero, which CamillaDSP ignores.
+
+The Loopback needs no control events.
+A format change from the player is seen when the kernel stops the capture,
+see [Following the player's sample rate and format](#following-the-players-sample-rate-and-format).
 
 ## Real-time priority
 CamillaDSP promotes its processing and audio threads to real-time priority (`SCHED_FIFO`), which helps

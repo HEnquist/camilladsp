@@ -817,7 +817,7 @@ as soon as there is one.
 Any command, for example a new config or `Stop`, ends the wait.
 
 While following is on, the controller decides what happens when the source changes,
-so `stop_on_rate_change` is always on, and `stop_on_inactive` is always off.
+so `stop_on_rate_change` is always on.
 
 `GetConfig` returns the config that runs, which may be an adapted config or a Specific file.
 `GetConfigFilePath` and the statefile keep the path of the entry config,

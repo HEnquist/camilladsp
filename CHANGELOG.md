@@ -1,3 +1,21 @@
+# 6.0.0
+New features:
+- Built-in controller, replacing camilladsp-controller. It follows the format of the capture
+  source, either with a config file per format or by adapting the loaded config to the new rate,
+  and it retries after device errors. Set it up with `--follow_specific`, `--follow_adapt` and
+  `--error_recovery`, in the `controller` section of the statefile, or over the websocket.
+- Alsa: follow a player on the Loopback, with the capture open the whole time.
+  Needs a kernel where the Loopback's `PCM Notify` works, Linux 7.4 or a stable kernel with the fix.
+
+Changes:
+- The `CaptureFormatChange` and `PlaybackFormatChange` stop reasons give the new `samplerate`,
+  `channels` and `format`, instead of only the rate.
+
+Removed:
+- Alsa: the `stop_on_inactive` capture option. It was a workaround for camilladsp-controller,
+  following the player replaces it. A config that still has it fails to load,
+  the 6.0 config migration in pyCamillaDSP and CamillaGUI removes it.
+
 # 5.0.0
 This is the short version. See [CHANGELOG_5.0_details.md](CHANGELOG_5.0_details.md) for the full
 list of changes, with background and measurements.

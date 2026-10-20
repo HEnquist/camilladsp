@@ -86,7 +86,6 @@ pub struct AlsaCaptureDevice {
     pub silence_timeout: f64,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
-    pub stop_on_inactive: bool,
     /// The controller follows the source format, see `audiodevice::new_capture_device`.
     pub follow: bool,
     pub link_volume_control: Option<String>,
@@ -820,7 +819,6 @@ fn capture_buffer(
     ctl: &Option<Ctl>,
     hctl: &Option<HCtl>,
     elems: &CaptureElements,
-    status_channel: &crossbeam_channel::Sender<StatusMessage>,
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> Res<(CaptureResult, usize)> {
@@ -871,8 +869,7 @@ fn capture_buffer(
                 if pollresult.ctl {
                     trace!("Got a control event");
                     if let Some(c) = ctl {
-                        let event_result =
-                            process_events(c, elems, status_channel, params, processing_params);
+                        let event_result = process_events(c, elems, params, processing_params);
                         match event_result {
                             CaptureResult::Done | CaptureResult::FormatChange(_) => {
                                 return Ok((event_result, 0));
@@ -1439,7 +1436,6 @@ impl CaptureDevice for AlsaCaptureDevice {
         let async_src = resampler_is_async(&resampler_config);
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
-        let stop_on_inactive = self.stop_on_inactive;
         let follow = self.follow;
         let link_volume_control = self.link_volume_control.clone();
         let link_mute_control = self.link_mute_control.clone();
@@ -1572,7 +1568,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     capture_status: capture_status_inner,
                                     stop_on_rate_change,
                                     rate_measure_interval,
-                                    stop_on_inactive,
                                     follow,
                                     link_volume_control,
                                     link_mute_control,
@@ -1669,7 +1664,6 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         &ctl,
                                         &hctl,
                                         &capture_elements,
-                                        &status_channel_inner,
                                         &mut cap_params,
                                         &processing_params_inner,
                                     );

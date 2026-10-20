@@ -291,21 +291,11 @@ pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
 
 /// Create a capture device.
 ///
-/// With `follow`, the controller follows the source format, and owns the settings that
-/// decide what happens when the source changes: `stop_on_inactive` is forced off and
-/// `stop_on_rate_change` on, whatever the config says.
+/// With `follow`, the controller follows the source format, and owns the setting that
+/// decides what happens when the source changes: `stop_on_rate_change` is forced on,
+/// whatever the config says.
 pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn CaptureDevice> {
     if follow {
-        if conf.capture.stop_on_inactive() {
-            warn!("Following the capture source, ignoring stop_on_inactive: true in the config");
-        }
-        #[cfg(target_os = "linux")]
-        if let config::CaptureDevice::Alsa {
-            stop_on_inactive, ..
-        } = &mut conf.capture
-        {
-            *stop_on_inactive = Some(false);
-        }
         conf.stop_on_rate_change = Some(true);
     }
     // Use `capture_samplerate` from config if given, and resampling is enabled.
@@ -354,7 +344,6 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
             channels,
             ref device,
             format,
-            stop_on_inactive,
             ref link_volume_control,
             ref link_mute_control,
             ..
@@ -370,7 +359,6 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
             silence_timeout: conf.silence_timeout_s(),
             stop_on_rate_change: conf.stop_on_rate_change(),
             rate_measure_interval: conf.rate_measure_interval_s(),
-            stop_on_inactive: stop_on_inactive.unwrap_or_default(),
             follow,
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),

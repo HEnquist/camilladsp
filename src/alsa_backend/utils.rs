@@ -16,7 +16,7 @@
 
 use crate::config::{AlsaSampleFormat, BinarySampleFormat};
 use crate::controller::{SourceFormat, SourceState};
-use crate::{CaptureStatus, PlaybackStatus, Res, StatusMessage};
+use crate::{CaptureStatus, PlaybackStatus, Res};
 use alsa::card::Iter;
 use alsa::ctl::{Ctl, DeviceIter, ElemId, ElemIface, ElemType, ElemValue};
 use alsa::device_name::HintIter;
@@ -60,7 +60,6 @@ pub struct CaptureParams {
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
-    pub stop_on_inactive: bool,
     /// The controller follows the source format, see `audiodevice::new_capture_device`.
     pub follow: bool,
     pub link_volume_control: Option<String>,
@@ -786,7 +785,6 @@ impl<'a> ElemData<'a> {
 
 #[derive(Default)]
 pub struct CaptureElements<'a> {
-    pub loopback_active: Option<ElemData<'a>>,
     pub loopback_rate: Option<ElemData<'a>>,
     pub loopback_format: Option<ElemData<'a>>,
     pub loopback_channels: Option<ElemData<'a>>,
@@ -869,7 +867,6 @@ impl FileDescriptors {
 pub fn process_events(
     ctl: &Ctl,
     elems: &CaptureElements,
-    status_channel: &crossbeam_channel::Sender<StatusMessage>,
     params: &mut CaptureParams,
     processing_params: &Arc<ProcessingParameters>,
 ) -> CaptureResult {
@@ -878,17 +875,6 @@ pub fn process_events(
         debug!("Event from numid {nid}");
         let action = get_event_action(nid, elems, ctl, params);
         match action {
-            EventAction::SourceInactive => {
-                if params.stop_on_inactive {
-                    debug!(
-                        "Stopping, capture device is inactive and stop_on_inactive is set to true"
-                    );
-                    status_channel
-                        .send(StatusMessage::CaptureDone)
-                        .unwrap_or_default();
-                    return CaptureResult::Done;
-                }
-            }
             EventAction::FormatChange(value) => {
                 debug!("Stopping, capture device sample rate changed");
                 return CaptureResult::FormatChange(SourceFormat::rate(value));
@@ -897,17 +883,11 @@ pub fn process_events(
                 debug!("Alsa volume change event, set main fader to {vol} dB");
                 processing_params.set_target_volume(0, vol);
                 params.linked_volume_value = Some(vol);
-                //status_channel
-                //    .send(StatusMessage::SetVolume(vol))
-                //    .unwrap_or_default();
             }
             EventAction::SetMute(mute) => {
                 debug!("Alsa mute change event, set mute state to {mute}");
                 processing_params.set_mute(0, mute);
                 params.linked_mute_value = Some(mute);
-                //status_channel
-                //    .send(StatusMessage::SetMute(mute))
-                //    .unwrap_or_default();
             }
             EventAction::None => {}
         }
@@ -920,7 +900,6 @@ pub enum EventAction {
     SetVolume(f32),
     SetMute(bool),
     FormatChange(usize),
-    SourceInactive,
 }
 
 pub fn get_event_action(
@@ -929,19 +908,7 @@ pub fn get_event_action(
     ctl: &Ctl,
     params: &mut CaptureParams,
 ) -> EventAction {
-    if let Some(eldata) = &elems.loopback_active
-        && eldata.numid == numid
-    {
-        let value = eldata.read_as_bool();
-        debug!("Loopback active: {value:?}");
-        if let Some(active) = value {
-            if active {
-                return EventAction::None;
-            }
-            return EventAction::SourceInactive;
-        }
-    }
-    // The `PCM Slave` rate, format and channels events are ignored. A format change
+    // The `PCM Slave` active, rate, format and channels events are ignored. A format change
     // on a loopback is followed when the kernel stops the capture for it, see
     // `CaptureElements::kernel_stop_is_format_change`.
     if let Some(eldata) = &elems.volume
@@ -971,7 +938,8 @@ pub fn get_event_action(
         debug!("Gadget rate: {value:?}");
         if let Some(rate) = value {
             if rate == 0 {
-                return EventAction::SourceInactive;
+                debug!("Gadget source is inactive");
+                return EventAction::None;
             }
             if rate as usize != params.capture_samplerate {
                 return EventAction::FormatChange(rate as usize);
@@ -993,13 +961,6 @@ impl<'a> CaptureElements<'a> {
         volume_name: &Option<String>,
         mute_name: &Option<String>,
     ) {
-        self.loopback_active = find_elem(
-            h,
-            ElemIface::PCM,
-            Some(device),
-            Some(subdevice),
-            "PCM Slave Active",
-        );
         let pcm_elem = |name| find_elem(h, ElemIface::PCM, Some(device), Some(subdevice), name);
         self.loopback_rate = pcm_elem("PCM Slave Rate");
         self.loopback_format = pcm_elem("PCM Slave Format");

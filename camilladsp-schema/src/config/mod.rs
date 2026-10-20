@@ -330,8 +330,6 @@ pub enum CaptureDevice {
         #[serde(default)]
         format: Option<AlsaSampleFormat>,
         #[serde(default)]
-        stop_on_inactive: Option<bool>,
-        #[serde(default)]
         link_volume_control: Option<String>,
         #[serde(default)]
         link_mute_control: Option<String>,
@@ -504,16 +502,6 @@ impl CaptureDevice {
             CaptureDevice::Wasapi(_) => format_from_name::<WasapiSampleFormat>(name).is_some(),
             CaptureDevice::Asio(_) => format_from_name::<AsioSampleFormat>(name).is_some(),
             _ => BinarySampleFormat::from_name(name).is_some(),
-        }
-    }
-
-    /// Whether the config asks the capture to stop when its source goes inactive.
-    pub fn stop_on_inactive(&self) -> bool {
-        match self {
-            CaptureDevice::Alsa {
-                stop_on_inactive, ..
-            } => stop_on_inactive.unwrap_or_default(),
-            _ => false,
         }
     }
 }
