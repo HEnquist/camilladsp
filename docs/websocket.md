@@ -1187,6 +1187,7 @@ Fields:
 
 - `file` (`string` or `null`, optional): Path of the entry config file, `null` for a config that was sent over the websocket.
 - `samplerate` (non-negative `integer` or `null`, optional): Capture sample rate, `null` when no config is loaded.
+- `samplerates` (array of non-negative `integer` or `null`, optional): The rates that run natively, when `samplerate` is a list, with the preferred one first. Other rates are resampled to the first one. `null` for a single `samplerate`, and then every rate runs natively.
 - `channels` (non-negative `integer` or `null`, optional): Capture channels, `null` when no config is loaded.
 - `format` (`string` or `null`, optional): Capture sample format, `null` when it is automatic or no config is loaded.
 - `problem` (`string` or `null`, optional): What is wrong with the config, `null` if it is usable.

@@ -22,6 +22,17 @@
             "description": "Capture sample rate, `null` when no config is loaded.",
             "minimum": 0
           },
+          "samplerates": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "The rates that run natively, when `samplerate` is a list, with the preferred one first.\nOther rates are resampled to the first one. `null` for a single `samplerate`, and then\nevery rate runs natively."
+          },
           "channels": {
             "type": [
               "integer",

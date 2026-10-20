@@ -220,8 +220,14 @@ pub fn load_config(filename: &str) -> Result<Configuration, Issues> {
     Ok(parse_config(&contents)?)
 }
 
-fn apply_overrides(configuration: &mut Configuration) -> Res<()> {
+/// Apply the CLI overrides. With `skip_samplerate`, the `-r` override is left out, since the
+/// rate is about to be adapted to the source anyway. Applying it first would turn a
+/// `samplerate` list into a single rate, and the adaptation would no longer see the list.
+fn apply_overrides(configuration: &mut Configuration, skip_samplerate: bool) -> Res<()> {
     let mut overrides = OVERRIDES.read().clone();
+    if skip_samplerate {
+        overrides.samplerate = None;
+    }
     // Only one match arm for now, might be more later.
     #[allow(clippy::single_match)]
     match &configuration.devices.capture {
@@ -680,8 +686,8 @@ pub fn validate_config(
 
 /// Validate a configuration like [`validate_config`], adapted to a capture sample rate.
 ///
-/// The adaptation, see [`adapt_to_capture_rate`], is applied after the CLI overrides, so
-/// that a `-r` override does not undo it, and before the tokens are expanded, so that
+/// The adaptation, see [`adapt_to_capture_rate`], takes the place of a `-r` override, and is
+/// applied after the other CLI overrides, and before the tokens are expanded, so that
 /// `$samplerate$` gives the new rate.
 pub fn validate_config_at_rate(
     conf: &mut Configuration,
@@ -691,7 +697,7 @@ pub fn validate_config_at_rate(
     let mut issues = Issues::new();
     let mut impulses = ImpulseCache::new();
     // pre-process by applying overrides and replacing tokens
-    if let Err(err) = apply_overrides(conf) {
+    if let Err(err) = apply_overrides(conf, capture_rate.is_some()) {
         // The overrides come from the command line, and without them the rest
         // of the config cannot be checked as it will run.
         return Err(Issue::invalid(issue_path![], err.to_string()).into());

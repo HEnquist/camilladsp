@@ -592,6 +592,7 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
         return AdaptCheck {
             file: None,
             samplerate: None,
+            samplerates: None,
             channels: None,
             format: None,
             problem: Some("no config is loaded".to_string()),
@@ -604,6 +605,12 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
     AdaptCheck {
         file: entry.filename.clone(),
         samplerate: Some(capture_rate_of(&conf)),
+        // From the config as written, since a `-r` override turns the list into one rate.
+        samplerates: entry
+            .raw
+            .devices
+            .samplerate_list()
+            .map(|rates| rates.iter().map(|r| r.get()).collect()),
         channels: Some(conf.devices.capture.channels()),
         format: conf.devices.capture.format_name(),
         problem,
@@ -1256,6 +1263,7 @@ pipeline:
             Some(AdaptCheck {
                 file: None,
                 samplerate: Some(44100),
+                samplerates: None,
                 channels: Some(2),
                 format: Some("S32_LE".to_string()),
                 problem: None,
@@ -1392,5 +1400,15 @@ pipeline:
         assert_eq!(list.samplerate(), 96000);
         assert_eq!(list.samplerate_list().unwrap().len(), 2);
         assert!(parsed("[]").is_err());
+    }
+
+    #[test]
+    fn check_files_lists_the_native_rates() {
+        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
+        let checks = check_files(&settings(None, Some(true)), Some(&entry(conf)));
+        let adapt = checks.adapt.unwrap();
+        assert_eq!(adapt.samplerate, Some(96000));
+        assert_eq!(adapt.samplerates, Some(vec![96000, 48000]));
+        assert_eq!(adapt.problem, None);
     }
 }

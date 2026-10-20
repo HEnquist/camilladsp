@@ -831,6 +831,7 @@ or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
 Without Adapt, and until a source rate is known, the first rate is used.
 This makes a config with a list usable everywhere, also as a Specific file.
 The `--samplerate` override uses the list the same way Adapt does.
+Once the controller has a source rate to run at, the override is ignored, since that sets the rate anyway.
 
 The Specific provider is asked first, then Adapt. Either one can be used alone.
 Adapt always starts from the entry config, so switching back and forth doesn't drift.
@@ -845,6 +846,7 @@ It has one section per provider, and the section of a provider that is off is `n
 The Specific section lists every file the template can match,
 with the format read from its name and the problem found, if any.
 The Adapt section gives the entry config, the format it is written for, and its problem, if any.
+When `samplerate` is a list, it also gives the rates that run natively, with the preferred one first.
 
 If no provider has a config for the new format, the controller waits for the source to change.
 It asks the backend what the source is doing once per second, and starts the matching config
