@@ -254,7 +254,7 @@ impl Controller {
                     && let SourceState::Format(format) =
                         query_capture_source(&entry.raw.devices.capture)
                 {
-                    let format = format.snapped();
+                    let format = controller::snap_format(&format);
                     info!("The capture source reports {format}");
                     self.last_format = Some(format);
                 }
@@ -396,7 +396,7 @@ impl Controller {
                 capture,
                 started,
             } => {
-                let format = format.snapped();
+                let format = controller::snap_format(&format);
                 if !follow || !(capture || is_asio_full_duplex(&last.config)) {
                     return Next::Idle;
                 }
@@ -512,7 +512,7 @@ impl Controller {
             first = false;
             match query_capture_source(&capture) {
                 SourceState::Format(reported) => {
-                    let reported = reported.snapped();
+                    let reported = controller::snap_format(&reported);
                     if reported.same_as(&current) {
                         trace!("The source is still at {current}");
                         continue;

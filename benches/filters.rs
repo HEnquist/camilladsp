@@ -4,11 +4,11 @@
 
 use criterion::{Bencher, BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use camillalib::CamillaFloat;
-use camillalib::filters::Filter;
-use camillalib::filters::biquad::{Biquad, BiquadCoefficients};
-use camillalib::filters::diffeq::DiffEq;
-use camillalib::filters::fftconv::FftConv;
+use camilladsp::CamillaFloat;
+use camilladsp::filters::Filter;
+use camilladsp::filters::biquad::{Biquad, BiquadCoefficients};
+use camilladsp::filters::diffeq::DiffEq;
+use camilladsp::filters::fftconv::FftConv;
 
 /// Bench a single convolution
 fn run_conv(b: &mut Bencher, len: usize, chunksize: usize) {

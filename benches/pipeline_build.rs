@@ -40,11 +40,11 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::time::Duration;
 
-use camillalib::ProcessingParameters;
-use camillalib::config;
-use camillalib::config::FiniteF64;
-use camillalib::filters::fftconv::{ConvCoeffCache, ImpulseCache};
-use camillalib::pipeline::Pipeline;
+use camilladsp::ProcessingParameters;
+use camilladsp::config;
+use camilladsp::config::FiniteF64;
+use camilladsp::filters::fftconv::{ConvCoeffCache, ImpulseCache};
+use camilladsp::pipeline::Pipeline;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

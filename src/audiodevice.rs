@@ -237,6 +237,12 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 full_duplex,
             })
         }
+        // Every device type parses on every platform, and validation rejects the
+        // ones this build has no backend for.
+        other => unreachable!(
+            "{} playback is not supported by this build, validation should have rejected it",
+            other.type_name()
+        ),
     }
 }
 
@@ -272,10 +278,14 @@ pub fn query_capture_source(conf: &config::CaptureDevice) -> SourceState {
         config::CaptureDevice::Wasapi(_) | config::CaptureDevice::Asio(_) => SourceState::Unknown,
         config::CaptureDevice::SignalGenerator { .. } => SourceState::Unknown,
         #[cfg(feature = "dummy-backend")]
-        config::CaptureDevice::Dummy { source_port, .. } => match source_port {
-            Some(port) => crate::dummy_backend::source::query(*port),
-            None => SourceState::Unknown,
-        },
+        config::CaptureDevice::Dummy {
+            source_port: Some(port),
+            ..
+        } => crate::dummy_backend::source::query(*port),
+        // A Dummy without a source, and the device types this build has no backend for.
+        // Every device type parses on every platform.
+        #[allow(unreachable_patterns)]
+        _ => SourceState::Unknown,
     }
 }
 
@@ -524,6 +534,12 @@ pub fn new_capture_device(mut conf: config::Devices, follow: bool) -> Box<dyn Ca
                 full_duplex,
             })
         }
+        // Every device type parses on every platform, and validation rejects the
+        // ones this build has no backend for.
+        other => unreachable!(
+            "{} capture is not supported by this build, validation should have rejected it",
+            other.type_name()
+        ),
     }
 }
 

@@ -136,7 +136,9 @@ jobs:
           fi
           sudo apt-get install -y -q --no-install-recommends alsa-utils \
             python3-pytest python3-pytest-timeout python3-numpy python3-websocket
-          sudo modprobe snd-aloop pcm_substreams=2
+          # The second loopback card is clocked by snd-dummy, so stopping the Dummy
+          # playback stalls it, see alsa/loopback.py.
+          sudo modprobe snd-aloop enable=1,1 pcm_substreams=2 timer_source=",Dummy.0.0"
           sudo modprobe snd-dummy
           # The default user of the minimal image is not in the audio group, and nobody
           # may ask for real time priority. Both apply from the next ssh login on.
@@ -154,6 +156,7 @@ jobs:
           ulimit -r
           aplay -l | grep -E "Loopback|Dummy"
           arecord -q -D hw:Loopback,1,0 -f S16_LE -r 48000 -c 2 -t raw -d 1 /dev/null
+          grep -x "Dummy.0.0" /proc/asound/Loopback_1/timer_source
           EOF
 
       - name: Copy the binary and the suite into the guest

@@ -1394,7 +1394,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 let (_tx_dev, _rx_dev) = bounded::<usize>(channel_capacity);
 
                 let buffer_fill = Arc::new(parking_lot::Mutex::new(
-                    countertimer::DeviceBufferEstimator::new(samplerate),
+                    countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_clone = buffer_fill.clone();
                 let mut chunk_stats = ChunkStats {
@@ -1677,22 +1677,15 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                     match channel.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            // Skip the sample when the callback holds the lock,
-                            // a 0 would drag the average down.
-                            if let Some(estimated_buffer_fill) =
-                                buffer_fill.try_lock().map(|b| b.estimate() as f64)
-                            {
-                                let buffer_level =
-                                    estimated_buffer_fill + (channel.len() * chunksize) as f64;
-                                if let Some(speed) =
-                                    rate_reporter.update(buffer_level, &playback_status)
-                                {
-                                    status_channel
-                                        .send(StatusMessage::SetSpeed(speed))
-                                        .unwrap_or(());
-                                }
-                            } else {
-                                xtrace!("Buffer estimator busy, skip buffer level sample.");
+                            let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            if let Some(speed) = rate_reporter.update_from_estimate(
+                                estimate,
+                                channel.len() * chunksize,
+                                &playback_status,
+                            ) {
+                                status_channel
+                                    .send(StatusMessage::SetSpeed(speed))
+                                    .unwrap_or(());
                             }
 
                             chunk.update_stats(&mut chunk_stats);
@@ -1712,6 +1705,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         }
                         Ok(AudioMessage::Pause) => {
                             trace!("Playback, pause message received.");
+                            rate_reporter.interrupt();
                         }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel

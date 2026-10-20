@@ -26,7 +26,7 @@ const PUSH_RETRIES: usize = 16;
 /// When the ring buffer is full it waits for the device to drain it, half a chunk duration at a
 /// time. That wait is what paces a source that is not rate limited, such as the signal generator.
 /// Without it the data would arrive far faster than the device can play it, and most of it would
-/// be dropped. If there is still no room after [`PUSH_RETRIES`] waits the device is not draining,
+/// be dropped. If there is still no room after `PUSH_RETRIES` waits the device is not draining,
 /// and the chunk is dropped whole. That is warned about once per episode, and each dropped chunk
 /// is logged at trace.
 pub struct RingBufferFeeder {

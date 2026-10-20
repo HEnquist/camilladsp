@@ -10,7 +10,9 @@ frequency of a tone, see cable.py.
 
 Loopback capture is not here. A loopback of either render endpoint of the cable gets
 only zeros on the runner, through the soundcard package as well as through CamillaDSP,
-so it says nothing about the backend.
+so it says nothing about the backend. It cannot test a stall either: VB-CABLE is one of
+the drivers that delivers silence when nothing plays, instead of stopping the capture.
+See "Differences between drivers" in docs/backend_wasapi.md.
 """
 
 import pytest

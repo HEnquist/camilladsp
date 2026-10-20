@@ -212,12 +212,30 @@ def test_a_clock_off_nominal_is_measured(start_cdsp, alsa_config, feeder, shift)
     rather than its own. With both moved the same way nothing drifts, and what is left
     is the measurement itself, which is what the rate watcher and the GUI's rate display
     rely on.
+
+    Each measurement counts the frames that arrived in a window of a second, and the
+    capture delivers them a period of 512 frames at a time, so a single one can be off
+    by a period, about 1 %. That is as much as the shift. Averaged over several
+    windows it comes well inside the 0.3 % tolerance, and still a third of the shift.
+    The first window is left out, since it starts with the capture, and so are the
+    highest and lowest fifth of the readings, so that one window disturbed by a
+    scheduling hiccup in the VM does not decide.
     """
     set_rate_shift(CAPTURE_CABLE, shift)
     set_rate_shift(PLAYBACK_CABLE, shift)
     feeder()
     cdsp = start_cdsp(config=alsa_config())
     expected = shifted_rate(RATE, shift)
-    cdsp.poll_until_true(
-        "GetCaptureRate", lambda rate: abs(rate - expected) < 0.001 * RATE, timeout=10.0
+    cdsp.poll_until_true("GetCaptureRate", lambda rate: rate > 0, timeout=10.0)
+    time.sleep(1.5)
+    readings = []
+    deadline = time.monotonic() + 8.0
+    while time.monotonic() < deadline:
+        readings.append(cdsp.send("GetCaptureRate"))
+        time.sleep(0.1)
+    readings.sort()
+    trim = len(readings) // 5
+    measured = statistics.mean(readings[trim:-trim])
+    assert abs(measured - expected) < 0.003 * RATE, (
+        f"the capture rate averaged {measured:.0f}, expected {expected:.0f}"
     )

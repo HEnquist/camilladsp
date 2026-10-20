@@ -8,6 +8,7 @@ New features:
 - Websocket commands for streaming signal levels and state change events.
 - Websocket commands for reading spectrum data, single read and streaming.
 - Websocket command for getting device capabilities.
+- JSON Schema of the websocket messages, for validating clients.
 - RF64 support for reading and writing wav files larger than 4 GB.
 - Adjustable corner frequencies and Q for the `Loudness` shelves.
 - ASIO: capture and playback can use two different devices.
@@ -15,6 +16,7 @@ New features:
 - PipeWire: request the config sample rate as the graph rate, for multi-rate DACs.
 
 Changes:
+- Config errors list every problem found, each with its location in the config.
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.
 - Applying a config with large FIR filters no longer stalls the audio.
@@ -23,10 +25,18 @@ Changes:
 - ASIO: the ASIO4ALL driver is refused, use the Wasapi backend instead.
 - Pre-built Linux binaries need glibc 2.34 or newer (Raspberry Pi OS Bookworm or similar).
 - No more pre-built armv6 binary for Raspberry Pi 1 and Zero.
+- Log module names start with `camilladsp::` instead of `camillalib::`.
+- Overruns and underruns are logged the same way in every backend, with one warning per event.
 
 Bugfixes:
+- Changing biquad parameters on the fly no longer produces a loud transient.
+- `DiffEq` filters with an `a0` other than 1.0 now get the correct gain.
 - PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.
 - File playback writes correct wav header sizes.
+- Alsa: a capture overrun no longer stops processing when capture and playback share a USB device.
+- Alsa: playback resumes at the target level after the device stalls, such as a UAC2 gadget.
+- Alsa, threaded backend: many fixes for stalls, pauses and rate adjust,
+  and it no longer keeps a CPU core busy.
 - Various smaller fixes, see the [detailed changelog](CHANGELOG_5.0_details.md#bugfixes).
 
 Config changes (breaking):
@@ -37,17 +47,23 @@ Config changes (breaking):
   `attack_unit`, `release_unit`) or in the parameter name (`adjust_interval_s`,
   `silence_timeout_s`, `ramp_time_ms` and so on). See the
   [detailed changelog](CHANGELOG_5.0_details.md#config-changes-breaking) for the full list.
+- Stricter validation, so some configs that loaded in 4.x are now rejected. For example `.nan`
+  and `.inf` values, out of range gains, and mixers that list the same source channel twice.
+  See the [detailed changelog](CHANGELOG_5.0_details.md#config-validation) for the full list.
 
 Websocket protocol changes (breaking):
 - Messages use a uniform tagged object shape. For example `{"SetUpdateInterval": 500}` becomes
   `{"command": "SetUpdateInterval", "value": 500}`, and replies carry the name in a `reply` field.
-  See the details for the full description. Users of pycamilladsp won't notice this,
+  See the [detailed changelog](CHANGELOG_5.0_details.md#websocket-protocol-changes-breaking)
+  for the full description. Users of pycamilladsp won't notice this,
   as long as they update to pycamilladsp 5.0.
+- Commands with unknown fields are rejected, so that a misspelled field name gives an error.
 
 Build changes (breaking):
 - The `websocket` feature is gone, the websocket server is always included.
 - The `asio-backend` feature is gone, ASIO is always included on Windows.
 - The `32bit` feature is replaced by `RUSTFLAGS="--cfg camillafloat_f32"`.
+- The library is renamed from `camillalib` to `camilladsp`, and `PrcFmt` to `CamillaFloat`.
 
 Removed:
 - Dropped the Jack, Pulse and Bluez backends. On Linux, use the native PipeWire backend, or

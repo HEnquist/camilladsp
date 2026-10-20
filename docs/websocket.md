@@ -1,0 +1,1401 @@
+<!--
+websocket.md is auto-generated from the protocol types by the ws_docs test of the
+camilladsp-schema crate, using camilladsp-schema/tests/ws_template.md.j2.
+Do not edit websocket.md directly. Add commands in ws_protocol! in
+camilladsp-schema/src/protocol.rs and edit the text around them in the template, then run
+UPDATE_DOCS=1 cargo test -p camilladsp-schema --features utoipa --test ws_docs
+-->
+# Controlling via websocket
+
+If the websocket server is enabled with the `-p` option,
+CamillaDSP will listen to incoming websocket connections on the specified port.
+
+If additionally the "wait" flag is given, it will wait for a config to be uploaded
+via the websocket server before starting the processing.
+
+By default the websocket server binds to the address 127.0.0.1,
+which means it's only accessible locally (on the same machine).
+If it should be also available to remote machines, give the IP address
+of the interface where it should be available with the `-a` option.
+Giving 0.0.0.0 will bind to all interfaces.
+
+
+## Command syntax
+Every command is a JSON object with a `"command"` field holding the command name:
+```json
+{"command": "GetVersion"}
+```
+Commands that take arguments carry them in additional named fields:
+```json
+{"command": "SetUpdateInterval", "value": 500}
+```
+
+The return values are also JSON (in string format).
+Every reply is a JSON object with a `"reply"` field holding the reply name and a `"result"` field,
+which is either Ok or an error.
+The commands that don't return a value reply with just the name and result:
+```json
+{
+  "reply": "SetUpdateInterval",
+  "result": "Ok"
+}
+```
+
+The commands that return a value also include a "value" field:
+```json
+{
+  "reply": "GetUpdateInterval",
+  "result": "Ok",
+  "value": 500
+}
+```
+
+When a command fails, the `"result"` field holds the error name instead of `"Ok"`.
+Most commands that return a value still include the `"value"` field,
+holding a placeholder that should be ignored.
+Some errors are just the name:
+```json
+{
+  "reply": "SetFaderVolume",
+  "result": "InvalidFaderError"
+}
+```
+Errors that carry a description add a top-level `"message"` field:
+```json
+{
+  "reply": "SetConfig",
+  "result": "ConfigValidationError",
+  "message": "Invalid value for samplerate"
+}
+```
+See [Error responses](#error-responses) for the full list.
+
+The messages are also available as JSON Schema, in [websocket_schema.json](./websocket_schema.json).
+Validate a command against `#/components/schemas/WsCommand`
+and a reply against `#/components/schemas/WsReply`.
+Objects with fields that are not in the schema fail validation.
+
+Command names and field names are case sensitive.
+A message that can't be parsed as a command, for example because of a misspelled command name,
+gets an `Invalid` reply with an `"error"` field describing the problem:
+```json
+{
+  "reply": "Invalid",
+  "error": "unknown variant `StopSubScription`, expected one of `SetConfigFilePath`, ..."
+}
+```
+A command with a field that it does not take is rejected the same way,
+so that a misspelled field name gives an error instead of being silently ignored:
+```json
+{
+  "reply": "Invalid",
+  "error": "unknown field `valeu`, expected `value`"
+}
+```
+
+## Message encoding
+
+Every message, in both directions, is a websocket text frame whose payload is a JSON document
+encoded as a UTF-8 string. There is no binary framing and no extra envelope: the string *is* the
+JSON.
+
+This means:
+
+- **Sending:** serialize your command object to a JSON string before handing it to the websocket
+  library. Sending a native object or map directly will not work unless the library serializes it
+  for you.
+- **Receiving:** parse the received string back into an object. Some libraries deliver text frames
+  as raw bytes or a buffer rather than a string; if so, decode them as UTF-8 first, then parse.
+- **Be defensive:** guard the parse step so a malformed or unexpected frame does not crash your
+  handler.
+
+Whether any of these steps happen automatically depends on your language and websocket library, so
+check what yours does. For example, in JavaScript you would serialize with `JSON.stringify()`
+before sending and parse with `JSON.parse()` on receipt; in Python the `json` module's `dumps` and
+`loads` do the same. Most languages ship an equivalent JSON encoder and decoder.
+
+If you use Python, the pyCamillaDSP library handles all of this for you. See
+[Controlling from Python](#controlling-from-python) below.
+
+## Subscriptions
+
+The subscribe commands (`SubscribeState`, `SubscribeSignalLevels`, `SubscribeVuLevels` and
+`SubscribeSpectrum`) switch the connection to streaming mode.
+CamillaDSP then pushes event messages on that connection whenever there is new data,
+without waiting for a request.
+
+While a subscription is active, the connection __only__ accepts `StopSubscription`.
+Any other command is not executed, and gets this reply instead:
+```json
+{
+  "reply": "Invalid",
+  "error": "Only StopSubscription is accepted while streaming is active"
+}
+```
+After `StopSubscription` the connection accepts all commands again.
+
+This means that a client that needs a subscription and also sends other commands
+must use two connections, one for the subscription and one for the commands.
+The same goes for receiving several streams at once,
+since each connection can have only one active subscription.
+
+
+## All commands
+
+The available commands are listed below.
+All commands return a result, and for those that also return a value it is described here.
+The structured values that commands take and return are described under [Types](#types).
+
+### General
+
+Basic commands for querying the CamillaDSP version and the list of supported
+device types, and for stopping or exiting the process.
+
+#### `GetVersion`
+
+Get the CamillaDSP version string.
+
+Returns (`string`): Version string, e.g. `"2.0.0"`.
+
+#### `GetSupportedDeviceTypes`
+
+Get the list of supported playback and capture device types.
+
+Returns (array \[array of `string`, array of `string`\]): `[list_of_playback_types, list_of_capture_types]`.
+
+#### `Stop`
+
+Stop processing and wait for a new configuration to be uploaded
+via `SetConfig` or `SetConfigFilePath` +
+`Reload`.
+
+#### `Exit`
+
+Stop processing and exit CamillaDSP.
+
+### Websocket server settings
+
+Controls the polling interval used for background status sampling.
+The update interval determines how often the capture rate and signal range
+snapshots are refreshed internally.
+
+#### `GetUpdateInterval`
+
+Get the update interval for capture rate and signal range polling.
+
+Returns (non-negative `integer`): Update interval in milliseconds.
+
+#### `SetUpdateInterval`
+
+Set the update interval for capture rate and signal range polling.
+
+Arguments:
+
+- `value` (non-negative `integer`): Interval in milliseconds.
+
+### Processing status
+
+Commands for monitoring the running pipeline: processing state, capture rate,
+signal range, async-resampler adjustment, playback buffer level, clipped
+samples, and CPU load. Also covers the optional state file and
+a push subscription for state-change events.
+
+#### `GetState`
+
+Get the current processing state.
+
+Returns ([`ProcessingState`](#processingstate)): Current processing state.
+
+#### `GetStopReason`
+
+Get the reason processing last stopped.
+
+Returns ([`StopReason`](#stopreason)): Reason the processing last stopped.
+
+#### `SubscribeState`
+
+Subscribe to pushed processing state change events.
+
+While subscribed, CamillaDSP sends a [`StateEvent`](#stateevent) message whenever the
+processing state changes. The event payload always contains `state`. When the state is
+`"Inactive"` it also contains `stop_reason`.
+
+Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
+
+#### `StopSubscription`
+
+Stop an active subscription (signal levels, VU levels, state, or spectrum).
+
+If no subscription is active, the reply is [`Invalid`](#invalid)
+with the error `"No active subscription"`.
+
+#### `GetCaptureRate`
+
+Get the measured sample rate of the capture device.
+
+Returns (non-negative `integer`): Measured capture sample rate in Hz.
+
+#### `GetSignalRange`
+
+Get the peak-to-peak signal range of the last processed chunk.
+
+A value of 2.0 means full level (signal swings from −1.0 to +1.0).
+
+Returns (`number`): Peak-to-peak amplitude range of the last chunk (2.0 = full level).
+
+#### `GetRateAdjust`
+
+Get the current adjustment factor applied to the asynchronous resampler.
+
+Returns (`number`): Rate adjustment factor applied to the async resampler (1.0 = no adjustment).
+
+#### `GetBufferLevel`
+
+Get the current playback device buffer level when rate adjust is enabled.
+
+Returns (non-negative `integer`): Playback device buffer fill level in frames; 0 if rate adjust is not enabled.
+
+#### `GetClippedSamples`
+
+Get the number of samples that have been clipped since start, or since the
+counter was last reset. Loading a new config does not reset it.
+
+Returns (non-negative `integer`): Number of clipped samples since start or the last reset.
+
+#### `ResetClippedSamples`
+
+Reset the clipped-samples counter to zero.
+
+#### `GetProcessingLoad`
+
+Get the current pipeline processing load.
+
+Returns (`number`): Pipeline processing load in percent.
+
+#### `GetResamplerLoad`
+
+Get the current resampler processing load.
+
+Returns (`number`): Resampler processing load in percent.
+
+#### `GetStateFilePath`
+
+Get the path of the state file, if one is configured.
+
+Returns (`string` or `null`): File path of the state file, or `null` if no state file is used.
+
+#### `GetStateFileUpdated`
+
+Check whether all pending changes have been saved to the state file.
+
+Returns (`boolean`): `true` if all changes have been saved to the state file.
+
+### Signal levels
+
+Read RMS and peak levels for capture and playback channels.
+Levels are available as an instantaneous snapshot, averaged over a time window,
+accumulated since the last call, or pushed continuously via a subscription.
+Also includes peak-since-start tracking, per-channel display labels,
+and a smoothed VU-meter subscription.
+
+#### `GetCaptureSignalRms`
+
+Get the RMS level of the last chunk on the capture side, per channel.
+
+Returns (array of `number`): RMS level per capture channel in dB (0 dB = full level).
+
+#### `GetCaptureSignalRmsSince`
+
+Get the RMS level averaged over the last `value` seconds on the capture side, per channel.
+
+Arguments:
+
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): RMS level per capture channel in dB, averaged over the requested window.
+
+#### `GetCaptureSignalRmsSinceLast`
+
+Get the RMS level since the last call to this command from this client, per channel.
+
+On the first call, returns values since the client connected.
+If called again before new data is available, returns an empty list.
+
+Returns (array of `number`): RMS level per capture channel in dB since the last call; empty if no new data.
+
+#### `GetCaptureSignalPeak`
+
+Get the peak level of the last chunk on the capture side, per channel.
+
+Returns (array of `number`): Peak level per capture channel in dB (0 dB = full level).
+
+#### `GetCaptureSignalPeakSince`
+
+Get the peak level over the last `value` seconds on the capture side, per channel.
+
+Arguments:
+
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): Peak level per capture channel in dB over the requested window.
+
+#### `GetCaptureSignalPeakSinceLast`
+
+Get the peak level since the last call to this command from this client, per channel.
+
+Returns (array of `number`): Peak level per capture channel in dB since the last call; empty if no new data.
+
+#### `GetPlaybackSignalRms`
+
+Get the RMS level of the last chunk on the playback side, per channel.
+
+Returns (array of `number`): RMS level per playback channel in dB (0 dB = full level).
+
+#### `GetPlaybackSignalRmsSince`
+
+Get the RMS level averaged over the last `value` seconds on the playback side, per channel.
+
+Arguments:
+
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): RMS level per playback channel in dB, averaged over the requested window.
+
+#### `GetPlaybackSignalRmsSinceLast`
+
+Get the RMS level since the last call to this command from this client, per channel.
+
+Returns (array of `number`): RMS level per playback channel in dB since the last call; empty if no new data.
+
+#### `GetPlaybackSignalPeak`
+
+Get the peak level of the last chunk on the playback side, per channel.
+
+Returns (array of `number`): Peak level per playback channel in dB (0 dB = full level).
+
+#### `GetPlaybackSignalPeakSince`
+
+Get the peak level over the last `value` seconds on the playback side, per channel.
+
+Arguments:
+
+- `value` (`number`): Time window in seconds.
+
+Returns (array of `number`): Peak level per playback channel in dB over the requested window.
+
+#### `GetPlaybackSignalPeakSinceLast`
+
+Get the peak level since the last call to this command from this client, per channel.
+
+Returns (array of `number`): Peak level per playback channel in dB since the last call; empty if no new data.
+
+#### `GetSignalLevels`
+
+Get RMS and peak levels for both sides in a single request.
+
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides.
+
+#### `GetSignalLevelsSince`
+
+Get RMS and peak levels over the last `value` seconds for both sides.
+
+Arguments:
+
+- `value` (`number`): Time window in seconds.
+
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides, averaged over the requested window.
+
+#### `GetSignalLevelsSinceLast`
+
+Get RMS and peak levels since the last call to this command from this client, for both sides.
+
+Returns ([`AllLevels`](#alllevels)): RMS and peak levels for both sides since the last call; empty if no new data.
+
+#### `SubscribeSignalLevels`
+
+Subscribe to pushed signal level events.
+
+While subscribed, CamillaDSP sends a [`SignalLevelsEvent`](#signallevelsevent) message each time a
+new chunk is analyzed. The event rate therefore depends on the configured chunk size and
+sample rate. Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
+
+Arguments:
+
+- `value` ([`WsSignalLevelSide`](#wssignallevelside)): Which side to receive events for.
+
+#### `SubscribeVuLevels`
+
+Subscribe to smoothed, rate-capped VU-meter level events.
+
+If `attack` or `release` is out of range the command returns [`InvalidValueError`](#invalidvalueerror)
+and no subscription is started.
+
+While subscribed, CamillaDSP sends [`VuLevelsEvent`](#vulevelsevent) messages containing
+smoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.
+Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
+
+Arguments:
+
+- `value` ([`VuSubscription`](#vusubscription)): Rate limit and smoothing settings.
+
+#### `GetSignalPeaksSinceStart`
+
+Get the peak capture and playback levels measured since processing started.
+
+Returns ([`PbCapLevels`](#pbcaplevels)): Peak levels since processing started, for both sides.
+
+#### `ResetSignalPeaksSinceStart`
+
+Reset the peak-since-start counters. Affects all connected clients.
+
+#### `GetChannelLabels`
+
+Get the optional display labels for capture and playback channels.
+
+Returns ([`ChannelLabels`](#channellabels)): Display labels for capture and playback channels.
+
+### Spectrum analysis
+
+Compute an FFT-based frequency spectrum from the audio passing through
+the pipeline. Available as a one-shot request or a continuous push
+subscription.
+
+#### `GetSpectrum`
+
+Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.
+
+Arguments:
+
+- `value` ([`SpectrumRequest`](#spectrumrequest)): The spectrum to compute.
+
+Returns ([`SpectrumData`](#spectrumdata) or `null`): Computed spectrum with frequency and magnitude arrays.
+
+#### `SubscribeSpectrum`
+
+Subscribe to pushed spectrum events.
+
+If processing is not running when this is sent, the result is
+[`ProcessingNotRunningError`](#processingnotrunningerror) and no subscription is started.
+
+While subscribed, CamillaDSP sends [`SpectrumEvent`](#spectrumevent) each time a new spectrum is
+ready. If processing stops, a final event with [`ProcessingStopped`](#processingstopped) is sent and
+the subscription is cancelled. Resubscribe once processing has resumed.
+
+Send `StopSubscription` to end the stream.
+No other commands are accepted on the connection until then.
+
+Arguments:
+
+- `value` ([`SpectrumSubscription`](#spectrumsubscription)): The spectrum to compute, and the push rate.
+
+### Volume control
+
+Read and adjust the volume and mute state of the faders.
+The Main fader (index 0) maps to fader index 0; Aux1–Aux4 map to indices 1–4.
+Volume adjustments can optionally specify a clamping range so that the
+result stays within caller-defined limits.
+
+#### `GetVolume`
+
+Get the current volume of the Main fader.
+
+Returns (`number`): Current volume in dB.
+
+#### `SetVolume`
+
+Set the volume of the Main fader. Clamped to −150 to +50 dB.
+
+Arguments:
+
+- `value` (`number`): Volume in dB.
+
+#### `AdjustVolume`
+
+Adjust the volume of the Main fader by `value` dB.
+
+Arguments:
+
+- `value` (`number`): Volume change in dB.
+- `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
+- `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
+
+Returns (`number`): New volume in dB after the adjustment.
+
+#### `GetMute`
+
+Get the mute state of the Main fader.
+
+Returns (`boolean`): `true` if muted.
+
+#### `SetMute`
+
+Set the mute state of the Main fader.
+
+Arguments:
+
+- `value` (`boolean`): `true` to mute, `false` to unmute.
+
+#### `ToggleMute`
+
+Toggle the mute state of the Main fader.
+
+Returns (`boolean`): New mute state after the toggle.
+
+#### `GetFaders`
+
+Get the volume and mute state of all faders in a single request.
+
+Returns (array of [`Fader`](#fader)): List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4).
+
+#### `GetFaderVolume`
+
+Get the volume of a specific fader.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[non-negative `integer`, `number`\]): `[fader_index, volume_dB]`.
+
+#### `SetFaderVolume`
+
+Set the volume of a specific fader. Clamped to −150 to +50 dB.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume in dB.
+
+#### `SetFaderExternalVolume`
+
+Special volume setter for use with a Loudness filter and an external volume control
+(without a Volume filter). Clamped to −150 to +50 dB.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume in dB.
+
+#### `AdjustFaderVolume`
+
+Adjust the volume of a specific fader by `value` dB.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`number`): Volume change in dB.
+- `min` (`number` or `null`, optional): Lower limit for the resulting volume in dB. Defaults to −150 dB.
+- `max` (`number` or `null`, optional): Upper limit for the resulting volume in dB. Defaults to +50 dB.
+
+Returns (array \[non-negative `integer`, `number`\]): `[fader_index, new_volume_dB]` after the adjustment.
+
+#### `GetFaderMute`
+
+Get the mute state of a specific fader.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[non-negative `integer`, `boolean`\]): `[fader_index, is_muted]`.
+
+#### `SetFaderMute`
+
+Set the mute state of a specific fader.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+- `value` (`boolean`): `true` to mute, `false` to unmute.
+
+#### `ToggleFaderMute`
+
+Toggle the mute state of a specific fader.
+
+Arguments:
+
+- `fader` (non-negative `integer`): Fader index, 0 for Main and 1–4 for Aux1–Aux4.
+
+Returns (array \[non-negative `integer`, `boolean`\]): `[fader_index, new_mute_state]` after the toggle.
+
+### Config management
+
+Read and modify the active configuration.
+Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
+effect immediately. Changes via `SetConfigFilePath` require a subsequent
+`Reload` to be applied.
+While the built-in controller follows the capture source, `GetConfig` returns
+the config that runs, which is the loaded config adapted to the source rate or
+a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
+it was made from, so the patch carries over to the next format change.
+
+#### `GetConfig`
+
+Read the active configuration.
+
+Returns (`string`): Active config in YAML format.
+
+#### `GetConfigJson`
+
+Read the active configuration as JSON.
+
+Returns (`string`): Active config in JSON format.
+
+#### `GetConfigTitle`
+
+Read the `title` field from the active configuration.
+
+Returns (`string`): Title string from the active config.
+
+#### `GetConfigDescription`
+
+Read the `description` field from the active configuration.
+
+Returns (`string`): Description string from the active config.
+
+#### `GetConfigFilePath`
+
+Get the path of the currently loaded config file.
+
+Returns (`string` or `null`): File path of the active config, or `null` if no file is loaded.
+
+#### `GetPreviousConfig`
+
+Read the previously active configuration (before the last reload or upload).
+
+Returns (`string`): Previously active config in YAML format.
+
+#### `SetConfigFilePath`
+
+Change the active config file path. Not applied until `Reload` is called.
+
+Arguments:
+
+- `value` (`string`): Path of the config file.
+
+#### `SetConfig`
+
+Upload and immediately apply a new configuration as a YAML string.
+
+Arguments:
+
+- `value` (`string`): Config in YAML format.
+
+#### `SetConfigJson`
+
+Upload and immediately apply a new configuration as a JSON string.
+
+Arguments:
+
+- `value` (`string`): Config in JSON format.
+
+#### `PatchConfig`
+
+Apply a partial patch to the active configuration.
+
+If the resulting config is valid it is applied immediately.
+
+Arguments:
+
+- `value` (any JSON value): Partial config object containing only the fields to change.
+
+#### `GetConfigValue`
+
+Read a single value from the active configuration using a JSON Pointer (RFC 6901).
+
+Arguments:
+
+- `value` (`string`): JSON Pointer to the value, such as `"/devices/samplerate"`.
+
+Returns (any JSON value): Value at the specified JSON Pointer path.
+
+#### `SetConfigValue`
+
+Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+
+Arguments:
+
+- `pointer` (`string`): JSON Pointer to the value, such as `"/devices/samplerate"`.
+- `value` (any JSON value): The value to store there.
+
+#### `Reload`
+
+Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+
+### Controller
+
+The built-in controller follows the format of the capture source and recovers
+from device errors. Its settings are the `controller` section of the statefile,
+and both features only work in wait mode.
+
+#### `GetControllerSettings`
+
+Get the settings of the built-in controller, the `controller` section of the
+statefile.
+
+Returns ([`ControllerSettings`](#controllersettings) or `null`): The `controller` section, or `null` if there is none.
+
+#### `SetControllerSettings`
+
+Replace the settings of the built-in controller. They take effect at the next
+session start, so send a `Reload` to apply them at once.
+
+Arguments:
+
+- `value` ([`ControllerSettings`](#controllersettings) or `null`, optional): The whole `controller` section, or `null` to remove it.
+
+#### `GetControllerStatus`
+
+Get the state of the built-in controller: the running Specific config file,
+error recovery, and whether it is waiting for the source to change format.
+
+Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller state.
+
+#### `CheckControllerFiles`
+
+Check every file the Specific template can match, and report what is wrong with
+each one. Loads every file, so it is meant to be run on demand rather than polled.
+
+Returns (array of [`FileCheck`](#filecheck)): Each file the Specific template matches, with the format read from its name and the problem found, if any. Empty when Specific is off.
+
+### Config reading and checking
+
+Parse and validate a configuration string or file without affecting the
+running pipeline. Useful for checking a config before applying it.
+The `Validate` variants perform more thorough cross-field checks than
+the `Read` variants.
+
+#### `ReadConfig`
+
+Parse and fill defaults for a YAML config string without changing the active config.
+
+Arguments:
+
+- `value` (`string`): Config in YAML format.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
+
+#### `ReadConfigJson`
+
+Parse and fill defaults for a JSON config string without changing the active config.
+
+Arguments:
+
+- `value` (`string`): Config in JSON format.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
+
+#### `ReadConfigFile`
+
+Parse and fill defaults for a config file without changing the active config.
+
+Arguments:
+
+- `value` (`string`): Path of the config file.
+
+Returns (`string`): Config with all optional fields filled with defaults, or an error message.
+
+#### `ValidateConfig`
+
+Like `ReadConfig` but performs more extensive validation checks.
+
+Arguments:
+
+- `value` (`string`): Config in YAML format.
+
+Returns (`string`): Validated config with defaults, or an error message.
+
+#### `ValidateConfigJson`
+
+Like `ReadConfigJson` but performs more extensive validation checks.
+
+Arguments:
+
+- `value` (`string`): Config in JSON format.
+
+Returns (`string`): Validated config with defaults, or an error message.
+
+### Audio device listing
+
+Enumerate available audio devices for a given backend and query their
+supported sample rates, formats, and channel counts.
+See the section below for the response format.
+
+#### `GetAvailableCaptureDevices`
+
+List available capture devices for a given backend.
+
+Arguments:
+
+- `backend` (`string`): Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+
+Returns (array of array \[`string`, `string`\]): List of `[identifier, name]` pairs. Some backends use the identifier as the name.
+
+#### `GetAvailablePlaybackDevices`
+
+List available playback devices for a given backend.
+
+Arguments:
+
+- `backend` (`string`): Backend name, one of `"Alsa"`, `"CoreAudio"`, `"Wasapi"`, `"Asio"`.
+
+Returns (array of array \[`string`, `string`\]): List of `[identifier, name]` pairs. Some backends use the identifier as the name.
+
+#### `GetCaptureDeviceCapabilities`
+
+Get the capabilities of a specific capture device.
+
+Errors: [`DeviceNotFoundError`](#devicenotfounderror), [`DeviceBusyError`](#devicebusyerror), [`DeviceError`](#deviceerror).
+
+Arguments:
+
+- `backend` (`string`): Backend name.
+- `device` (`string`): Device identifier, as listed by `GetAvailableCaptureDevices`.
+
+Returns ([`AudioDeviceDescriptor`](#audiodevicedescriptor)): Capabilities of the requested capture device.
+
+#### `GetPlaybackDeviceCapabilities`
+
+Get the capabilities of a specific playback device.
+
+Errors: [`DeviceNotFoundError`](#devicenotfounderror), [`DeviceBusyError`](#devicebusyerror), [`DeviceError`](#deviceerror).
+
+Arguments:
+
+- `backend` (`string`): Backend name.
+- `device` (`string`): Device identifier, as listed by `GetAvailablePlaybackDevices`.
+
+Returns ([`AudioDeviceDescriptor`](#audiodevicedescriptor)): Capabilities of the requested playback device.
+
+## Other replies
+
+These replies do not answer a command. The events are pushed to clients that have subscribed to
+them, and `Invalid` is the reply to a message that could not be parsed as a command.
+
+### `SignalLevelsEvent`
+
+Pushed to subscribed clients each time the signal levels are updated.
+
+Fields:
+
+- `value` ([`StreamLevels`](#streamlevels)): Levels for the subscribed side.
+
+### `VuLevelsEvent`
+
+Pushed to subscribed clients each time smoothed VU levels are updated.
+
+Fields:
+
+- `value` ([`VuLevels`](#vulevels)): Smoothed RMS and peak levels for both sides.
+
+### `StateEvent`
+
+Pushed to subscribed clients each time the processing state changes.
+
+Fields:
+
+- `value` ([`StateUpdate`](#stateupdate)): New processing state, with stop reason if the state is `Inactive`.
+
+### `SpectrumEvent`
+
+Pushed to subscribed clients each time a new spectrum is ready.
+
+Fields:
+
+- `value` ([`SpectrumData`](#spectrumdata) or `null`, optional): Computed spectrum, or absent if processing has stopped.
+
+### `Invalid`
+
+Sent when the server cannot parse or dispatch the incoming command.
+
+Fields:
+
+- `error` (`string`)
+
+## Types
+
+The structured values used by the commands and replies.
+
+### `ProcessingState`
+
+The state of the processing, as reported by [`GetState`](#getstate).
+
+- `Running`: processing is running normally.
+- `Paused`: processing is paused because the input signal is silent.
+- `Inactive`: processing is off and devices are closed, waiting for a new configuration.
+- `Starting`: opening devices and starting up processing with a new configuration.
+- `Stalled`: the capture device is not providing data, so processing is stalled.
+
+One of `"Running"`, `"Paused"`, `"Inactive"`, `"Starting"`, `"Stalled"`.
+
+### `StopReason`
+
+Reason a processing run ended.
+
+One of:
+
+- `"None"`: Processing is still running; not yet stopped.
+- `"Done"`: Processing completed normally (e.g. end of file input).
+- `{"CaptureError": value}` (`value` is `string`): Capture device reported an error.
+- `{"PlaybackError": value}` (`value` is `string`): Playback device reported an error.
+- `{"UnknownError": value}` (`value` is `string`): An unexpected internal error occurred.
+- `{"CaptureFormatChange": value}` (`value` is [`SourceFormat`](#sourceformat)): Capture device format changed: `samplerate`, `channels` and `format`, null if unknown.
+- `{"PlaybackFormatChange": value}` (`value` is [`SourceFormat`](#sourceformat)): Playback device format changed, reported the same way as `CaptureFormatChange`.
+
+### `AllLevels`
+
+Combined RMS and peak levels for both sides, returned by the `GetSignalLevels*` commands.
+
+All values are in dB (0 dB = full level), one entry per channel.
+
+Fields:
+
+- `playback_rms` (array of `number`): RMS level per playback channel in dB.
+- `playback_peak` (array of `number`): Peak level per playback channel in dB.
+- `capture_rms` (array of `number`): RMS level per capture channel in dB.
+- `capture_peak` (array of `number`): Peak level per capture channel in dB.
+
+### `WsSignalLevelSide`
+
+Side selector for [`SubscribeSignalLevels`](#subscribesignallevels) subscriptions.
+
+Serialised as a lowercase string: `"playback"`, `"capture"`, or `"both"`.
+
+One of `"playback"`, `"capture"`, `"both"`.
+
+### `VuSubscription`
+
+Parameters for a VU-meter subscription ([`SubscribeVuLevels`](#subscribevulevels)).
+
+Controls smoothing and rate-limiting of pushed level events.
+
+Fields:
+
+- `max_rate` (`number`): Maximum event rate in Hz. A value ≤ 0 disables rate limiting.
+
+  If set higher than the natural update rate, events are sent at the natural rate.
+- `attack` (`number`): Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing.
+
+  A smaller value gives a faster, more responsive meter on rising signals. For peak values, upward changes are always applied immediately regardless of this setting.
+- `release` (`number`): Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing.
+
+  A smaller value makes the meter drop faster; a larger value gives a slower decay. A good starting point for an analog-feel meter is around 300 ms.
+
+### `PbCapLevels`
+
+Peak levels for playback and capture sides, returned by [`GetSignalPeaksSinceStart`](#getsignalpeakssincestart).
+
+All values are in dB, one entry per channel.
+
+Fields:
+
+- `playback` (array of `number`): Peak level per playback channel in dB, measured since processing started.
+- `capture` (array of `number`): Peak level per capture channel in dB, measured since processing started.
+
+### `ChannelLabels`
+
+Channel display labels returned by [`GetChannelLabels`](#getchannellabels).
+
+Fields:
+
+- `playback` (array of (`string` or `null`) or `null`): Labels for playback channels. `null` if no labels are configured. Each entry is a label string, or `null` if that specific channel has no label.
+- `capture` (array of (`string` or `null`) or `null`): Labels for capture channels. Same structure as `playback`.
+
+### `SpectrumRequest`
+
+Parameters for a one-shot spectrum request ([`GetSpectrum`](#getspectrum)).
+
+The spectrum is computed from a Hann-windowed FFT.
+Output bins are logarithmically spaced between `min_freq` and `max_freq`.
+Magnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).
+
+Fields:
+
+- `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
+- `channel` (non-negative `integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
+- `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
+- `n_bins` (non-negative `integer`): Number of output bins. Must be ≥ 2.
+
+### `SpectrumData`
+
+Log-spaced spectrum, as returned by [`GetSpectrum`](#getspectrum).
+
+Fields:
+
+- `frequencies` (array of `number`): Center frequency of each output bin in Hz.
+- `magnitudes` (array of `number`): Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
+
+### `SpectrumSubscription`
+
+Parameters for a streaming spectrum subscription ([`SubscribeSpectrum`](#subscribespectrum)).
+
+Same fields as `SpectrumRequest` plus an optional `max_rate` cap.
+
+Fields:
+
+- `side` ([`SpectrumSide`](#spectrumside)): Which side to analyze: `"capture"` or `"playback"`.
+- `channel` (non-negative `integer` or `null`, optional): Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).
+- `min_freq` (`number`): Lower edge of the frequency range in Hz. Must be > 0.
+- `max_freq` (`number`): Upper edge of the frequency range in Hz. Must be > `min_freq`.
+- `n_bins` (non-negative `integer`): Number of output bins. Must be ≥ 2.
+- `max_rate` (`number` or `null`, optional): Maximum push rate in Hz. Leave out or set `null` for the natural rate (one push per 50 % overlap hop).
+
+### `Fader`
+
+Volume and mute state for one fader, as returned by [`GetFaders`](#getfaders).
+
+Fields:
+
+- `volume` (`number`): Current volume in dB.
+- `mute` (`boolean`): Whether the fader is muted.
+
+### `ControllerSettings`
+
+The `controller` section of the statefile.
+
+Fields:
+
+- `follow_capture` ([`FollowCapture`](#followcapture) or `null`, optional): Follow the capture source format, absent to disable following.
+- `error_recovery` (`boolean` or `null`, optional): Retry after a device error.
+
+### `ControllerStatusReport`
+
+The state of the built-in controller, returned by the `GetControllerStatus` command.
+
+Fields:
+
+- `active_config_file` (`string` or `null`, optional): The Specific config file that runs, `null` when the entry config runs as is or adapted.
+- `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives.
+- `recovering` (`boolean`): Waiting to retry after a device error.
+- `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
+- `next_retry_s` (`number` or `null`, optional): Seconds until the next retry, while waiting for one.
+- `waiting_for_source` ([`SourceFormat`](#sourceformat) or `null`, optional): The source format no config was found for, while waiting for the source to change.
+- `following` (`boolean`): Whether following is on, enabled and in wait mode.
+- `error_recovery` (`boolean`): Whether error recovery is on, enabled and in wait mode.
+- `stop_reason` ([`StopReason`](#stopreason)): Why processing last stopped.
+
+### `FileCheck`
+
+One file the Specific template matches, and what is wrong with it, if anything.
+
+Fields:
+
+- `file` (`string`): Path of the file.
+- `samplerate` (non-negative `integer` or `null`, optional): Sample rate read from the file name, if the template has the token.
+- `channels` (non-negative `integer` or `null`, optional): Channels read from the file name, if the template has the token.
+- `format` (`string` or `null`, optional): Sample format read from the file name, if the template has the token.
+- `problem` (`string` or `null`, optional): What is wrong with the file, `null` if it is usable.
+
+### `AudioDeviceDescriptor`
+
+Full capability descriptor for a named audio device.
+
+Fields:
+
+- `name` (`string`): Backend-specific device identifier (e.g. `"hw:0,0"` for ALSA).
+- `description` (`string`): Human-readable device name.
+- `capability_sets` (array of [`DeviceCapabilitySet`](#devicecapabilityset)): Capability sets, one per access mode supported by the backend.
+
+### `StreamLevels`
+
+Payload of a [`SignalLevelsEvent`](#signallevelsevent) pushed by [`SubscribeSignalLevels`](#subscribesignallevels).
+
+All dB values are per-channel, 0 dB = full level.
+
+Fields:
+
+- `side` ([`WsSignalLevelSide`](#wssignallevelside)): Which side these levels belong to.
+- `rms` (array of `number`): RMS level per channel in dB.
+- `peak` (array of `number`): Peak level per channel in dB.
+
+### `VuLevels`
+
+Payload of a [`VuLevelsEvent`](#vulevelsevent) pushed by [`SubscribeVuLevels`](#subscribevulevels).
+
+All values are smoothed dB levels, per channel.
+
+Fields:
+
+- `playback_rms` (array of `number`): Smoothed RMS level per playback channel in dB.
+- `playback_peak` (array of `number`): Smoothed peak level per playback channel in dB.
+- `capture_rms` (array of `number`): Smoothed RMS level per capture channel in dB.
+- `capture_peak` (array of `number`): Smoothed peak level per capture channel in dB.
+
+### `StateUpdate`
+
+Payload of a [`StateEvent`](#stateevent) pushed by [`SubscribeState`](#subscribestate).
+
+Fields:
+
+- `state` ([`ProcessingState`](#processingstate)): The new processing state.
+- `stop_reason` ([`StopReason`](#stopreason) or `null`, optional): Present only when `state` is `Inactive`.
+
+### `SourceFormat`
+
+The format a source reported. Each field is given where the backend knows it, and is
+`None` otherwise. Most backends know at least the rate, WASAPI only knows that something
+changed.
+
+The sample format is the backend's own name for it, as its configs and its capability
+probing write it ("S24_3_LE" for ALSA, "S24" for CoreAudio). Backends differ in which
+formats they have, so a name is what stays general across them.
+
+Fields:
+
+- `samplerate` (non-negative `integer` or `null`, optional): Sample rate in Hz.
+- `channels` (non-negative `integer` or `null`, optional): Number of channels.
+- `format` (`string` or `null`, optional): Sample format, as the backend's configs name it.
+
+### `SpectrumSide`
+
+Side selector for spectrum analysis commands.
+
+Serialised as a lowercase string: `"playback"` or `"capture"`.
+
+One of `"playback"`, `"capture"`.
+
+### `FollowCapture`
+
+Settings for following the capture source format.
+
+Fields:
+
+- `specific` (`string` or `null`, optional): Template for the Specific provider, absent to disable it.
+- `adapt` (`boolean` or `null`, optional): Enable the Adapt provider.
+
+### `DeviceCapabilitySet`
+
+A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).
+
+Fields:
+
+- `mode` ([`CapabilityMode`](#capabilitymode)): The access mode these capabilities were probed under.
+- `capabilities` (array of [`ChannelCapability`](#channelcapability)): Per-channel-count capability entries.
+
+### `CapabilityMode`
+
+The access mode a `DeviceCapabilitySet` was probed under.
+
+- `Unified`: the device uses a unified capability model (ALSA, CoreAudio, ASIO).
+- `Shared`: WASAPI shared-mode capabilities, derived from the mix format.
+- `Exclusive`: WASAPI exclusive-mode capabilities, probed independently.
+
+One of `"Unified"`, `"Shared"`, `"Exclusive"`.
+
+### `ChannelCapability`
+
+The sample rates (and their formats) supported by a device at a specific channel count.
+
+Fields:
+
+- `channels` (non-negative `integer`): Number of channels.
+- `samplerates` (array of [`SamplerateCapability`](#sampleratecapability)): Supported sample rates for this channel count.
+
+### `SamplerateCapability`
+
+The sample formats supported by a device at a specific sample rate.
+
+Fields:
+
+- `samplerate` (non-negative `integer`): Sample rate in Hz.
+- `formats` (array of `string`): Names of the supported sample formats at this rate.
+
+
+## Audio device capability response format
+
+The capability commands return an `AudioDeviceDescriptor` object:
+```json
+{
+  "name": "Device name",
+  "description": "Readable description",
+  "capability_sets": [
+    {
+      "mode": "Unified",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {
+              "samplerate": 44100,
+              "formats": ["S16_LE", "S32_LE"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each entry in `capability_sets` has a `mode` field:
+- `Unified` — used by ALSA, CoreAudio, and ASIO, which have a single capability model.
+- `Shared` — WASAPI shared mode. Always exactly one channel count and one sample rate; format is always `F32`.
+- `Exclusive` — WASAPI exclusive mode. Probed independently; supports multiple channel counts, sample rates, and formats.
+  WASAPI does not provide a structured capability API, so the exclusive-mode scan must probe configurations one at a time.
+  Heuristics keep probe time reasonable, so not every valid configuration is guaranteed to appear for unusual devices.
+
+For WASAPI, the response contains two sets — one `Shared` and one `Exclusive`:
+```json
+{
+  "name": "Speakers (Realtek HD Audio)",
+  "description": "Speakers (Realtek HD Audio)",
+  "capability_sets": [
+    {
+      "mode": "Shared",
+      "capabilities": [{"channels": 2, "samplerates": [{"samplerate": 48000, "formats": ["F32"]}]}]
+    },
+    {
+      "mode": "Exclusive",
+      "capabilities": [
+        {
+          "channels": 2,
+          "samplerates": [
+            {"samplerate": 44100, "formats": ["S16", "S24", "S32", "F32"]},
+            {"samplerate": 48000, "formats": ["S16", "S24", "S32", "F32"]}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+For ALSA, capability results are representative rather than exhaustive: continuous sample-rate ranges are reduced
+to the standard rates that CamillaDSP probes, and channel probing is capped to a practical maximum.
+
+Example device list entries for ALSA:
+```
+[
+  ["hw:Loopback,0,0", "Loopback, Loopback PCM, subdevice #0"],
+  ["hw:Generic,0,0", "HD-Audio Generic, ALC236 Analog, subdevice #0"]
+]
+```
+
+Example device list entries for WASAPI. The identifier is the display name, and the name repeats
+it. CoreAudio and ASIO do the same.
+```
+[
+  ["Microphone (USB Microphone)", "Microphone (USB Microphone)"],
+  ["In 3-4 (MOTU M Series)", "In 3-4 (MOTU M Series)"]
+]
+```
+
+If the device is not found, busy, or the probe fails, the result field contains an error
+and `capability_sets` is an empty list.
+
+## Error responses
+
+The possible values of `"result"` when a command fails are listed below. Those noted as including a
+message also carry a top-level `"message"` field with the details; see
+[Command syntax](#command-syntax) for the reply shape.
+
+### `ShutdownInProgressError`
+
+CamillaDSP is shutting down and cannot handle the request.
+
+### `RateLimitExceededError`
+
+Too many requests were sent in a short time.
+
+### `InvalidFaderError`
+
+The request referred to a fader index that does not exist.
+
+### `ConfigValidationError`
+
+The configuration could be parsed but contains a logical error.
+
+Includes a message describing the problem.
+
+### `ConfigReadError`
+
+The configuration could not be read (file missing, YAML/JSON syntax error, etc.).
+
+Includes a message describing the problem.
+
+### `InvalidValueError`
+
+A parameter value was outside the accepted range.
+
+Includes a message describing the problem.
+
+### `InvalidRequestError`
+
+The request itself was malformed or not valid in the current state.
+
+Includes a message describing the problem.
+
+### `DeviceNotFoundError`
+
+The named audio device does not exist.
+
+The `message` contains the device name.
+
+### `DeviceBusyError`
+
+The audio device is currently in use and cannot be probed.
+
+The `message` contains the device name.
+
+### `DeviceError`
+
+The device probe failed for another reason.
+
+The `message` contains a description.
+
+### `ProcessingStopped`
+
+Processing stopped while a subscription was active.
+
+Sent as the final event of a spectrum subscription when processing stops.
+
+### `ProcessingNotRunningError`
+
+Processing is not currently running.
+
+Returned by [`SubscribeSpectrum`](#subscribespectrum) when processing is inactive.
+
+
+## Controlling from Python
+
+The recommended way of controlling CamillaDSP with Python is by using the
+[pyCamillaDSP library](https://github.com/HEnquist/pycamilladsp).
+
+Please see the readme in that library for instructions.
+
+
+## Secure websocket, wss://
+By compiling with the optional feature `secure-websocket`,
+the websocket server also supports loading an identity from a .pfx file.
+This is enabled by providing the two optional parameters "cert" and "pass",
+where "cert" is the path to the .pfx-file containing the identity, and "pass" is the password for the file.
+How to properly generate the identity is outside the scope of this readme,
+but for simple tests a self-signed certificate can be used.
+
+### Generate self-signed identity
+First generate rsa keys:
+```sh
+openssl req -newkey rsa:2048 -new -nodes -x509 -days 3650 -keyout key.pem -out cert.pem
+```
+
+Then use these to generate the identity:
+```sh
+openssl pkcs12 -export -out identity.pfx -inkey key.pem -in cert.pem
+```
+This will prompt for an Export password. This is the password that must then be provided to CamillaDSP.
+
+
+To connect with a Python client, do this:
+```python
+import websocket
+import ssl
+
+ws = websocket.WebSocket(sslopt={"cert_reqs": ssl.CERT_NONE})
+ws.connect("wss://localhost:1234")
+```
+Note the "wss" instead of "ws" in the address. Since the certificate is self-signed,
+it must be used with `ssl.CERT_NONE` to skip certificate verification.

@@ -7,8 +7,29 @@ on:
       - created
 
 jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # On a release, the tag must be the workspace version with a v in front.
+      # Runs on every push too, since the jobs that need it would otherwise be skipped.
+      - name: Check crate version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "camilladsp") | .version')
+          echo "Crate version: $VERSION"
+          if [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::Release tag $TAG does not match the Cargo.toml version $VERSION"
+            exit 1
+          fi
+
   linux_amd64:
     name: Linux amd64
+    needs: version
     runs-on: ubuntu-latest
     #container: ubuntu:20.04
     steps:
@@ -76,6 +97,7 @@ jobs:
 
   linux_aarch64:
     name: Linux aarch64
+    needs: version
     runs-on: ubuntu-24.04-arm
     #container: ubuntu:20.04
     steps:
@@ -143,6 +165,7 @@ jobs:
 
   linux_armv7:
     name: Linux armv7
+    needs: version
     runs-on: ubuntu-latest
     # Cross compiled in a Debian container, see the matching job in ci_test.yml.
     # The container release sets the glibc floor of the released binary, so keep
@@ -195,6 +218,7 @@ jobs:
 
   windows:
     name: Windows
+    needs: version
     runs-on: windows-latest
     steps:
       - name: Checkout sources
@@ -227,6 +251,7 @@ jobs:
 
   macos:
     name: macOS Intel
+    needs: version
     runs-on: macos-15-intel
     steps:
       - name: Checkout sources
@@ -260,6 +285,7 @@ jobs:
 
   macos_arm:
     name: macOS Arm
+    needs: version
     runs-on: macos-latest
     steps:
       - name: Checkout sources
@@ -290,19 +316,69 @@ jobs:
           asset_name: camilladsp-macos-aarch64.tar.gz
           tag: ${{ github.event.release.tag_name }}
 
+  docs:
+    name: Documentation
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      # Follows the links from the readme, so a new document only needs to be linked there.
+      # Fails on a broken link.
+      # The readme in the zip gets a note with the release tag, or the commit for a push build.
+      - name: Build documentation zip
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION:-commit ${GITHUB_SHA::7}}"
+          python3 .github/scripts/make_docs_zip.py README.md camilladsp-docs.zip --version "$VERSION"
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: camilladsp-docs
+          path: camilladsp-docs.zip
+          retention-days: 14
+
+      - name: Upload documentation to release
+        if: github.event_name == 'release' && github.event.action == 'created'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: camilladsp-docs.zip
+          asset_name: camilladsp-docs.zip
+          tag: ${{ github.event.release.tag_name }}
+
   publish_crate:
     name: Publish to crates.io
-    if: github.event_name == 'release' && github.event.action == 'created'
+    # A dry run on every push, so this job is known to work before a release needs it.
+    # Publishes for real on final releases only. A prerelease tag like v5.0.0-beta.1
+    # always has a dash, and those are published by hand.
+    if: >-
+      github.event_name == 'push'
+      || (github.event_name == 'release' && github.event.action == 'created'
+      && !contains(github.event.release.tag_name, '-'))
     needs: [linux_amd64, linux_aarch64, linux_armv7, windows, macos, macos_arm]
     runs-on: ubuntu-latest
     steps:
       - name: Check tag is a plain release version
+        if: github.event_name == 'release'
         run: echo "${{ github.event.release.tag_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'
       - name: Checkout sources
         uses: actions/checkout@v5
+      - name: Update package list
+        run: sudo apt-get update
+      # cargo publish builds the packaged crate before uploading, and that needs the
+      # ALSA headers on Linux.
+      - name: Install Alsa devel
+        run: sudo apt-get install libasound2-dev -y
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Publish dry run
+        if: github.event_name == 'push'
+        run: cargo publish --workspace --dry-run
       - name: Publish
-        run: cargo publish
+        if: github.event_name == 'release'
+        run: cargo publish --workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -524,6 +524,53 @@ pub fn recover_suspended_pcm(pcmdevice: &alsa::PCM, direction: &str) -> Res<()> 
     Ok(())
 }
 
+/// Make sure a capture device is running.
+/// Recover it after an overrun or a suspend, and start it if it is not running.
+pub fn ensure_capture_running(pcmdevice: &alsa::PCM) -> Res<()> {
+    let capture_state = pcmdevice.state_raw();
+    if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
+        warn!("Prepare capture device");
+        restart_capture_pcm(pcmdevice)
+    } else if capture_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
+        resume_capture_pcm(pcmdevice)
+    } else if capture_state < 0 {
+        // This should never happen but sometimes does anyway,
+        // for example if a USB device is unplugged.
+        error!(
+            "Alsa snd_pcm_state() of capture device returned an unexpected error: {capture_state}"
+        );
+        Err(Box::new(Errno::from_raw(-capture_state)))
+    } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        debug!(
+            "Starting capture from state: {}",
+            state_desc(capture_state as u32)
+        );
+        pcmdevice.start()?;
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
+/// Prepare a capture device after an overrun and start it again.
+/// A prepared capture device does not start by itself before it is read,
+/// and polling it just times out, so it must be started explicitly.
+pub fn restart_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
+    trace!("snd_pcm_prepare");
+    pcmdevice.prepare()?;
+    pcmdevice.start()?;
+    Ok(())
+}
+
+/// Resume a suspended capture device, and start it again unless the resume already did.
+pub fn resume_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
+    recover_suspended_pcm(pcmdevice, "Capture")?;
+    if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        pcmdevice.start()?;
+    }
+    Ok(())
+}
+
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {
     let min_rate = hwp.get_rate_min()?;
     let max_rate = hwp.get_rate_max()?;

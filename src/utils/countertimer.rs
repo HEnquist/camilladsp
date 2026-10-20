@@ -20,26 +20,86 @@ use crate::ToCamillaFloat;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+/// The number of update intervals the estimator keeps, to find the usual interval.
+const ESTIMATOR_INTERVALS: usize = 8;
+
+/// A device buffer level from a [`DeviceBufferEstimator`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BufferEstimate {
+    /// The estimated number of frames in the buffer.
+    Level(usize),
+    /// The device has not updated the level for much longer than usual.
+    /// It has probably stopped taking data, and the level is not useful.
+    Stale,
+    /// The level has been marked as meaningless, see [`DeviceBufferEstimator::invalidate`].
+    Invalid,
+}
+
 /// Estimates the current device buffer level by extrapolating from the last known value.
+///
+/// The device side calls [`add`](Self::add) every time it takes data.
+/// When it stops doing that, for example because the device has stalled,
+/// the extrapolated level drops to zero while data piles up in front of the device.
+/// The estimate is therefore reported as stale when the last update is more than twice
+/// as old as the usual time between updates, and never earlier than two chunks.
+/// The usual time is the median of the last few intervals,
+/// so that a single long gap, such as the stall itself, does not move it.
 pub struct DeviceBufferEstimator {
     update_time: Instant,
     frames: usize,
     sample_rate: f32,
+    valid: bool,
+    intervals: [Duration; ESTIMATOR_INTERVALS],
+    interval_index: usize,
+    min_max_age: Duration,
 }
 
 impl DeviceBufferEstimator {
-    /// Create a new estimator for a device running at `sample_rate` Hz.
-    pub fn new(sample_rate: usize) -> Self {
+    /// Create a new estimator for a device running at `sample_rate` Hz, fed chunks of `chunksize` frames.
+    pub fn new(sample_rate: usize, chunksize: usize) -> Self {
+        let min_max_age = Duration::from_secs_f64(2.0 * chunksize as f64 / sample_rate as f64)
+            .max(Duration::from_millis(20));
         DeviceBufferEstimator {
             update_time: Instant::now(),
             frames: 0,
             sample_rate: sample_rate as f32,
+            valid: true,
+            intervals: [Duration::ZERO; ESTIMATOR_INTERVALS],
+            interval_index: 0,
+            min_max_age,
         }
     }
 
     pub fn add(&mut self, frames: usize) {
-        self.update_time = Instant::now();
+        let now = Instant::now();
+        self.intervals[self.interval_index] = now.duration_since(self.update_time);
+        self.interval_index = (self.interval_index + 1) % ESTIMATOR_INTERVALS;
+        self.update_time = now;
         self.frames = frames;
+        self.valid = true;
+    }
+
+    /// Mark the estimate as meaningless until the next [`add`](Self::add)
+    pub fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    /// The age above which the estimate is stale.
+    fn max_age(&self) -> Duration {
+        let mut intervals = self.intervals;
+        intervals.sort_unstable();
+        (2 * intervals[ESTIMATOR_INTERVALS / 2]).max(self.min_max_age)
+    }
+
+    /// The current level, or why there is none.
+    pub fn checked_estimate(&self) -> BufferEstimate {
+        if !self.valid {
+            BufferEstimate::Invalid
+        } else if self.update_time.elapsed() > self.max_age() {
+            BufferEstimate::Stale
+        } else {
+            BufferEstimate::Level(self.estimate())
+        }
     }
 
     pub fn estimate(&self) -> usize {
@@ -235,15 +295,22 @@ impl Default for TimeAverage {
 }
 
 /// Check if a value stays within a given range.
+///
+/// Only values that are off in the same direction count as in a row.
+/// A measured rate is quantised to whole chunks per window, so a window that got an extra
+/// chunk is followed by one that got one fewer, and that noise alternates in sign.
+/// A real change is off the same way every time.
 pub struct ValueWatcher {
     min_value: f32,
     max_value: f32,
     count_limit: usize,
     count: usize,
+    above: bool,
 }
 
 impl ValueWatcher {
-    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`.
+    /// Create a watcher that fires after `count_limit` consecutive values outside `target ± max_rel_diff`,
+    /// all on the same side.
     pub fn new(target_value: f32, max_rel_diff: f32, count_limit: usize) -> ValueWatcher {
         let min_value = target_value / (1.0 + max_rel_diff);
         let max_value = target_value * (1.0 + max_rel_diff);
@@ -252,6 +319,7 @@ impl ValueWatcher {
             max_value,
             count_limit,
             count: 0,
+            above: false,
         }
     }
 
@@ -260,12 +328,18 @@ impl ValueWatcher {
     }
 
     pub fn check_value(&mut self, value: f32) -> bool {
-        if value < self.min_value || value > self.max_value {
-            self.count += 1;
+        let above = value > self.max_value;
+        if above || value < self.min_value {
+            if self.count > 0 && above == self.above {
+                self.count += 1;
+            } else {
+                self.count = 1;
+                self.above = above;
+            }
         } else {
             self.count = 0;
         }
-        self.count > self.count_limit
+        self.count >= self.count_limit
     }
 }
 
@@ -487,7 +561,8 @@ impl ValueHistory {
 mod tests {
     use crate::ProcessingState;
     use crate::utils::countertimer::{
-        Averager, HistoryRecord, SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+        Averager, BufferEstimate, DeviceBufferEstimator, HistoryRecord, SilenceCounter, Stopwatch,
+        TimeAverage, ValueHistory, ValueWatcher,
     };
     use std::time::{Duration, Instant};
 
@@ -513,6 +588,54 @@ mod tests {
 
     fn last_record(hist: &ValueHistory) -> HistoryRecord {
         hist.last().unwrap()
+    }
+
+    fn level(estimate: BufferEstimate) -> usize {
+        match estimate {
+            BufferEstimate::Level(frames) => frames,
+            other => panic!("expected a level, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_buffer_estimator_invalidate() {
+        // 4800 frame chunks make the minimum max age 200 ms.
+        let mut est = DeviceBufferEstimator::new(48000, 4800);
+        est.add(4800);
+        // Backdate the update so the estimate reflects a known amount of consumed frames.
+        est.update_time = instant_in_past(Duration::from_millis(50));
+        let estimate = level(est.checked_estimate());
+        assert!(estimate <= 2400 && estimate > 0);
+        est.invalidate();
+        assert_eq!(est.checked_estimate(), BufferEstimate::Invalid);
+        est.add(1000);
+        assert!(matches!(est.checked_estimate(), BufferEstimate::Level(_)));
+    }
+
+    #[test]
+    fn device_buffer_estimator_stale_after_two_chunks() {
+        let mut est = DeviceBufferEstimator::new(48000, 4800);
+        est.add(9600);
+        est.update_time = instant_in_past(Duration::from_millis(150));
+        assert!(matches!(est.checked_estimate(), BufferEstimate::Level(_)));
+        est.update_time = instant_in_past(Duration::from_millis(250));
+        assert_eq!(est.checked_estimate(), BufferEstimate::Stale);
+        est.add(9600);
+        assert!(matches!(est.checked_estimate(), BufferEstimate::Level(_)));
+    }
+
+    #[test]
+    fn device_buffer_estimator_stale_follows_update_interval() {
+        // Updates every 500 ms, much longer than two chunks of 480 frames.
+        let mut est = DeviceBufferEstimator::new(48000, 480);
+        est.intervals = [Duration::from_millis(500); 8];
+        // One long gap, like a stall, does not move the usual interval.
+        est.intervals[3] = Duration::from_secs(20);
+        est.add(48000);
+        est.update_time = instant_in_past(Duration::from_millis(900));
+        assert!(matches!(est.checked_estimate(), BufferEstimate::Level(_)));
+        est.update_time = instant_in_past(Duration::from_millis(1100));
+        assert_eq!(est.checked_estimate(), BufferEstimate::Stale);
     }
 
     #[test]
@@ -629,19 +752,49 @@ mod tests {
             let val = 48000.0 * (1.0 - 0.004 * n as f32);
             assert!(!watcher.check_value(val));
         }
-        for _ in 0..limit_nbr {
+        for _ in 0..limit_nbr - 1 {
             assert!(!watcher.check_value(44100.0));
         }
         for _ in 0..5 {
             assert!(watcher.check_value(44100.0));
         }
         assert!(!watcher.check_value(48000.0));
-        for _ in 0..limit_nbr {
+        for _ in 0..limit_nbr - 1 {
             assert!(!watcher.check_value(88200.0));
         }
         for _ in 0..5 {
             assert!(watcher.check_value(88200.0));
         }
+    }
+
+    #[test]
+    fn test_valuewatcher_ignores_alternating_values() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        for _ in 0..20 {
+            assert!(!watcher.check_value(48000.0 * 1.1));
+            assert!(!watcher.check_value(48000.0 * 0.9));
+        }
+    }
+
+    #[test]
+    fn test_valuewatcher_restarts_count_on_direction_change() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        assert!(!watcher.check_value(52000.0));
+        assert!(!watcher.check_value(52000.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0));
+    }
+
+    #[test]
+    fn test_valuewatcher_reset() {
+        let mut watcher = ValueWatcher::new(48000.0, 0.04, 3);
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        watcher.reset();
+        assert!(!watcher.check_value(44100.0));
+        assert!(!watcher.check_value(44100.0));
+        assert!(watcher.check_value(44100.0));
     }
 
     #[test]

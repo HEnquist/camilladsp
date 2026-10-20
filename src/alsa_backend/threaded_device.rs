@@ -21,6 +21,7 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::countertimer::BufferEstimate;
 use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -39,7 +40,7 @@ use std::fmt::Debug;
 use std::sync::LazyLock;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::CommandMessage;
 use crate::ProcessingState;
@@ -50,9 +51,10 @@ use crate::alsa_backend::threaded_buffermanager::{
 };
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, FormatPinned,
-    LoopbackNotify, PinnedFormat, find_elem, list_channels_as_text, list_device_names,
-    list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
-    recover_suspended_pcm, state_desc, sync_linked_controls,
+    LoopbackNotify, PinnedFormat, ensure_capture_running, find_elem, list_channels_as_text,
+    list_device_names, list_formats_as_text, list_samplerates_as_text, pick_preferred_format,
+    process_events, recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
+    sync_linked_controls,
 };
 use crate::controller::SourceFormat;
 use crate::utils::rate_controller::RateAdjustReporter;
@@ -124,6 +126,20 @@ fn recover_playback_error(
     }
 }
 
+/// The number of frames in the device buffer, or `None` when the device is not running.
+fn running_device_delay(
+    pcmdevice: &alsa::PCM,
+    buf_manager: &PlaybackBufferManager,
+) -> Option<usize> {
+    if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+        return None;
+    }
+    pcmdevice
+        .avail()
+        .ok()
+        .map(|avail| buf_manager.current_delay(avail).max(0) as usize)
+}
+
 fn prime_playback_delay(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
@@ -133,12 +149,15 @@ fn prime_playback_delay(
     buf_manager: &PlaybackBufferManager,
     silence_buf: &[u8],
 ) -> Res<()> {
-    let target_frames = buf_manager
-        .target_level()
-        .min(buf_manager.data.buffersize()) as usize;
-    if target_frames == 0 {
+    if buf_manager.target_level() == 0 {
         return Ok(());
     }
+    // The level is measured when a chunk arrives, just before it is written, when the
+    // device holds a chunk less than right after a write. `queued_frames` includes the
+    // chunk about to be written, so prime one chunk above the target, to measure the
+    // target at the next arrival.
+    let target_frames = (buf_manager.target_level() + buf_manager.data.chunksize())
+        .min(buf_manager.data.buffersize()) as usize;
 
     let current_delay = pcmdevice
         .avail()
@@ -352,11 +371,9 @@ fn run_playback_inner_loop<C>(
     let bytes_per_frame = channels * bytes_per_sample;
     let millis_per_frame: f32 = 1000.0 / samplerate as f32;
     let mut device_stalled = false;
-    let mut pcm_paused = false;
-    let can_pause = pcmdevice
-        .hw_params_current()
-        .map(|p| p.can_pause())
-        .unwrap_or_default();
+    // Processing is paused. The device is not paused, it keeps running on silence like in
+    // the other backends, and `paused` only quiets the log while that is expected.
+    let mut paused = false;
     // Pre-allocate all buffers to avoid heap allocations on the RT thread.
     // Size buffer generously: the ring buffer can hold several chunks, so
     // available_bytes in prepare_playback_bytes can exceed one chunksize.
@@ -381,22 +398,23 @@ fn run_playback_inner_loop<C>(
         let have_data = available_bytes >= bytes_per_frame || !write_remainder.is_empty();
 
         if have_data {
+            let resumed = playback_interrupted;
             if playback_interrupted {
                 info!("PB: Normal playback resumes");
                 playback_interrupted = false;
             }
+            paused = false;
             // Drain pending messages non-blocking to keep sample_queue_bytes up to date.
             // The device paces the loop via play_buffer's internal pcmdevice.wait(),
             // so we only need try_recv here - no blocking required.
+            let mut stop_requested = false;
             loop {
                 match rx_play.try_recv() {
                     Ok(PlaybackDeviceMessage::Data(bytes)) => {
                         sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                     }
                     Ok(PlaybackDeviceMessage::Pause) => {
-                        if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
-                            pcm_paused = true;
-                        }
+                        paused = true;
                     }
                     Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
                         if let Some(elem_uac2_gadget) = &pitch_elem
@@ -412,6 +430,7 @@ fn run_playback_inner_loop<C>(
                     Ok(PlaybackDeviceMessage::Stop) => {
                         let drop_res = pcmdevice.drop();
                         trace!("pcm_drop result {drop_res:?}");
+                        stop_requested = true;
                         break;
                     }
                     Err(crossbeam_channel::TryRecvError::Empty) => break,
@@ -420,6 +439,25 @@ fn run_playback_inner_loop<C>(
                         break;
                     }
                 }
+            }
+            if stop_requested {
+                break;
+            }
+
+            // The device kept running on silence while there was no data, and the level
+            // would resume at whatever was left of it. Top it up to the target, the way a
+            // restart after an underrun does.
+            if resumed && pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
+                prime_playback_delay(
+                    pcmdevice,
+                    io,
+                    millis_per_frame,
+                    bytes_per_frame,
+                    sample_queue_bytes / bytes_per_frame,
+                    buf_manager,
+                    &silence_buf,
+                )
+                .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
             }
 
             let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
@@ -453,7 +491,7 @@ fn run_playback_inner_loop<C>(
                 buf_manager,
                 &silence_buf,
             );
-            pcm_paused = false;
+            let was_stalled = device_stalled;
             device_stalled = apply_playback_write_result(
                 playback_res,
                 bytes_to_play,
@@ -464,6 +502,42 @@ fn run_playback_inner_loop<C>(
                 status_channel_inner,
                 Some((pcmdevice, io, buf_manager, bytes_per_frame, &silence_buf)),
             );
+            if device_stalled {
+                // The device is not consuming frames, so estimates of its buffer level
+                // would decay to zero and wind up the rate controller.
+                if let Some(mut est) = buffer_fill.try_lock() {
+                    est.invalidate();
+                }
+            } else if was_stalled {
+                info!("PB: device resumed normal operation");
+                // The device buffer and the ring buffer accumulated outdated samples
+                // while the device was stalled. Drop them so playback restarts from Prepared
+                // at the target level. Otherwise the rate controller sees a bunch of extra
+                // samples and its integral goes up.
+                pcmdevice
+                    .drop()
+                    .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                pcmdevice
+                    .prepare()
+                    .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
+                let stale_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
+                debug!("PB: dropping {stale_bytes}b to resume from current samples");
+                device_consumer.skip(stale_bytes);
+                sample_queue_bytes -= stale_bytes;
+                write_remainder.clear();
+            }
+            if device_stalled && (end_of_stream || channel_disconnected) {
+                // A stalled device will not take what is left, and waiting for it would
+                // keep the thread from ever ending. Drop it instead of draining.
+                let status = if channel_disconnected {
+                    StatusMessage::PlaybackError("Playback inner queue disconnected".to_string())
+                } else {
+                    StatusMessage::PlaybackDone
+                };
+                status_channel_inner.send(status).unwrap_or(());
+                pcmdevice.drop().unwrap_or_default();
+                break;
+            }
 
             // Update the buffer level estimator after each write (like WASAPI).
             // This lets the outer thread interpolate accurate fill levels between updates.
@@ -490,21 +564,29 @@ fn run_playback_inner_loop<C>(
                     .send(StatusMessage::PlaybackDone)
                     .unwrap_or(());
             }
-            if !pcm_paused {
-                pcmdevice.drain().unwrap_or_default();
-            }
+            pcmdevice.drain().unwrap_or_default();
             break;
         } else {
-            // No data available yet - poll the channel non-blocking.
-            // The RT thread should stay paced by the device state rather than a channel timeout.
-            match rx_play.try_recv() {
+            // No data available yet. Wait for the next message, but only for half the time
+            // the device can play on what it has before it runs low, so that silence can
+            // be written in time. Half, since a device that updates its position once per
+            // period reports up to a period too much. A busy loop here would keep a core
+            // fully loaded at real time priority, and starve everything else on that core.
+            let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
+            let wait = running_device_delay(pcmdevice, buf_manager)
+                .filter(|delay| *delay > low_delay_threshold)
+                .map(|delay| {
+                    Duration::from_secs_f32(
+                        0.5 * (delay - low_delay_threshold) as f32 * millis_per_frame / 1000.0,
+                    )
+                })
+                .unwrap_or_default();
+            match rx_play.recv_timeout(wait) {
                 Ok(PlaybackDeviceMessage::Data(bytes)) => {
                     sample_queue_bytes = sample_queue_bytes.saturating_add(bytes);
                 }
                 Ok(PlaybackDeviceMessage::Pause) => {
-                    if can_pause && !pcm_paused && pcmdevice.pause(true).is_ok() {
-                        pcm_paused = true;
-                    }
+                    paused = true;
                 }
                 Ok(PlaybackDeviceMessage::SetPitch(speed)) => {
                     if let Some(elem_uac2_gadget) = &pitch_elem
@@ -517,9 +599,7 @@ fn run_playback_inner_loop<C>(
                     status_channel_inner
                         .send(StatusMessage::PlaybackDone)
                         .unwrap_or(());
-                    if !pcm_paused {
-                        pcmdevice.drain().unwrap_or_default();
-                    }
+                    pcmdevice.drain().unwrap_or_default();
                     break;
                 }
                 Ok(PlaybackDeviceMessage::Stop) => {
@@ -527,28 +607,22 @@ fn run_playback_inner_loop<C>(
                     trace!("pcm_drop result {drop_res:?}");
                     break;
                 }
-                Err(crossbeam_channel::TryRecvError::Empty) => {
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     // Only write silence if the device buffer is running low.
                     // The ALSA device buffer may still have plenty of valid audio
                     // even though the ring buffer is momentarily empty (the non-RT
                     // outer thread can be slightly late delivering data).
                     // Writing silence into a healthy buffer corrupts the audio stream
                     // with audible gaps.
-                    let device_delay =
-                        if pcmdevice.state_raw() == alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                            pcmdevice
-                                .avail()
-                                .ok()
-                                .map(|avail| buf_manager.current_delay(avail))
-                        } else {
-                            None
-                        };
-                    let low_delay_threshold = buf_manager.data.periodsize().max(1) as usize;
-                    let buffer_low =
-                        device_delay.is_none_or(|delay| (delay as usize) < low_delay_threshold);
+                    let buffer_low = running_device_delay(pcmdevice, buf_manager)
+                        .is_none_or(|delay| delay < low_delay_threshold);
                     if buffer_low {
                         if !playback_interrupted {
-                            warn!("PB: Playback interrupted, no data available");
+                            if paused {
+                                debug!("PB: Processing paused, playing silence");
+                            } else {
+                                warn!("PB: Playback interrupted, no data available");
+                            }
                             playback_interrupted = true;
                         }
                         let silence_bytes = chunksize * bytes_per_frame;
@@ -559,23 +633,21 @@ fn run_playback_inner_loop<C>(
                             io,
                             millis_per_frame,
                             bytes_per_frame,
-                            0,
+                            // The silence about to be written counts as queued, like a
+                            // chunk of data does.
+                            chunksize,
                             buf_manager,
                             &silence_buf,
                         );
-                    } else {
-                        thread::yield_now();
                     }
                 }
-                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                     status_channel_inner
                         .send(StatusMessage::PlaybackError(
                             "Playback inner queue disconnected".to_string(),
                         ))
                         .unwrap_or(());
-                    if !pcm_paused {
-                        pcmdevice.drain().unwrap_or_default();
-                    }
+                    pcmdevice.drain().unwrap_or_default();
                     break;
                 }
             }
@@ -756,23 +828,7 @@ fn capture_buffer(
         return Ok((CaptureResult::Done, 0));
     }
     let capture_state = pcmdevice.state_raw();
-    if capture_state == alsa_sys::SND_PCM_STATE_XRUN as i32 {
-        warn!("Prepare capture device");
-        pcmdevice.prepare()?;
-    } else if capture_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
-        recover_suspended_pcm(pcmdevice, "Capture")?;
-        if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-            pcmdevice.start()?;
-        }
-    } else if capture_state < 0 {
-        // This should never happen but sometimes does anyway,
-        // for example if a USB device is unplugged.
-        let nixerr = Errno::from_raw(-capture_state);
-        error!(
-            "Alsa snd_pcm_state() of capture device returned an unexpected error: {capture_state}"
-        );
-        return Err(Box::new(nixerr));
-    } else if (capture_state == alsa_sys::SND_PCM_STATE_DRAINING as i32
+    if (capture_state == alsa_sys::SND_PCM_STATE_DRAINING as i32
         || capture_state == alsa_sys::SND_PCM_STATE_SETUP as i32)
         && elems.kernel_stop_is_format_change(params)
     {
@@ -780,13 +836,8 @@ fn capture_buffer(
             CaptureResult::FormatChange(elems.loopback_format_change()),
             0,
         ));
-    } else if capture_state != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-        debug!(
-            "Starting capture from state: {}",
-            state_desc(capture_state as u32)
-        );
-        pcmdevice.start()?;
     }
+    ensure_capture_running(pcmdevice)?;
     // `frames_to_read` is counted on the capture side, so the wait timeout must be
     // derived from the capture rate and not the pipeline rate.
     let millis_per_chunk = 1000.0 * frames_to_read as f32 / params.capture_samplerate as f32;
@@ -845,16 +896,12 @@ fn capture_buffer(
             Err(err) => match Errno::from_raw(err.errno()) {
                 Errno::EPIPE => {
                     warn!("Capture: wait overrun, trying to recover. Error: {err}");
-                    trace!("snd_pcm_prepare");
-                    pcmdevice.prepare()?;
+                    restart_capture_pcm(pcmdevice)?;
                     break;
                 }
                 Errno::ESTRPIPE => {
                     warn!("Capture: wait interrupted by suspend, trying to recover. Error: {err}");
-                    recover_suspended_pcm(pcmdevice, "Capture")?;
-                    if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                        pcmdevice.start()?;
-                    }
+                    resume_capture_pcm(pcmdevice)?;
                     break;
                 }
                 _ => {
@@ -895,16 +942,12 @@ fn capture_buffer(
             )),
             Errno::EPIPE => {
                 warn!("Capture: read overrun, trying to recover. Error: {err}");
-                trace!("snd_pcm_prepare");
-                pcmdevice.prepare()?;
+                restart_capture_pcm(pcmdevice)?;
                 Ok((CaptureResult::Normal, 0))
             }
             Errno::ESTRPIPE => {
                 warn!("Capture: read interrupted by suspend, trying to recover. Error: {err}");
-                recover_suspended_pcm(pcmdevice, "Capture")?;
-                if pcmdevice.state_raw() != alsa_sys::SND_PCM_STATE_RUNNING as i32 {
-                    pcmdevice.start()?;
-                }
+                resume_capture_pcm(pcmdevice)?;
                 Ok((CaptureResult::Normal, 0))
             }
             _ => {
@@ -1110,7 +1153,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 
                 let status_channel_inner = status_channel.clone();
                 let buffer_fill = Arc::new(Mutex::new(
-                    countertimer::DeviceBufferEstimator::new(samplerate),
+                    countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_inner = buffer_fill.clone();
 
@@ -1246,29 +1289,30 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
-                                    // Skip the sample when the callback holds the lock,
-                                    // a 0 would drag the average down.
-                                    if let Some(estimated_buffer_fill) =
-                                        buffer_fill.try_lock().map(|b| b.estimate() as f64)
-                                    {
-                                        let buffer_level = estimated_buffer_fill
-                                            + (channel.len() * chunksize) as f64;
-                                        if let Some(speed) =
-                                            rate_reporter.update(buffer_level, &playback_status)
-                                        {
-                                            if pitch_supported {
-                                                let _ = send_playback_device_message(
-                                                    &tx_dev,
-                                                    PlaybackDeviceMessage::SetPitch(speed),
-                                                );
-                                            } else {
-                                                status_channel
-                                                    .send(StatusMessage::SetSpeed(speed))
-                                                    .unwrap_or(());
-                                            }
+                                    let estimate =
+                                        buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                    if let Some(speed) = rate_reporter.update_from_estimate(
+                                        estimate,
+                                        channel.len() * chunksize,
+                                        &playback_status,
+                                    ) {
+                                        if pitch_supported {
+                                            let _ = send_playback_device_message(
+                                                &tx_dev,
+                                                PlaybackDeviceMessage::SetPitch(speed),
+                                            );
+                                        } else {
+                                            status_channel
+                                                .send(StatusMessage::SetSpeed(speed))
+                                                .unwrap_or(());
                                         }
-                                    } else {
-                                        xtrace!("Buffer estimator busy, skip buffer level sample.");
+                                    }
+                                    if estimate == Some(BufferEstimate::Invalid) {
+                                        // Playback is stalled. Drop the chunk, like the non-threaded
+                                        // backend drains its channel while stalled. Waiting for room
+                                        // in the full ring buffer would hold up the whole pipeline,
+                                        // and the backlog would then be played after the device resumes.
+                                        continue;
                                     }
 
                                     chunk.update_stats(&mut chunk_stats);
@@ -1302,6 +1346,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                 }
                                 Ok(AudioMessage::Pause) => {
+                                    rate_reporter.interrupt();
                                     let _ = send_playback_device_message(
                                         &tx_dev,
                                         PlaybackDeviceMessage::Pause,
@@ -1630,6 +1675,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     );
 
                                     match capture_res {
+                                        // Nothing read after recovering from an overrun, or on EAGAIN.
+                                        // This is not a stall, so just read again.
+                                        Ok((CaptureResult::Normal, 0)) => continue,
                                         Ok((CaptureResult::Normal, bytes_read)) => {
                                             let pushed_bytes =
                                                 device_producer.push_slice(&buffer[0..bytes_read]);
@@ -1765,6 +1813,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                         // Sample rate measured over the last completed `rate_measure_interval`
                         // window, kept separate from the short update cadence.
                         let mut measured_rate = 0.0;
+                        // The ring buffer fill after the last chunk was taken, so the rate
+                        // watcher can count what arrived rather than what was taken.
+                        let mut prev_ring_bytes = 0;
                         let mut silence_counter = countertimer::SilenceCounter::new(
                             silence_threshold,
                             silence_timeout,
@@ -1881,6 +1932,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                             if device_stalled {
                                 if state != ProcessingState::Stalled {
                                     state = ProcessingState::Stalled;
+                                    // The periodic status update below is skipped while stalled,
+                                    // so publish the state change here.
+                                    crate::set_capture_state(&capture_status, state);
                                     if channel.send(AudioMessage::Pause).is_err() {
                                         break;
                                     }
@@ -1889,6 +1943,14 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                            // What the device delivered since the last chunk, rather than the
+                            // chunk itself. A chunk can only be taken once the period that
+                            // completes it has arrived, so counting chunks times them up to a
+                            // period late, and with a chunk size that is not a whole number of
+                            // periods that put the measured rate up to a period per window off.
+                            let ring_bytes = device_consumer.occupied_len();
+                            let delivered_bytes = capture_bytes + ring_bytes - prev_ring_bytes;
+                            prev_ring_bytes = ring_bytes;
 
                             averager.add_value(capture_bytes);
                             if let Some(capture_status_guard) = capture_status.try_upgradable_read()
@@ -1905,7 +1967,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 }
                             }
 
-                            watcher_averager.add_value(capture_bytes);
+                            watcher_averager.add_value(delivered_bytes);
                             let rate_measure_interval_ms = (1000.0 * rate_measure_interval) as u64;
                             if watcher_averager.larger_than_millis(rate_measure_interval_ms) {
                                 let bytes_per_sec = watcher_averager.average();

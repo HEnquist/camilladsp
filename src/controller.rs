@@ -27,7 +27,6 @@
 //! `-r` override does.
 
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,12 +34,10 @@ use std::time::Instant;
 
 use crate::config::{self, Configuration};
 use crate::filters::fftconv::ImpulseCache;
-
-/// The tokens a Specific template can contain.
-pub const TOKEN_SAMPLERATE: &str = "$samplerate$";
-pub const TOKEN_CHANNELS: &str = "$channels$";
-pub const TOKEN_FORMAT: &str = "$format$";
-const TOKENS: [&str; 3] = [TOKEN_SAMPLERATE, TOKEN_CHANNELS, TOKEN_FORMAT];
+pub use camilladsp_schema::protocol::{
+    ControllerSettings, FileCheck, FollowCapture, SourceFormat, TOKEN_CHANNELS, TOKEN_FORMAT,
+    TOKEN_SAMPLERATE, TOKENS,
+};
 
 /// How close a reported rate has to be to a standard rate to be snapped to it, relative.
 ///
@@ -48,172 +45,6 @@ const TOKENS: [&str; 3] = [TOKEN_SAMPLERATE, TOKEN_CHANNELS, TOKEN_FORMAT];
 /// 0.2 s window. The closest standard rates, 44100 and 48000, are 8.8% apart, so 3% still
 /// can't snap to the wrong one.
 const SNAP_TOLERANCE: f64 = 0.03;
-
-/// Settings for following the capture source format.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct FollowCapture {
-    /// Template for the Specific provider, absent to disable it.
-    #[serde(default)]
-    pub specific: Option<String>,
-    /// Enable the Adapt provider.
-    #[serde(default)]
-    pub adapt: Option<bool>,
-}
-
-/// The `controller` section of the statefile.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ControllerSettings {
-    /// Follow the capture source format, absent to disable following.
-    #[serde(default)]
-    pub follow_capture: Option<FollowCapture>,
-    /// Retry after a device error.
-    #[serde(default)]
-    pub error_recovery: Option<bool>,
-}
-
-impl ControllerSettings {
-    /// Check the settings, returning a description of the first problem found.
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(follow) = &self.follow_capture {
-            if follow.specific.is_none() && !follow.adapt.unwrap_or_default() {
-                return Err(
-                    "follow_capture needs at least one provider, set 'specific' or 'adapt'"
-                        .to_string(),
-                );
-            }
-            if let Some(template) = &follow.specific
-                && !TOKENS.iter().any(|token| template.contains(token))
-            {
-                return Err(format!(
-                    "The specific template '{template}' contains no token, use at least one of {}",
-                    TOKENS.join(", ")
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    /// Return the settings with an invalid `follow_capture` removed, logging why.
-    ///
-    /// Used for a statefile, where refusing the whole file would lose the rest of the state.
-    pub fn sanitized(mut self) -> Self {
-        if let Err(err) = self.validate() {
-            warn!("Ignoring the follow_capture settings in the statefile: {err}");
-            self.follow_capture = None;
-        }
-        self
-    }
-
-    /// Whether at least one follow provider is enabled.
-    pub fn following_enabled(&self) -> bool {
-        self.specific_template().is_some() || self.adapt_enabled()
-    }
-
-    /// Whether error recovery is enabled.
-    pub fn recovery_enabled(&self) -> bool {
-        self.error_recovery.unwrap_or_default()
-    }
-
-    /// The template of the Specific provider, if it is enabled.
-    pub fn specific_template(&self) -> Option<&str> {
-        self.follow_capture
-            .as_ref()
-            .and_then(|f| f.specific.as_deref())
-    }
-
-    /// Whether the Adapt provider is enabled.
-    pub fn adapt_enabled(&self) -> bool {
-        self.follow_capture
-            .as_ref()
-            .and_then(|f| f.adapt)
-            .unwrap_or_default()
-    }
-
-    /// Whether any controller feature is enabled.
-    pub fn any_enabled(&self) -> bool {
-        self.following_enabled() || self.recovery_enabled()
-    }
-}
-
-/// The format a source reported. Each field is given where the backend knows it, and is
-/// `None` otherwise. Most backends know at least the rate, WASAPI only knows that something
-/// changed.
-///
-/// The sample format is the backend's own name for it, as its configs and its capability
-/// probing write it ("S24_3_LE" for ALSA, "S24" for CoreAudio). Backends differ in which
-/// formats they have, so a name is what stays general across them.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SourceFormat {
-    pub samplerate: Option<usize>,
-    pub channels: Option<usize>,
-    pub format: Option<String>,
-}
-
-impl SourceFormat {
-    /// A format where only the rate is known.
-    pub fn rate(samplerate: usize) -> Self {
-        SourceFormat {
-            samplerate: Some(samplerate),
-            channels: None,
-            format: None,
-        }
-    }
-
-    /// A format change where nothing is known about the new format.
-    pub fn unknown() -> Self {
-        SourceFormat {
-            samplerate: None,
-            channels: None,
-            format: None,
-        }
-    }
-
-    /// Whether two reports describe the same format. Fields that only one of them
-    /// knows are not compared.
-    pub fn same_as(&self, other: &SourceFormat) -> bool {
-        fn agree<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
-            match (a, b) {
-                (Some(a), Some(b)) => a == b,
-                _ => true,
-            }
-        }
-        agree(&self.samplerate, &other.samplerate)
-            && agree(&self.channels, &other.channels)
-            && agree(&self.format, &other.format)
-    }
-
-    /// The same format, with the rate snapped to a standard rate. See [`snap_rate`].
-    pub fn snapped(&self) -> Self {
-        SourceFormat {
-            samplerate: self.samplerate.map(snap_rate),
-            channels: self.channels,
-            format: self.format.clone(),
-        }
-    }
-
-    /// The rate, if it is known.
-    pub fn known_rate(&self) -> Option<NonZeroUsize> {
-        self.samplerate.and_then(NonZeroUsize::new)
-    }
-}
-
-impl std::fmt::Display for SourceFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.samplerate {
-            Some(rate) => write!(f, "{rate} Hz")?,
-            None => write!(f, "unknown rate")?,
-        }
-        if let Some(channels) = self.channels {
-            write!(f, ", {channels} channels")?;
-        }
-        if let Some(format) = &self.format {
-            write!(f, ", {format}")?;
-        }
-        Ok(())
-    }
-}
 
 /// What a capture source is doing right now, see `audiodevice::query_capture_source`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -366,6 +197,15 @@ pub fn snap_rate(rate: usize) -> usize {
         .map(|r| *r as usize)
         .find(|r| ((rate as f64 - *r as f64) / *r as f64).abs() <= SNAP_TOLERANCE)
         .unwrap_or(rate)
+}
+
+/// The same format, with the rate snapped to a standard rate. See [`snap_rate`].
+pub fn snap_format(format: &SourceFormat) -> SourceFormat {
+    SourceFormat {
+        samplerate: format.samplerate.map(snap_rate),
+        channels: format.channels,
+        format: format.format.clone(),
+    }
 }
 
 /// The rate the capture device of a config opens at.
@@ -581,7 +421,7 @@ pub fn select_config(
             running,
         }));
     };
-    let format = format.snapped();
+    let format = snap_format(format);
     if let Some(template) = settings.specific_template()
         && let Some(selected) = specific_config(entry, template, &format)
     {
@@ -616,16 +456,6 @@ pub fn select_variant(
             kind: LoadKind::Variant,
         },
     }))
-}
-
-/// One file found by [`preflight`], and what is wrong with it, if anything.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FileCheck {
-    pub file: String,
-    pub samplerate: Option<usize>,
-    pub channels: Option<usize>,
-    pub format: Option<String>,
-    pub problem: Option<String>,
 }
 
 /// Token values captured while matching a file name against a template.

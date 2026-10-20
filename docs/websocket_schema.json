@@ -1,0 +1,5453 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Messages of the CamillaDSP websocket protocol. Generated from the protocol types by the ws_docs test of the camilladsp-schema crate. Validate a command against #/components/schemas/WsCommand and a reply against #/components/schemas/WsReply.",
+  "components": {
+    "schemas": {
+      "AllLevels": {
+        "type": "object",
+        "description": "Combined RMS and peak levels for both sides, returned by the `GetSignalLevels*` commands.\n\nAll values are in dB (0 dB = full level), one entry per channel.",
+        "required": [
+          "playback_rms",
+          "playback_peak",
+          "capture_rms",
+          "capture_peak"
+        ],
+        "properties": {
+          "playback_rms": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "RMS level per playback channel in dB."
+          },
+          "playback_peak": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Peak level per playback channel in dB."
+          },
+          "capture_rms": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "RMS level per capture channel in dB."
+          },
+          "capture_peak": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Peak level per capture channel in dB."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "AudioDeviceDescriptor": {
+        "type": "object",
+        "description": "Full capability descriptor for a named audio device.",
+        "required": [
+          "name",
+          "description",
+          "capability_sets"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Backend-specific device identifier (e.g. `\"hw:0,0\"` for ALSA)."
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable device name."
+          },
+          "capability_sets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceCapabilitySet"
+            },
+            "description": "Capability sets, one per access mode supported by the backend."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "CapabilityMode": {
+        "type": "string",
+        "description": "The access mode a [`DeviceCapabilitySet`] was probed under.\n\n- `Unified`: the device uses a unified capability model (ALSA, CoreAudio, ASIO).\n- `Shared`: WASAPI shared-mode capabilities, derived from the mix format.\n- `Exclusive`: WASAPI exclusive-mode capabilities, probed independently.",
+        "enum": [
+          "Unified",
+          "Shared",
+          "Exclusive"
+        ]
+      },
+      "ChannelCapability": {
+        "type": "object",
+        "description": "The sample rates (and their formats) supported by a device at a specific channel count.",
+        "required": [
+          "channels",
+          "samplerates"
+        ],
+        "properties": {
+          "channels": {
+            "type": "integer",
+            "description": "Number of channels.",
+            "minimum": 0
+          },
+          "samplerates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SamplerateCapability"
+            },
+            "description": "Supported sample rates for this channel count."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "ChannelLabels": {
+        "type": "object",
+        "description": "Channel display labels returned by [`WsCommand::GetChannelLabels`].",
+        "required": [
+          "playback",
+          "capture"
+        ],
+        "properties": {
+          "playback": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Labels for playback channels. `null` if no labels are configured. Each entry is a label\nstring, or `null` if that specific channel has no label."
+          },
+          "capture": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Labels for capture channels. Same structure as `playback`."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "ControllerSettings": {
+        "type": "object",
+        "description": "The `controller` section of the statefile.",
+        "properties": {
+          "follow_capture": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FollowCapture",
+                "description": "Follow the capture source format, absent to disable following."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_recovery": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Retry after a device error."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "ControllerStatusReport": {
+        "type": "object",
+        "description": "The state of the built-in controller, returned by the `GetControllerStatus` command.",
+        "required": [
+          "recovering",
+          "attempts",
+          "following",
+          "error_recovery",
+          "stop_reason"
+        ],
+        "properties": {
+          "active_config_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Specific config file that runs, `null` when the entry config runs as is or\nadapted."
+          },
+          "entry_config_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The entry config file, the one `GetConfigFilePath` gives."
+          },
+          "recovering": {
+            "type": "boolean",
+            "description": "Waiting to retry after a device error."
+          },
+          "attempts": {
+            "type": "integer",
+            "description": "Retries since the last session that ran long enough.",
+            "minimum": 0
+          },
+          "next_retry_s": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Seconds until the next retry, while waiting for one."
+          },
+          "waiting_for_source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SourceFormat",
+                "description": "The source format no config was found for, while waiting for the source to change."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "following": {
+            "type": "boolean",
+            "description": "Whether following is on, enabled and in wait mode."
+          },
+          "error_recovery": {
+            "type": "boolean",
+            "description": "Whether error recovery is on, enabled and in wait mode."
+          },
+          "stop_reason": {
+            "$ref": "#/components/schemas/StopReason",
+            "description": "Why processing last stopped."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "DeviceCapabilitySet": {
+        "type": "object",
+        "description": "A set of device capabilities associated with a single access mode (e.g. exclusive vs. shared).",
+        "required": [
+          "mode",
+          "capabilities"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CapabilityMode",
+            "description": "The access mode these capabilities were probed under."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChannelCapability"
+            },
+            "description": "Per-channel-count capability entries."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "Fader": {
+        "type": "object",
+        "description": "Volume and mute state for one fader, as returned by [`WsCommand::GetFaders`].",
+        "required": [
+          "volume",
+          "mute"
+        ],
+        "properties": {
+          "volume": {
+            "type": "number",
+            "format": "float",
+            "description": "Current volume in dB."
+          },
+          "mute": {
+            "type": "boolean",
+            "description": "Whether the fader is muted."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "FileCheck": {
+        "type": "object",
+        "description": "One file the Specific template matches, and what is wrong with it, if anything.",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Path of the file."
+          },
+          "samplerate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Sample rate read from the file name, if the template has the token.",
+            "minimum": 0
+          },
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Channels read from the file name, if the template has the token.",
+            "minimum": 0
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sample format read from the file name, if the template has the token."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What is wrong with the file, `null` if it is usable."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "FollowCapture": {
+        "type": "object",
+        "description": "Settings for following the capture source format.",
+        "properties": {
+          "specific": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Template for the Specific provider, absent to disable it."
+          },
+          "adapt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Enable the Adapt provider."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "PbCapLevels": {
+        "type": "object",
+        "description": "Peak levels for playback and capture sides, returned by [`WsCommand::GetSignalPeaksSinceStart`].\n\nAll values are in dB, one entry per channel.",
+        "required": [
+          "playback",
+          "capture"
+        ],
+        "properties": {
+          "playback": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Peak level per playback channel in dB, measured since processing started."
+          },
+          "capture": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Peak level per capture channel in dB, measured since processing started."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "ProcessingState": {
+        "type": "string",
+        "description": "The state of the processing, as reported by [`WsCommand::GetState`].\n\n- `Running`: processing is running normally.\n- `Paused`: processing is paused because the input signal is silent.\n- `Inactive`: processing is off and devices are closed, waiting for a new configuration.\n- `Starting`: opening devices and starting up processing with a new configuration.\n- `Stalled`: the capture device is not providing data, so processing is stalled.",
+        "enum": [
+          "Running",
+          "Paused",
+          "Inactive",
+          "Starting",
+          "Stalled"
+        ]
+      },
+      "SamplerateCapability": {
+        "type": "object",
+        "description": "The sample formats supported by a device at a specific sample rate.",
+        "required": [
+          "samplerate",
+          "formats"
+        ],
+        "properties": {
+          "samplerate": {
+            "type": "integer",
+            "description": "Sample rate in Hz.",
+            "minimum": 0
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the supported sample formats at this rate."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "SourceFormat": {
+        "type": "object",
+        "description": "The format a source reported. Each field is given where the backend knows it, and is\n`None` otherwise. Most backends know at least the rate, WASAPI only knows that something\nchanged.\n\nThe sample format is the backend's own name for it, as its configs and its capability\nprobing write it (\"S24_3_LE\" for ALSA, \"S24\" for CoreAudio). Backends differ in which\nformats they have, so a name is what stays general across them.",
+        "properties": {
+          "samplerate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Sample rate in Hz.",
+            "minimum": 0
+          },
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Number of channels.",
+            "minimum": 0
+          },
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sample format, as the backend's configs name it."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "SpectrumData": {
+        "type": "object",
+        "description": "Log-spaced spectrum, as returned by [`WsCommand::GetSpectrum`].",
+        "required": [
+          "frequencies",
+          "magnitudes"
+        ],
+        "properties": {
+          "frequencies": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Center frequency of each output bin in Hz."
+          },
+          "magnitudes": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave)."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "SpectrumRequest": {
+        "type": "object",
+        "description": "Parameters for a one-shot spectrum request ([`WsCommand::GetSpectrum`]).\n\nThe spectrum is computed from a Hann-windowed FFT.\nOutput bins are logarithmically spaced between `min_freq` and `max_freq`.\nMagnitudes are returned in dBFS (0 dBFS = full-scale sine wave, amplitude 1.0).",
+        "required": [
+          "side",
+          "min_freq",
+          "max_freq",
+          "n_bins"
+        ],
+        "properties": {
+          "side": {
+            "$ref": "#/components/schemas/SpectrumSide",
+            "description": "Which side to analyze: `\"capture\"` or `\"playback\"`."
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).",
+            "minimum": 0
+          },
+          "min_freq": {
+            "type": "number",
+            "format": "double",
+            "description": "Lower edge of the frequency range in Hz. Must be > 0."
+          },
+          "max_freq": {
+            "type": "number",
+            "format": "double",
+            "description": "Upper edge of the frequency range in Hz. Must be > `min_freq`."
+          },
+          "n_bins": {
+            "type": "integer",
+            "description": "Number of output bins. Must be ≥ 2.",
+            "minimum": 0
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "SpectrumSide": {
+        "type": "string",
+        "description": "Side selector for spectrum analysis commands.\n\nSerialised as a lowercase string: `\"playback\"` or `\"capture\"`.",
+        "enum": [
+          "playback",
+          "capture"
+        ]
+      },
+      "SpectrumSubscription": {
+        "type": "object",
+        "description": "Parameters for a streaming spectrum subscription ([`WsCommand::SubscribeSpectrum`]).\n\nSame fields as [`SpectrumRequest`] plus an optional `max_rate` cap.",
+        "required": [
+          "side",
+          "min_freq",
+          "max_freq",
+          "n_bins"
+        ],
+        "properties": {
+          "side": {
+            "$ref": "#/components/schemas/SpectrumSide",
+            "description": "Which side to analyze: `\"capture\"` or `\"playback\"`."
+          },
+          "channel": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Channel to analyze. `null` averages all channels; an integer selects a single channel (zero-based).",
+            "minimum": 0
+          },
+          "min_freq": {
+            "type": "number",
+            "format": "double",
+            "description": "Lower edge of the frequency range in Hz. Must be > 0."
+          },
+          "max_freq": {
+            "type": "number",
+            "format": "double",
+            "description": "Upper edge of the frequency range in Hz. Must be > `min_freq`."
+          },
+          "n_bins": {
+            "type": "integer",
+            "description": "Number of output bins. Must be ≥ 2.",
+            "minimum": 0
+          },
+          "max_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float",
+            "description": "Maximum push rate in Hz. Leave out or set `null` for the natural rate (one push per 50 %\noverlap hop)."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "StateUpdate": {
+        "type": "object",
+        "description": "Payload of a [`WsReply::StateEvent`] pushed by [`WsCommand::SubscribeState`].",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ProcessingState",
+            "description": "The new processing state."
+          },
+          "stop_reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StopReason",
+                "description": "Present only when `state` is `Inactive`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "StopReason": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Processing is still running; not yet stopped.",
+            "enum": [
+              "None"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "Processing completed normally (e.g. end of file input).",
+            "enum": [
+              "Done"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "Capture device reported an error.",
+            "required": [
+              "CaptureError"
+            ],
+            "properties": {
+              "CaptureError": {
+                "type": "string",
+                "description": "Capture device reported an error."
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Playback device reported an error.",
+            "required": [
+              "PlaybackError"
+            ],
+            "properties": {
+              "PlaybackError": {
+                "type": "string",
+                "description": "Playback device reported an error."
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "An unexpected internal error occurred.",
+            "required": [
+              "UnknownError"
+            ],
+            "properties": {
+              "UnknownError": {
+                "type": "string",
+                "description": "An unexpected internal error occurred."
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Capture device format changed: `samplerate`, `channels` and `format`, null if unknown.",
+            "required": [
+              "CaptureFormatChange"
+            ],
+            "properties": {
+              "CaptureFormatChange": {
+                "$ref": "#/components/schemas/SourceFormat",
+                "description": "Capture device format changed: `samplerate`, `channels` and `format`, null if unknown."
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Playback device format changed, reported the same way as `CaptureFormatChange`.",
+            "required": [
+              "PlaybackFormatChange"
+            ],
+            "properties": {
+              "PlaybackFormatChange": {
+                "$ref": "#/components/schemas/SourceFormat",
+                "description": "Playback device format changed, reported the same way as `CaptureFormatChange`."
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        ],
+        "description": "Reason a processing run ended."
+      },
+      "StreamLevels": {
+        "type": "object",
+        "description": "Payload of a [`WsReply::SignalLevelsEvent`] pushed by [`WsCommand::SubscribeSignalLevels`].\n\nAll dB values are per-channel, 0 dB = full level.",
+        "required": [
+          "side",
+          "rms",
+          "peak"
+        ],
+        "properties": {
+          "side": {
+            "$ref": "#/components/schemas/WsSignalLevelSide",
+            "description": "Which side these levels belong to."
+          },
+          "rms": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "RMS level per channel in dB."
+          },
+          "peak": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Peak level per channel in dB."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "VuLevels": {
+        "type": "object",
+        "description": "Payload of a [`WsReply::VuLevelsEvent`] pushed by [`WsCommand::SubscribeVuLevels`].\n\nAll values are smoothed dB levels, per channel.",
+        "required": [
+          "playback_rms",
+          "playback_peak",
+          "capture_rms",
+          "capture_peak"
+        ],
+        "properties": {
+          "playback_rms": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Smoothed RMS level per playback channel in dB."
+          },
+          "playback_peak": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Smoothed peak level per playback channel in dB."
+          },
+          "capture_rms": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Smoothed RMS level per capture channel in dB."
+          },
+          "capture_peak": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Smoothed peak level per capture channel in dB."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "VuSubscription": {
+        "type": "object",
+        "description": "Parameters for a VU-meter subscription ([`WsCommand::SubscribeVuLevels`]).\n\nControls smoothing and rate-limiting of pushed level events.",
+        "required": [
+          "max_rate",
+          "attack",
+          "release"
+        ],
+        "properties": {
+          "max_rate": {
+            "type": "number",
+            "format": "float",
+            "description": "Maximum event rate in Hz. A value ≤ 0 disables rate limiting.\n\nIf set higher than the natural update rate, events are sent at the natural rate."
+          },
+          "attack": {
+            "type": "number",
+            "format": "float",
+            "description": "Attack time constant in ms for rising values. Valid range: 0–60000. `0` disables smoothing.\n\nA smaller value gives a faster, more responsive meter on rising signals.\nFor peak values, upward changes are always applied immediately regardless of this setting."
+          },
+          "release": {
+            "type": "number",
+            "format": "float",
+            "description": "Release time constant in ms for falling values. Valid range: 0–60000. `0` disables smoothing.\n\nA smaller value makes the meter drop faster; a larger value gives a slower decay.\nA good starting point for an analog-feel meter is around 300 ms."
+          }
+        },
+        "unevaluatedProperties": false
+      },
+      "WsCommand": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Get the CamillaDSP version string.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetVersion"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the list of supported playback and capture device types.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSupportedDeviceTypes"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Stop processing and wait for a new configuration to be uploaded\nvia [`SetConfig`](Self::SetConfig) or [`SetConfigFilePath`](Self::SetConfigFilePath) +\n[`Reload`](Self::Reload).",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "Stop"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Stop processing and exit CamillaDSP.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "Exit"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the update interval for capture rate and signal range polling.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetUpdateInterval"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set the update interval for capture rate and signal range polling.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "integer",
+                "description": "Interval in milliseconds.",
+                "minimum": 0
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetUpdateInterval"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current processing state.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetState"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the reason processing last stopped.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetStopReason"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Subscribe to pushed processing state change events.\n\nWhile subscribed, CamillaDSP sends a [`WsReply::StateEvent`] message whenever the\nprocessing state changes. The event payload always contains `state`. When the state is\n`\"Inactive\"` it also contains `stop_reason`.\n\nSend [`StopSubscription`](Self::StopSubscription) to end the stream.\nNo other commands are accepted on the connection until then.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SubscribeState"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Stop an active subscription (signal levels, VU levels, state, or spectrum).\n\nIf no subscription is active, the reply is [`WsReply::Invalid`]\nwith the error `\"No active subscription\"`.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "StopSubscription"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the measured sample rate of the capture device.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureRate"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak-to-peak signal range of the last processed chunk.\n\nA value of 2.0 means full level (signal swings from −1.0 to +1.0).",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSignalRange"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current adjustment factor applied to the asynchronous resampler.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetRateAdjust"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current playback device buffer level when rate adjust is enabled.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetBufferLevel"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the number of samples that have been clipped since start, or since the\ncounter was last reset. Loading a new config does not reset it.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetClippedSamples"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Reset the clipped-samples counter to zero.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ResetClippedSamples"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current pipeline processing load.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetProcessingLoad"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current resampler processing load.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetResamplerLoad"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the path of the state file, if one is configured.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetStateFilePath"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Check whether all pending changes have been saved to the state file.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetStateFileUpdated"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level of the last chunk on the capture side, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalRms"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level averaged over the last `value` seconds on the capture side, per channel.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Time window in seconds."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalRmsSince"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level since the last call to this command from this client, per channel.\n\nOn the first call, returns values since the client connected.\nIf called again before new data is available, returns an empty list.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalRmsSinceLast"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level of the last chunk on the capture side, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalPeak"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level over the last `value` seconds on the capture side, per channel.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Time window in seconds."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalPeakSince"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level since the last call to this command from this client, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureSignalPeakSinceLast"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level of the last chunk on the playback side, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalRms"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level averaged over the last `value` seconds on the playback side, per channel.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Time window in seconds."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalRmsSince"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the RMS level since the last call to this command from this client, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalRmsSinceLast"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level of the last chunk on the playback side, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalPeak"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level over the last `value` seconds on the playback side, per channel.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Time window in seconds."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalPeakSince"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak level since the last call to this command from this client, per channel.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackSignalPeakSinceLast"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get RMS and peak levels for both sides in a single request.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSignalLevels"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get RMS and peak levels over the last `value` seconds for both sides.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Time window in seconds."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSignalLevelsSince"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get RMS and peak levels since the last call to this command from this client, for both sides.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSignalLevelsSinceLast"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Subscribe to pushed signal level events.\n\nWhile subscribed, CamillaDSP sends a [`WsReply::SignalLevelsEvent`] message each time a\nnew chunk is analyzed. The event rate therefore depends on the configured chunk size and\nsample rate. Send [`StopSubscription`](Self::StopSubscription) to end the stream.\nNo other commands are accepted on the connection until then.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/WsSignalLevelSide",
+                "description": "Which side to receive events for."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SubscribeSignalLevels"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Subscribe to smoothed, rate-capped VU-meter level events.\n\nIf `attack` or `release` is out of range the command returns [`WsResult::InvalidValueError`]\nand no subscription is started.\n\nWhile subscribed, CamillaDSP sends [`WsReply::VuLevelsEvent`] messages containing\nsmoothed `playback_rms`, `playback_peak`, `capture_rms`, and `capture_peak` vectors.\nSend [`StopSubscription`](Self::StopSubscription) to end the stream.\nNo other commands are accepted on the connection until then.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/VuSubscription",
+                "description": "Rate limit and smoothing settings."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SubscribeVuLevels"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the peak capture and playback levels measured since processing started.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSignalPeaksSinceStart"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Reset the peak-since-start counters. Affects all connected clients.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ResetSignalPeaksSinceStart"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the optional display labels for capture and playback channels.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetChannelLabels"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Compute a one-shot frequency spectrum from the audio currently passing through the pipeline.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/SpectrumRequest",
+                "description": "The spectrum to compute."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetSpectrum"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Subscribe to pushed spectrum events.\n\nIf processing is not running when this is sent, the result is\n[`WsResult::ProcessingNotRunningError`] and no subscription is started.\n\nWhile subscribed, CamillaDSP sends [`WsReply::SpectrumEvent`] each time a new spectrum is\nready. If processing stops, a final event with [`WsResult::ProcessingStopped`] is sent and\nthe subscription is cancelled. Resubscribe once processing has resumed.\n\nSend [`StopSubscription`](Self::StopSubscription) to end the stream.\nNo other commands are accepted on the connection until then.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/components/schemas/SpectrumSubscription",
+                "description": "The spectrum to compute, and the push rate."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SubscribeSpectrum"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the current volume of the Main fader.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set the volume of the Main fader. Clamped to −150 to +50 dB.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Volume in dB."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Adjust the volume of the Main fader by `value` dB.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Volume change in dB."
+              },
+              "min": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float",
+                "description": "Lower limit for the resulting volume in dB. Defaults to −150 dB."
+              },
+              "max": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float",
+                "description": "Upper limit for the resulting volume in dB. Defaults to +50 dB."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "AdjustVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the mute state of the Main fader.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set the mute state of the Main fader.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "boolean",
+                "description": "`true` to mute, `false` to unmute."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Toggle the mute state of the Main fader.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ToggleMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the volume and mute state of all faders in a single request.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetFaders"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the volume of a specific fader.",
+            "required": [
+              "fader",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetFaderVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set the volume of a specific fader. Clamped to −150 to +50 dB.",
+            "required": [
+              "fader",
+              "value",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Volume in dB."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetFaderVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Special volume setter for use with a Loudness filter and an external volume control\n(without a Volume filter). Clamped to −150 to +50 dB.",
+            "required": [
+              "fader",
+              "value",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Volume in dB."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetFaderExternalVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Adjust the volume of a specific fader by `value` dB.",
+            "required": [
+              "fader",
+              "value",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "value": {
+                "type": "number",
+                "format": "float",
+                "description": "Volume change in dB."
+              },
+              "min": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float",
+                "description": "Lower limit for the resulting volume in dB. Defaults to −150 dB."
+              },
+              "max": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float",
+                "description": "Upper limit for the resulting volume in dB. Defaults to +50 dB."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "AdjustFaderVolume"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the mute state of a specific fader.",
+            "required": [
+              "fader",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetFaderMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set the mute state of a specific fader.",
+            "required": [
+              "fader",
+              "value",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "value": {
+                "type": "boolean",
+                "description": "`true` to mute, `false` to unmute."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetFaderMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Toggle the mute state of a specific fader.",
+            "required": [
+              "fader",
+              "command"
+            ],
+            "properties": {
+              "fader": {
+                "type": "integer",
+                "description": "Fader index, 0 for Main and 1–4 for Aux1–Aux4.",
+                "minimum": 0
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ToggleFaderMute"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read the active configuration.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read the active configuration as JSON.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfigJson"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read the `title` field from the active configuration.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfigTitle"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read the `description` field from the active configuration.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfigDescription"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the path of the currently loaded config file.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfigFilePath"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read the previously active configuration (before the last reload or upload).",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPreviousConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Path of the config file."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetConfigFilePath"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Upload and immediately apply a new configuration as a YAML string.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in YAML format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Upload and immediately apply a new configuration as a JSON string.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in JSON format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetConfigJson"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Apply a partial patch to the active configuration.\n\nIf the resulting config is valid it is applied immediately.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "description": "Partial config object containing only the fields to change."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "PatchConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Read a single value from the active configuration using a JSON Pointer (RFC 6901).",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "JSON Pointer to the value, such as `\"/devices/samplerate\"`."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetConfigValue"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Set a single value in the active configuration using a JSON Pointer (RFC 6901).",
+            "required": [
+              "pointer",
+              "value",
+              "command"
+            ],
+            "properties": {
+              "pointer": {
+                "type": "string",
+                "description": "JSON Pointer to the value, such as `\"/devices/samplerate\"`."
+              },
+              "value": {
+                "description": "The value to store there."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetConfigValue"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "Reload"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the settings of the built-in controller, the `controller` section of the\nstatefile.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetControllerSettings"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ControllerSettings",
+                    "description": "The whole `controller` section, or `null` to remove it."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "SetControllerSettings"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the state of the built-in controller: the running Specific config file,\nerror recovery, and whether it is waiting for the source to change format.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetControllerStatus"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Check every file the Specific template can match, and report what is wrong with\neach one. Loads every file, so it is meant to be run on demand rather than polled.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "CheckControllerFiles"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Parse and fill defaults for a YAML config string without changing the active config.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in YAML format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ReadConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Parse and fill defaults for a JSON config string without changing the active config.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in JSON format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ReadConfigJson"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Parse and fill defaults for a config file without changing the active config.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Path of the config file."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ReadConfigFile"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Like [`ReadConfig`](Self::ReadConfig) but performs more extensive validation checks.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in YAML format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ValidateConfig"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Like [`ReadConfigJson`](Self::ReadConfigJson) but performs more extensive validation checks.",
+            "required": [
+              "value",
+              "command"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "Config in JSON format."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "ValidateConfigJson"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "List available capture devices for a given backend.",
+            "required": [
+              "backend",
+              "command"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "description": "Backend name, one of `\"Alsa\"`, `\"CoreAudio\"`, `\"Wasapi\"`, `\"Asio\"`."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetAvailableCaptureDevices"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "List available playback devices for a given backend.",
+            "required": [
+              "backend",
+              "command"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "description": "Backend name, one of `\"Alsa\"`, `\"CoreAudio\"`, `\"Wasapi\"`, `\"Asio\"`."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetAvailablePlaybackDevices"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the capabilities of a specific capture device.\n\nErrors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].",
+            "required": [
+              "backend",
+              "device",
+              "command"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "description": "Backend name."
+              },
+              "device": {
+                "type": "string",
+                "description": "Device identifier, as listed by\n[`GetAvailableCaptureDevices`](Self::GetAvailableCaptureDevices)."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetCaptureDeviceCapabilities"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the capabilities of a specific playback device.\n\nErrors: [`WsResult::DeviceNotFoundError`], [`WsResult::DeviceBusyError`], [`WsResult::DeviceError`].",
+            "required": [
+              "backend",
+              "device",
+              "command"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "description": "Backend name."
+              },
+              "device": {
+                "type": "string",
+                "description": "Device identifier, as listed by\n[`GetAvailablePlaybackDevices`](Self::GetAvailablePlaybackDevices)."
+              },
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetPlaybackDeviceCapabilities"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        ],
+        "description": "All commands accepted by the websocket server.\n\nEvery command is a JSON object with a `\"command\"` field holding the command name.\nCommands with arguments carry them in additional named fields, e.g.\n`{\"command\": \"SetUpdateInterval\", \"value\": 500}`.\n\nA command with a field that it does not take is rejected, so that a misspelled field\nname gives an error instead of being ignored.\n\nSee the [module-level documentation](self) for the general message format."
+      },
+      "WsReply": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Version string, e.g. `\"2.0.0\"`."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetVersion"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "description": "`[list_of_playback_types, list_of_capture_types]`."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSupportedDeviceTypes"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "Stop"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "Exit"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "description": "Update interval in milliseconds.",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetUpdateInterval"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetUpdateInterval"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/ProcessingState",
+                    "description": "Current processing state."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetState"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/StopReason",
+                    "description": "Reason the processing last stopped."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetStopReason"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SubscribeState"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "StopSubscription"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "description": "Measured capture sample rate in Hz.",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureRate"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "Peak-to-peak amplitude range of the last chunk (2.0 = full level)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSignalRange"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "Rate adjustment factor applied to the async resampler (1.0 = no adjustment)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetRateAdjust"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "description": "Playback device buffer fill level in frames; 0 if rate adjust is not enabled.",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetBufferLevel"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "integer",
+                    "description": "Number of clipped samples since start or the last reset.",
+                    "minimum": 0
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetClippedSamples"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ResetClippedSamples"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "Pipeline processing load in percent."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetProcessingLoad"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "Resampler processing load in percent."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetResamplerLoad"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "File path of the state file, or `null` if no state file is used."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetStateFilePath"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "boolean",
+                    "description": "`true` if all changes have been saved to the state file."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetStateFileUpdated"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per capture channel in dB (0 dB = full level)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalRms"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per capture channel in dB, averaged over the requested window."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalRmsSince"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per capture channel in dB since the last call; empty if no new data."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalRmsSinceLast"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per capture channel in dB (0 dB = full level)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalPeak"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per capture channel in dB over the requested window."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalPeakSince"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per capture channel in dB since the last call; empty if no new data."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureSignalPeakSinceLast"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per playback channel in dB (0 dB = full level)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalRms"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per playback channel in dB, averaged over the requested window."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalRmsSince"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "RMS level per playback channel in dB since the last call; empty if no new data."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalRmsSinceLast"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per playback channel in dB (0 dB = full level)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalPeak"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per playback channel in dB over the requested window."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalPeakSince"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "format": "float"
+                    },
+                    "description": "Peak level per playback channel in dB since the last call; empty if no new data."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackSignalPeakSinceLast"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/AllLevels",
+                    "description": "RMS and peak levels for both sides."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSignalLevels"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/AllLevels",
+                    "description": "RMS and peak levels for both sides, averaged over the requested window."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSignalLevelsSince"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/AllLevels",
+                    "description": "RMS and peak levels for both sides since the last call; empty if no new data."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSignalLevelsSinceLast"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SubscribeSignalLevels"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SubscribeVuLevels"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/PbCapLevels",
+                    "description": "Peak levels since processing started, for both sides."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSignalPeaksSinceStart"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ResetSignalPeaksSinceStart"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/ChannelLabels",
+                    "description": "Display labels for capture and playback channels."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetChannelLabels"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/SpectrumData",
+                        "description": "Computed spectrum with frequency and magnitude arrays."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetSpectrum"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SubscribeSpectrum"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "Current volume in dB."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "number",
+                    "format": "float",
+                    "description": "New volume in dB after the adjustment."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "AdjustVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "boolean",
+                    "description": "`true` if muted."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "boolean",
+                    "description": "New mute state after the toggle."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ToggleMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Fader"
+                    },
+                    "description": "List of faders: Main (index 0) followed by Aux1–Aux4 (indices 1–4)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetFaders"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "number",
+                        "format": "float"
+                      }
+                    ],
+                    "description": "`[fader_index, volume_dB]`."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetFaderVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetFaderVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetFaderExternalVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "number",
+                        "format": "float"
+                      }
+                    ],
+                    "description": "`[fader_index, new_volume_dB]` after the adjustment."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "AdjustFaderVolume"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ],
+                    "description": "`[fader_index, is_muted]`."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetFaderMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetFaderMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ],
+                    "description": "`[fader_index, new_mute_state]` after the toggle."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ToggleFaderMute"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Active config in YAML format."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Active config in JSON format."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfigJson"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Title string from the active config."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfigTitle"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Description string from the active config."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfigDescription"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "File path of the active config, or `null` if no file is loaded."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfigFilePath"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Previously active config in YAML format."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPreviousConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetConfigFilePath"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetConfigJson"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "PatchConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "description": "Value at the specified JSON Pointer path."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetConfigValue"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetConfigValue"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "Reload"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/ControllerSettings",
+                        "description": "The `controller` section, or `null` if there is none."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetControllerSettings"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SetControllerSettings"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/ControllerStatusReport",
+                    "description": "The controller state."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetControllerStatus"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/FileCheck"
+                    },
+                    "description": "Each file the Specific template matches, with the format read from its name\nand the problem found, if any. Empty when Specific is off."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "CheckControllerFiles"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Config with all optional fields filled with defaults, or an error message."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ReadConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Config with all optional fields filled with defaults, or an error message."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ReadConfigJson"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Config with all optional fields filled with defaults, or an error message."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ReadConfigFile"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Validated config with defaults, or an error message."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ValidateConfig"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "description": "Validated config with defaults, or an error message."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "ValidateConfigJson"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": false,
+                      "prefixItems": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "description": "List of `[identifier, name]` pairs. Some backends use the identifier as the name."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetAvailableCaptureDevices"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": false,
+                      "prefixItems": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "description": "List of `[identifier, name]` pairs. Some backends use the identifier as the name."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetAvailablePlaybackDevices"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/AudioDeviceDescriptor",
+                    "description": "Capabilities of the requested capture device."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetCaptureDeviceCapabilities"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/AudioDeviceDescriptor",
+                    "description": "Capabilities of the requested playback device."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetPlaybackDeviceCapabilities"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/StreamLevels",
+                    "description": "Levels for the subscribed side."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Pushed to subscribed clients each time the signal levels are updated.",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SignalLevelsEvent"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Pushed to subscribed clients each time the signal levels are updated.",
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/VuLevels",
+                    "description": "Smoothed RMS and peak levels for both sides."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Pushed to subscribed clients each time smoothed VU levels are updated.",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "VuLevelsEvent"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Pushed to subscribed clients each time smoothed VU levels are updated.",
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/StateUpdate",
+                    "description": "New processing state, with stop reason if the state is `Inactive`."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Pushed to subscribed clients each time the processing state changes.",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "StateEvent"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Pushed to subscribed clients each time the processing state changes.",
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/SpectrumData",
+                        "description": "Computed spectrum, or absent if processing has stopped."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "description": "Pushed to subscribed clients each time a new spectrum is ready.",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "SpectrumEvent"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "Pushed to subscribed clients each time a new spectrum is ready.",
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Sent when the server cannot parse or dispatch the incoming command.",
+            "required": [
+              "error",
+              "reply"
+            ],
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "reply": {
+                "type": "string",
+                "enum": [
+                  "Invalid"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        ],
+        "description": "All possible reply messages sent by the websocket server.\n\nEach variant mirrors the corresponding [`WsCommand`]. Every reply is a JSON object with a\n`\"reply\"` field holding the reply name, e.g. `{\"reply\": \"GetVersion\", \"result\": \"Ok\",\n\"value\": \"2.0.0\"}`."
+      },
+      "WsResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The command succeeded.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "Ok"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "CamillaDSP is shutting down and cannot handle the request.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ShutdownInProgressError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Too many requests were sent in a short time.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "RateLimitExceededError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The request referred to a fader index that does not exist.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "InvalidFaderError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The configuration could be parsed but contains a logical error.\n\nIncludes a message describing the problem.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ConfigValidationError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The configuration could not be read (file missing, YAML/JSON syntax error, etc.).\n\nIncludes a message describing the problem.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ConfigReadError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A parameter value was outside the accepted range.\n\nIncludes a message describing the problem.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "InvalidValueError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The request itself was malformed or not valid in the current state.\n\nIncludes a message describing the problem.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "InvalidRequestError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The named audio device does not exist.\n\nThe `message` contains the device name.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "DeviceNotFoundError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The audio device is currently in use and cannot be probed.\n\nThe `message` contains the device name.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "DeviceBusyError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The device probe failed for another reason.\n\nThe `message` contains a description.",
+            "required": [
+              "message",
+              "result"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "DeviceError"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Processing stopped while a subscription was active.\n\nSent as the final event of a spectrum subscription when processing stops.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ProcessingStopped"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Processing is not currently running.\n\nReturned by [`WsCommand::SubscribeSpectrum`] when processing is inactive.",
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ProcessingNotRunningError"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Result status returned in every websocket response.\n\nFlattened into each [`WsReply`] variant, so its tag becomes the reply's `\"result\"` field\n(always a plain string) and any message rides alongside as a top-level `\"message\"` field.\nSee the [module-level documentation](self) for the full response format."
+      },
+      "WsSignalLevelSide": {
+        "type": "string",
+        "description": "Side selector for [`WsCommand::SubscribeSignalLevels`] subscriptions.\n\nSerialised as a lowercase string: `\"playback\"`, `\"capture\"`, or `\"both\"`.",
+        "enum": [
+          "playback",
+          "capture",
+          "both"
+        ]
+      }
+    }
+  }
+}

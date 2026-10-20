@@ -15,10 +15,10 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::time::Duration;
 
-use camillalib::CamillaFloat;
-use camillalib::config::{BiquadParameters, FiniteF64, NotchWidth};
-use camillalib::filters::Filter;
-use camillalib::filters::biquad::{
+use camilladsp::CamillaFloat;
+use camilladsp::config::{BiquadParameters, FiniteF64, NotchWidth};
+use camilladsp::filters::Filter;
+use camilladsp::filters::biquad::{
     Biquad, BiquadCoefficients, MAX_CHANNELS, MAX_DEPTH, choose_split, process_cascades_with_split,
 };
 
