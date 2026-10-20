@@ -14,8 +14,6 @@ The CamillaDSP project encompasses:
         A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
     *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
         A Python library for interacting with the CamillaDSP engine via its websocket interface.
-    *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
-        A controller for automatic sample rate switching.
 
 # CamillaDSP engine
 
@@ -35,6 +33,12 @@ All processing is done in chunks of a fixed number of samples.
 A small number of samples gives a small in-out latency
 while a larger number is more efficient.
 The full configuration is given in a YAML file.
+
+A built-in controller can follow the capture source when it changes sample rate,
+by switching to a matching config or adapting the loaded one,
+and can retry after device errors.
+See [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
+
 If something does not work as expected, see [Getting help](#getting-help).
 
 # License
@@ -201,6 +205,10 @@ This is used to send requests for adjusting the capture speed to the supervisor 
 The supervisor monitors all threads by listening to their status messages.
 The requests for capture rate adjust are passed on to the capture thread.
 It's also responsible for updating the configuration when requested to do so via the websocket server or a SIGHUP signal.
+This is done by the built-in controller, which decides which config runs and what happens when processing stops.
+Without following or error recovery enabled it runs the loaded config, and goes idle or exits when processing stops.
+With them, it can switch to a config for a new source format, or retry after an error,
+see [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
 
 ### Websocket server
 The websocket server launches a separate thread to handle each connected client.
