@@ -809,6 +809,24 @@ config providers for a config to run for the new format:
 - __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
   `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
 
+Not every device runs at every rate.
+Some only support the 48 kHz family, for example.
+For these, the entry config can give `samplerate` as a list of the rates the device runs natively:
+```yaml
+devices:
+  samplerate: [48000, 96000]
+```
+A source at a listed rate then runs natively at that rate.
+A source at any other rate is resampled to the first rate in the list,
+so put the preferred rate first.
+In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resampled to 48 kHz.
+The config's own resampler is used for this.
+If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
+or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
+Until a source rate is known, the first rate is used.
+A list is only accepted while the controller follows the source with Adapt,
+and only in the entry config, not in the Specific files.
+
 The Specific provider is asked first, then Adapt. Either one can be used alone.
 Adapt always starts from the entry config, so switching back and forth doesn't drift.
 A rate measured by the backend, like 44097, is snapped to the nearest standard rate.
@@ -1105,6 +1123,11 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
   The `samplerate` setting decides the sample rate that everything will run at.
   This rate must be supported by both the capture and  playback device.
+
+  When the built-in controller follows the source with Adapt, `samplerate` can also be a list
+  of the rates the hardware runs natively, see
+  [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
+  The first rate in the list is the preferred one.
 
 * `chunksize`
 
