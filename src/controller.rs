@@ -695,6 +695,8 @@ mod tests {
     }
 
     fn base_config(samplerate: usize, channels: usize, extra: &str) -> Configuration {
+        // Validation opens the capture file, so it has to exist on every platform.
+        let capture_file = format!("{}/testdata/int32.raw", env!("CARGO_MANIFEST_DIR"));
         let yaml = format!(
             "devices:
   samplerate: {samplerate}
@@ -702,7 +704,7 @@ mod tests {
   capture:
     type: RawFile
     channels: {channels}
-    filename: /dev/zero
+    filename: '{capture_file}'
     format: S32_LE
   playback:
     type: File
@@ -821,8 +823,10 @@ mod tests {
             resolved,
             dir.canonicalize().unwrap().join("conf_$samplerate$.yml")
         );
-        let absolute = resolve_template("/abs/conf.yml", Some(&entry_file));
-        assert_eq!(absolute, PathBuf::from("/abs/conf.yml"));
+        // An absolute path needs a drive letter on Windows, so build one from the temp dir.
+        let absolute = std::env::temp_dir().join("abs").join("conf.yml");
+        let resolved = resolve_template(&absolute.to_string_lossy(), Some(&entry_file));
+        assert_eq!(resolved, absolute);
     }
 
     #[test]
