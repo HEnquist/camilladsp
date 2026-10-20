@@ -823,9 +823,9 @@ In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resam
 The config's own resampler is used for this.
 If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
 or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
-Until a source rate is known, the first rate is used.
-A list is only accepted while the controller follows the source with Adapt,
-and only in the entry config, not in the Specific files.
+Without Adapt, and until a source rate is known, the first rate is used.
+This makes a config with a list usable everywhere, also as a Specific file.
+The `--samplerate` override uses the list the same way Adapt does.
 
 The Specific provider is asked first, then Adapt. Either one can be used alone.
 Adapt always starts from the entry config, so switching back and forth doesn't drift.
@@ -1124,10 +1124,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `samplerate` setting decides the sample rate that everything will run at.
   This rate must be supported by both the capture and  playback device.
 
-  When the built-in controller follows the source with Adapt, `samplerate` can also be a list
-  of the rates the hardware runs natively, see
+  `samplerate` can also be a list of the rates the hardware runs natively.
+  The first rate in the list is the preferred one, and the one that is used unless the built-in
+  controller adapts the config to the source, see
   [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
-  The first rate in the list is the preferred one.
 
 * `chunksize`
 

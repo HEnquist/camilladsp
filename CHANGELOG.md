@@ -4,8 +4,9 @@ New features:
   source, either with a config file per format or by adapting the loaded config to the new rate,
   and it retries after device errors. Set it up with `--follow_specific`, `--follow_adapt` and
   `--error_recovery`, in the `controller` section of the statefile, or over the websocket.
-- `samplerate` can be a list of the rates the hardware runs natively, when following with Adapt.
-  Other rates are resampled to the first one.
+- `samplerate` can be a list of the rates the hardware runs natively. Following with Adapt runs
+  a listed rate natively and resamples other rates to the first one, which is also the rate used
+  without Adapt.
 - Alsa: follow a player on the Loopback, with the capture open the whole time.
   Needs a kernel where the Loopback's `PCM Notify` works, Linux 7.4 or a stable kernel with the fix.
 

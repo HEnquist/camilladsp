@@ -272,9 +272,6 @@ pub fn check_variant(
             ));
         }
     }
-    if variant.devices.samplerate_list().is_some() {
-        return Err("its samplerate is a list, which only the entry config can have".to_string());
-    }
     if let Some(expected) = format.samplerate {
         let rate = capture_rate_of(variant);
         if rate != expected {
@@ -395,20 +392,12 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
 ///
 /// `format` is `None` when following is off or no format is known, and then the entry
 /// runs as is. `validated` is the entry already validated as is, reused if given.
-/// `settings` are the ones in effect, with following removed when it is off, since an
-/// entry with a list of sample rates is only accepted while Adapt follows the source.
 pub fn select_config(
     entry: &ConfigSource,
     format: Option<&SourceFormat>,
     settings: &ControllerSettings,
     validated: Option<(Configuration, ImpulseCache)>,
 ) -> Selection {
-    if entry.raw.devices.samplerate_list().is_some() && !settings.adapt_enabled() {
-        return Selection::Invalid(
-            "samplerate is a list, which needs the controller to follow the source with Adapt"
-                .to_string(),
-        );
-    }
     let running = RunningSource {
         source: entry.clone(),
         kind: LoadKind::Entry,
@@ -1365,17 +1354,29 @@ pipeline:
     }
 
     #[test]
-    fn a_rate_list_needs_adapt() {
-        let conf = with_rate_list(base_config(48000, 2, ""), &[48000, 96000]);
+    fn without_adapt_a_rate_list_runs_at_the_first_rate() {
+        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
+        let selected = run(select_config(
+            &entry(conf.clone()),
+            None,
+            &ControllerSettings::default(),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+
+        // A Specific file with a list is selected for its first rate.
         let dir = temp_dir("rate_list");
+        write_config(&dir, "conf_96000.yml", &conf);
         let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
-        for settings in [
-            ControllerSettings::default(),
-            settings(Some(&template), None),
-        ] {
-            let selection = select_config(&entry(conf.clone()), None, &settings, None);
-            assert!(matches!(selection, Selection::Invalid(ref e) if e.contains("Adapt")));
-        }
+        let selected = run(select_config(
+            &entry(base_config(48000, 2, "")),
+            Some(&format(96000, None)),
+            &settings(Some(&template), None),
+            None,
+        ));
+        assert!(matches!(selected.provider, Provider::Specific(_)));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.resampler, None);
     }
 
     #[test]

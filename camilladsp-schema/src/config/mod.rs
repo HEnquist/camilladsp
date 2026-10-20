@@ -834,9 +834,8 @@ impl PlaybackDeviceCoreAudio {
 }
 
 /// The `samplerate` of the devices: one rate, or a list of the rates the hardware runs
-/// natively. A list is only accepted while the controller follows the source with Adapt.
-/// The first rate is the starting rate, and the one a source at an unlisted rate is
-/// resampled to.
+/// natively. The first rate is used unless Adapt picks another one, and it is the one a
+/// source at an unlisted rate is resampled to.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 #[serde(try_from = "SampleRatesRaw")]
