@@ -253,8 +253,8 @@ def test_a_loaded_entry_starts_at_the_followed_rate(start_cdsp, ca_config, feede
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)
-    with open(ca_config(chunksize=512)) as conf:
-        cdsp.send("SetConfig", conf.read())
+    cdsp.send("SetConfigFilePath", ca_config(chunksize=512))
+    cdsp.send("Reload")
     poll_config_value(cdsp, "/devices/chunksize", 1024)
     assert config_value(cdsp, "/devices/samplerate") == 96000
     cdsp.poll_until("GetState", "Running")

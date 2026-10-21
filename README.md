@@ -793,8 +793,9 @@ Over the websocket, the settings are read and changed with `GetControllerSetting
 A change takes effect at the next session start, so send a `Reload` to apply it at once.
 
 ### Following the capture format
-The config that is loaded explicitly, from the command line, the statefile, `SetConfig`,
+The config file that is loaded explicitly, from the command line, the statefile,
 `SetConfigFilePath` plus `Reload` and so on, is the _entry config_.
+A config sent over the websocket is not an entry config, see [Manual mode](#manual-mode).
 When the capture device reports that the source changed format, the controller asks two
 config providers for a config to run for the new format:
 
@@ -908,6 +909,29 @@ The backends report format changes differently:
 - The file backends and WASAPI detect a rate change by measuring the incoming rate.
 - ASIO reports a rate change from the driver.
 
+### Manual mode
+A config sent with `SetConfig` or `SetConfigJson` puts the controller in _manual mode_.
+This is meant for trying out a config, for example the unsaved changes in a GUI editor.
+The sent config then runs exactly as it was sent:
+- It is not adapted to the source rate, and no Specific file replaces it.
+  If the controller kept following, the next format change would silently replace
+  what the client sent, while the client still shows it as running.
+- A format change of the source stops processing, the same as without following, and nothing
+  restarts it. The stop reason gives the new format.
+  `stop_on_rate_change` from the sent config applies, as it does without following.
+  When the sent config doesn't change the devices, they keep running as they were opened,
+  with `stop_on_rate_change` on, until they restart.
+- Error recovery still works, since it restarts the same config.
+- `PatchConfig` and `SetConfigValue` patch the sent config, and it stays in manual mode.
+- The entry config, `GetConfigFilePath` and the statefile are not changed.
+
+Manual mode ends when a config is loaded from a file again: with `Reload`,
+`SetConfigFilePath` followed by `Reload`, `SIGHUP`, or a restart of the process,
+since manual mode is not saved in the statefile.
+The controller then starts from the entry config file, and follows again if following is enabled.
+`SetControllerSettings` doesn't end manual mode by itself, the `Reload` after it does.
+`GetControllerStatus` reports `manual: true` while it lasts, with `following: false`.
+
 ### Error recovery
 When processing stops because of a capture or playback error, the controller tries again with
 the config that was running.
@@ -919,7 +943,8 @@ retried.
 A `Stop` or a new config cancels the retries.
 
 `GetControllerStatus` shows the state of the controller: the Specific file that runs,
-whether it is retrying and how many attempts it has made, and the format it is waiting for.
+whether it is retrying and how many attempts it has made, the format it is waiting for,
+and whether it is in manual mode.
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./docs/websocket.md)

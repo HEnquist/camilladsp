@@ -140,6 +140,8 @@ enum Pending {
     },
     /// A patched Specific variant.
     Variant(Box<LoadedConfig>),
+    /// A config sent over the websocket, to run as sent.
+    Manual(Box<LoadedConfig>),
 }
 
 /// Whether capture and playback run on one ASIO driver, and so share a clock.
@@ -174,6 +176,9 @@ struct Controller {
     last_format: Option<SourceFormat>,
     /// Retries since the last session that ran long enough.
     attempts: usize,
+    /// A config sent over the websocket runs, and following is paused until an entry is
+    /// loaded from a file.
+    manual: bool,
     shared_configs: SharedConfigs,
     status_structs: StatusStructs,
     rx: crossbeam_channel::Receiver<ControllerMessage>,
@@ -181,7 +186,19 @@ struct Controller {
 
 impl Controller {
     fn following(&self, settings: &ControllerSettings) -> bool {
-        self.wait && settings.following_enabled()
+        self.wait && settings.following_enabled() && !self.manual
+    }
+
+    fn set_manual(&mut self, manual: bool) {
+        if manual != self.manual {
+            if manual {
+                info!("A config was sent over the websocket, following is paused until a reload");
+            } else {
+                debug!("A config was loaded from a file, leaving manual mode");
+            }
+        }
+        self.manual = manual;
+        self.shared.status.lock().manual = manual;
     }
 
     fn recovery(&self, settings: &ControllerSettings) -> bool {
@@ -218,12 +235,17 @@ impl Controller {
                 }
                 *self.shared.entry.lock() = Some(loaded.source.clone());
                 self.entry = Some(loaded.source);
+                self.set_manual(false);
                 Pending::Entry {
                     validated: Some(Box::new((loaded.validated, loaded.impulses))),
                     query: true,
                 }
             }
             LoadKind::Variant => Pending::Variant(Box::new(loaded)),
+            LoadKind::Manual => {
+                self.set_manual(true);
+                Pending::Manual(Box::new(loaded))
+            }
         }
     }
 
@@ -244,6 +266,7 @@ impl Controller {
                     Err(err) => Selection::Invalid(err),
                 }
             }
+            Pending::Manual(loaded) => Selection::Run(controller::select_manual(*loaded)),
             Pending::Entry { validated, query } => {
                 let Some(entry) = self.entry.clone() else {
                     return Selection::Invalid("There is no config to run".to_string());
@@ -397,6 +420,9 @@ impl Controller {
                 started,
             } => {
                 let format = controller::snap_format(&format);
+                // Asked again rather than taken from the session start, since a config
+                // sent during the session pauses following.
+                let follow = self.following(&self.shared.settings());
                 if !follow || !(capture || is_asio_full_duplex(&last.config)) {
                     return Next::Idle;
                 }
@@ -437,6 +463,7 @@ impl Controller {
                     .map(|f| f.to_string())
                     .unwrap_or_default()
             ),
+            Provider::Manual => debug!("Running a config sent over the websocket"),
         }
         *self.shared_configs.active.lock() = Some(selected.config.clone());
         *self.shared.running.lock() = Some(selected.running.clone());
@@ -621,6 +648,16 @@ impl Controller {
                                     end!(SessionEnd::WaitSource(format));
                                 }
                             };
+                            // The backends only follow when told so at open, so a session
+                            // started without following restarts once following resumes,
+                            // after manual mode or a settings change. The other way round
+                            // the session keeps running, and a format change just isn't
+                            // followed.
+                            if !follow && self.following(&self.shared.settings()) {
+                                debug!("Following resumed, restarting the devices");
+                                pipeline.stop(is_starting);
+                                end!(SessionEnd::Restart(new));
+                            }
                             let comp = config::config_diff(&current.config, &new.config);
                             match comp {
                                 config::ConfigChange::Pipeline
@@ -937,6 +974,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         entry: None,
         last_format: None,
         attempts: 0,
+        manual: false,
         shared_configs: SharedConfigs {
             active: active_config,
             previous: previous_config,

@@ -258,6 +258,7 @@
         "required": [
           "recovering",
           "attempts",
+          "manual",
           "following",
           "error_recovery",
           "stop_reason"
@@ -268,14 +269,14 @@
               "string",
               "null"
             ],
-            "description": "The Specific config file that runs, `null` when the entry config runs as is or\nadapted."
+            "description": "The Specific config file that runs, `null` when the entry config runs as is or\nadapted, and in manual mode."
           },
           "entry_config_file": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The entry config file, the one `GetConfigFilePath` gives."
+            "description": "The entry config file, the one `GetConfigFilePath` gives, and the one `Reload`\nloads."
           },
           "recovering": {
             "type": "boolean",
@@ -305,9 +306,13 @@
               }
             ]
           },
+          "manual": {
+            "type": "boolean",
+            "description": "Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the\ncontroller leaves it alone until a config is loaded from a file, for example with\n`Reload`."
+          },
           "following": {
             "type": "boolean",
-            "description": "Whether following is on, enabled and in wait mode."
+            "description": "Whether following is on, enabled and in wait mode. `false` in manual mode."
           },
           "error_recovery": {
             "type": "boolean",
@@ -2046,7 +2051,7 @@
           },
           {
             "type": "object",
-            "description": "Upload and immediately apply a new configuration as a YAML string.",
+            "description": "Upload and immediately apply a new configuration as a YAML string.\nPuts the built-in controller in manual mode, see the group description.",
             "required": [
               "value",
               "command"
@@ -2067,7 +2072,7 @@
           },
           {
             "type": "object",
-            "description": "Upload and immediately apply a new configuration as a JSON string.",
+            "description": "Upload and immediately apply a new configuration as a JSON string.\nPuts the built-in controller in manual mode, see the group description.",
             "required": [
               "value",
               "command"
@@ -2154,7 +2159,7 @@
           },
           {
             "type": "object",
-            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.",
+            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.\nEnds manual mode, and following resumes if it is enabled.",
             "required": [
               "command"
             ],
@@ -2186,7 +2191,7 @@
           },
           {
             "type": "object",
-            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.",
+            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.\nThis doesn't end manual mode, the `Reload` does.",
             "required": [
               "command"
             ],

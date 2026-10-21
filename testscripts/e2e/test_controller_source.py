@@ -12,9 +12,11 @@ The entry config is 2 channels at 48 kHz, and Adapt is the only provider, so a s
 4 channels has no config and the controller waits.
 """
 
+import json
 import time
 
 import pytest
+import yaml
 
 from conftest import CAPTURE_PORT_PLACEHOLDER, PLAYBACK_PORT_PLACEHOLDER, free_port
 from dummyctl import SimulatedSource
@@ -33,9 +35,12 @@ def source():
 def source_cdsp(start_cdsp, config_file, source):
     """Factory for a CamillaDSP whose dummy capture asks `source`."""
 
-    def _start(extra_args=FOLLOW, **kwargs):
-        config = config_file(source_edits(source), base="dummy_control.yml")
-        return start_cdsp(config=config, extra_args=extra_args, **kwargs)
+    def _start(extra_args=FOLLOW, config=None, **kwargs):
+        if config is None:
+            config = config_file(source_edits(source), base="dummy_control.yml")
+        cdsp = start_cdsp(config=config, extra_args=extra_args, **kwargs)
+        cdsp.config_path = config
+        return cdsp
 
     return _start
 
@@ -170,11 +175,86 @@ def test_a_new_entry_ends_the_wait(source_cdsp, source, config_file):
     edits = source_edits(source)
     edits.update({"    channels: 2\n": "    channels: 4\n", "[0, 1]": "[0, 1, 2, 3]"})
     four = config_file(edits, base="dummy_control.yml")
-    with open(four) as conf:
-        cdsp.send("SetConfig", conf.read())
+    cdsp.send("SetConfigFilePath", four)
+    cdsp.send("Reload")
     cdsp.poll_until("GetState", "Running", timeout=5.0)
     assert config_value(cdsp, "/devices/capture/channels") == 4
     assert cdsp.send("GetControllerStatus")["waiting_for_source"] is None
+
+
+def send_config(cdsp, path, title):
+    """Send the config at `path` with SetConfigJson, the way the GUI tries out its editor.
+    The title tells it apart from the file, and changing it doesn't restart the devices."""
+    with open(path) as conf:
+        config = yaml.safe_load(conf)
+    config["title"] = title
+    cdsp.send("SetConfigJson", json.dumps(config))
+    cdsp.poll_until("GetConfigTitle", title)
+
+
+@pytest.fixture
+def specific(tmp_path, config_file, source):
+    """A Specific template with files for 48 and 96 kHz, and the args to follow it."""
+    template = str(tmp_path / "conf_$samplerate$.yml")
+    for rate in (48000, 96000):
+        edits = source_edits(source)
+        edits["samplerate: 48000"] = f"samplerate: {rate}"
+        path = template.replace("$samplerate$", str(rate))
+        config_file(edits, base="dummy_control.yml", path=path)
+    return template, ["--wait", "--follow_specific", template]
+
+
+@pytest.mark.parametrize("provider", ["adapt", "specific"])
+def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specific, provider):
+    """Manual mode: a source change stops the sent config rather than following it, and
+    nothing restarts it. `Reload` goes back to the entry file and follows again."""
+    template, specific_args = specific
+    source.play(48000)
+    if provider == "adapt":
+        cdsp = source_cdsp()
+    else:
+        entry = template.replace("$samplerate$", "48000")
+        cdsp = source_cdsp(extra_args=specific_args, config=entry)
+    wait_for_rate(cdsp, 48000)
+    send_config(cdsp, cdsp.config_path, "sent")
+    state = cdsp.send("GetControllerStatus")
+    assert (state["manual"], state["following"]) == (True, False)
+    assert state["entry_config_file"] == cdsp.config_path
+    assert state["active_config_file"] is None
+
+    source.play(96000)
+    cdsp.poll_until("GetState", "Inactive")
+    assert cdsp.send("GetStopReason") == {
+        "CaptureFormatChange": {"samplerate": 96000, "channels": 2, "format": "S32_LE"}
+    }
+    time.sleep(2.0)
+    assert cdsp.send("GetState") == "Inactive"
+    assert cdsp.send("GetControllerStatus")["waiting_for_source"] is None
+
+    # New settings don't end manual mode by themselves.
+    cdsp.send("SetControllerSettings", cdsp.send("GetControllerSettings"))
+    assert cdsp.send("GetControllerStatus")["manual"] is True
+
+    cdsp.send("Reload")
+    wait_for_rate(cdsp, 96000)
+    state = cdsp.send("GetControllerStatus")
+    assert (state["manual"], state["following"]) == (False, True)
+    if provider == "specific":
+        assert state["active_config_file"] == template.replace("$samplerate$", "96000")
+
+
+def test_a_sent_config_is_not_adapted(source_cdsp, source):
+    """A config for 48 kHz, sent while following runs at 96 kHz, runs at 48 kHz. The
+    session it restarts doesn't follow, so a source change leaves it running."""
+    source.play(96000)
+    cdsp = source_cdsp()
+    wait_for_rate(cdsp, 96000)
+    send_config(cdsp, cdsp.config_path, "sent")
+    wait_for_rate(cdsp, 48000)
+    source.play(44100)
+    time.sleep(1.5)
+    assert cdsp.send("GetState") == "Running"
+    assert config_value(cdsp, "/devices/samplerate") == 48000
 
 
 def test_without_following_the_source_is_ignored(source_cdsp, source):

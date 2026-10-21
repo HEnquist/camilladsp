@@ -631,6 +631,10 @@ While the built-in controller follows the capture source, `GetConfig` returns
 the config that runs, which is the loaded config adapted to the source rate or
 a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
 it was made from, so the patch carries over to the next format change.
+`SetConfig` and `SetConfigJson` put the controller in manual mode, where the
+config runs exactly as sent and following is paused, until a config is loaded
+from a file again with `Reload`. In manual mode, `PatchConfig` and
+`SetConfigValue` patch the sent config.
 
 #### `GetConfig`
 
@@ -679,6 +683,7 @@ Arguments:
 #### `SetConfig`
 
 Upload and immediately apply a new configuration as a YAML string.
+Puts the built-in controller in manual mode, see the group description.
 
 Arguments:
 
@@ -687,6 +692,7 @@ Arguments:
 #### `SetConfigJson`
 
 Upload and immediately apply a new configuration as a JSON string.
+Puts the built-in controller in manual mode, see the group description.
 
 Arguments:
 
@@ -724,12 +730,20 @@ Arguments:
 #### `Reload`
 
 Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+Ends manual mode, and following resumes if it is enabled.
 
 ### Controller
 
 The built-in controller follows the format of the capture source and recovers
 from device errors. Its settings are the `controller` section of the statefile,
 and both features only work in wait mode.
+
+A config sent with `SetConfig` or `SetConfigJson` puts the controller in manual
+mode. The sent config then runs exactly as sent: it is not adapted, no other file
+is selected, and a source format change stops processing as it does without
+following. Error recovery still restarts the sent config. Manual mode ends when a
+config is loaded from a file, with `Reload`, `SetConfigFilePath` followed by
+`Reload`, `SIGHUP`, or a restart. Following then resumes from that file.
 
 #### `GetControllerSettings`
 
@@ -742,6 +756,7 @@ Returns ([`ControllerSettings`](#controllersettings) or `null`): The `controller
 
 Replace the settings of the built-in controller. They take effect at the next
 session start, so send a `Reload` to apply them at once.
+This doesn't end manual mode, the `Reload` does.
 
 Arguments:
 
@@ -1069,13 +1084,14 @@ The state of the built-in controller, returned by the `GetControllerStatus` comm
 
 Fields:
 
-- `active_config_file` (`string` or `null`, optional): The Specific config file that runs, `null` when the entry config runs as is or adapted.
-- `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives.
+- `active_config_file` (`string` or `null`, optional): The Specific config file that runs, `null` when the entry config runs as is or adapted, and in manual mode.
+- `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives, and the one `Reload` loads.
 - `recovering` (`boolean`): Waiting to retry after a device error.
 - `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
 - `next_retry_s` (`number` or `null`, optional): Seconds until the next retry, while waiting for one.
 - `waiting_for_source` ([`SourceFormat`](#sourceformat) or `null`, optional): The source format no config was found for, while waiting for the source to change.
-- `following` (`boolean`): Whether following is on, enabled and in wait mode.
+- `manual` (`boolean`): Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the controller leaves it alone until a config is loaded from a file, for example with `Reload`.
+- `following` (`boolean`): Whether following is on, enabled and in wait mode. `false` in manual mode.
 - `error_recovery` (`boolean`): Whether error recovery is on, enabled and in wait mode.
 - `stop_reason` ([`StopReason`](#stopreason)): Why processing last stopped.
 

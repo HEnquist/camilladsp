@@ -73,6 +73,10 @@ pub enum LoadKind {
     /// A patched version of the running Specific variant. It runs until the next switch,
     /// and the entry stays as it is.
     Variant,
+    /// A config sent over the websocket. It puts the controller in manual mode, where it
+    /// runs exactly as sent and following is paused, until an entry is loaded from a file.
+    /// The entry stays as it is.
+    Manual,
 }
 
 /// A config sent to the controller, along with the result of validating it as is.
@@ -129,6 +133,8 @@ pub enum Provider {
     Specific(String),
     /// The Adapt provider.
     Adapt,
+    /// A config sent over the websocket, run as sent.
+    Manual,
 }
 
 /// A config ready to run.
@@ -165,6 +171,8 @@ pub struct ControllerStatus {
     pub next_retry: Option<Instant>,
     /// The format no provider had a config for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
+    /// A config sent over the websocket runs, and the controller leaves it alone.
+    pub manual: bool,
 }
 
 /// Controller state shared with the websocket server.
@@ -479,6 +487,20 @@ pub fn select_variant(
             kind: LoadKind::Variant,
         },
     }))
+}
+
+/// Run a config sent over the websocket exactly as sent, validated as it is.
+pub fn select_manual(loaded: LoadedConfig) -> Box<Selected> {
+    Box::new(Selected {
+        config: loaded.validated,
+        impulses: loaded.impulses,
+        provider: Provider::Manual,
+        format: None,
+        running: RunningSource {
+            source: loaded.source,
+            kind: LoadKind::Manual,
+        },
+    })
 }
 
 /// Token values captured while matching a file name against a template.
@@ -926,6 +948,18 @@ mod tests {
             select_config(&entry(conf), None, &settings(None, Some(true)), None),
             Selection::Invalid(_)
         ));
+    }
+
+    #[test]
+    fn a_sent_config_runs_as_sent() {
+        let source = entry(base_config(48000, 2, ""));
+        let loaded = LoadedConfig::validate(source.clone(), LoadKind::Manual).unwrap();
+        let selected = select_manual(loaded);
+        assert_eq!(selected.provider, Provider::Manual);
+        assert_eq!(selected.format, None);
+        assert_eq!(selected.config.devices.samplerate(), 48000);
+        assert_eq!(selected.running.kind, LoadKind::Manual);
+        assert_eq!(selected.running.source, source);
     }
 
     #[test]

@@ -125,6 +125,22 @@ def test_a_new_config_cancels_the_recovery(start_cdsp, config_file):
     assert status(cdsp)["attempts"] == 0
 
 
+def test_recovery_restarts_a_sent_config(control_cdsp, config_file):
+    """Manual mode pauses following, but recovery restarts the same config, so it keeps
+    working on the config that was sent."""
+    cdsp = control_cdsp(extra_args=["--wait", "--error_recovery", "--follow_adapt"])
+    edits = {**cdsp.control_edits, "\ndevices:\n": "\ntitle: sent\ndevices:\n"}
+    with open(config_file(edits, base="dummy_control.yml")) as conf:
+        cdsp.send("SetConfig", conf.read())
+    cdsp.poll_until("GetConfigTitle", "sent")
+    cdsp.capture_control.set("error", 1)
+    cdsp.poll_until_true("GetControllerStatus", lambda s: s["recovering"])
+    cdsp.poll_until("GetState", "Running", timeout=5.0)
+    cdsp.poll_until("GetStopReason", "None")
+    assert cdsp.send("GetConfigTitle") == "sent"
+    assert status(cdsp)["manual"] is True
+
+
 def test_the_end_of_a_stream_is_not_retried(control_cdsp):
     cdsp = control_cdsp(extra_args=["--wait", "--error_recovery"])
     cdsp.capture_control.set("eof", 1)

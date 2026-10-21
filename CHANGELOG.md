@@ -9,6 +9,8 @@ New features:
   without Adapt.
 - Following with Adapt refuses to change the `samplerate` of a config with settings that are only
   right at its own rate, such as delays in samples or `Free` biquads.
+- A config sent with `SetConfig` or `SetConfigJson` runs exactly as sent, and pauses following
+  until a config is loaded from a file again, for example with `Reload`.
 - Alsa: follow a player on the Loopback, with the capture open the whole time.
   Needs a kernel where the Loopback's `PCM Notify` works, Linux 7.4 or a stable kernel with the fix.
 

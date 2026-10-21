@@ -1472,7 +1472,8 @@ fn handle_command(
                         .next_retry
                         .map(|t| t.saturating_duration_since(Instant::now()).as_secs_f32()),
                     waiting_for_source: status.waiting_for_source,
-                    following: shared.wait && settings.following_enabled(),
+                    manual: status.manual,
+                    following: shared.wait && settings.following_enabled() && !status.manual,
                     error_recovery: shared.wait && settings.recovery_enabled(),
                     stop_reason,
                 },
@@ -1527,7 +1528,7 @@ fn handle_command(
                         raw,
                         filename: None,
                     },
-                    LoadKind::Entry,
+                    LoadKind::Manual,
                 ) {
                     Ok(loaded) => {
                         match shared_data_inst
@@ -1577,7 +1578,7 @@ fn handle_command(
                         raw,
                         filename: None,
                     },
-                    LoadKind::Entry,
+                    LoadKind::Manual,
                 ) {
                     Ok(loaded) => {
                         match shared_data_inst

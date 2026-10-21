@@ -405,9 +405,10 @@ pub struct ControllerFileChecks {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerStatusReport {
     /// The Specific config file that runs, `null` when the entry config runs as is or
-    /// adapted.
+    /// adapted, and in manual mode.
     pub active_config_file: Option<String>,
-    /// The entry config file, the one `GetConfigFilePath` gives.
+    /// The entry config file, the one `GetConfigFilePath` gives, and the one `Reload`
+    /// loads.
     pub entry_config_file: Option<String>,
     /// Waiting to retry after a device error.
     pub recovering: bool,
@@ -417,7 +418,11 @@ pub struct ControllerStatusReport {
     pub next_retry_s: Option<f32>,
     /// The source format no config was found for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
-    /// Whether following is on, enabled and in wait mode.
+    /// Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the
+    /// controller leaves it alone until a config is loaded from a file, for example with
+    /// `Reload`.
+    pub manual: bool,
+    /// Whether following is on, enabled and in wait mode. `false` in manual mode.
     pub following: bool,
     /// Whether error recovery is on, enabled and in wait mode.
     pub error_recovery: bool,
@@ -1125,6 +1130,10 @@ ws_protocol! {
     /// the config that runs, which is the loaded config adapted to the source rate or
     /// a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
     /// it was made from, so the patch carries over to the next format change.
+    /// `SetConfig` and `SetConfigJson` put the controller in manual mode, where the
+    /// config runs exactly as sent and following is paused, until a config is loaded
+    /// from a file again with `Reload`. In manual mode, `PatchConfig` and
+    /// `SetConfigValue` patch the sent config.
     group "Config management" {
         /// Read the active configuration.
         GetConfig -> {
@@ -1169,12 +1178,14 @@ ws_protocol! {
         },
 
         /// Upload and immediately apply a new configuration as a YAML string.
+        /// Puts the built-in controller in manual mode, see the group description.
         SetConfig {
             /// Config in YAML format.
             value: String,
         },
 
         /// Upload and immediately apply a new configuration as a JSON string.
+        /// Puts the built-in controller in manual mode, see the group description.
         SetConfigJson {
             /// Config in JSON format.
             value: String,
@@ -1206,12 +1217,20 @@ ws_protocol! {
         },
 
         /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+        /// Ends manual mode, and following resumes if it is enabled.
         Reload,
     }
 
     /// The built-in controller follows the format of the capture source and recovers
     /// from device errors. Its settings are the `controller` section of the statefile,
     /// and both features only work in wait mode.
+    ///
+    /// A config sent with `SetConfig` or `SetConfigJson` puts the controller in manual
+    /// mode. The sent config then runs exactly as sent: it is not adapted, no other file
+    /// is selected, and a source format change stops processing as it does without
+    /// following. Error recovery still restarts the sent config. Manual mode ends when a
+    /// config is loaded from a file, with `Reload`, `SetConfigFilePath` followed by
+    /// `Reload`, `SIGHUP`, or a restart. Following then resumes from that file.
     group "Controller" {
         /// Get the settings of the built-in controller, the `controller` section of the
         /// statefile.
@@ -1222,6 +1241,7 @@ ws_protocol! {
 
         /// Replace the settings of the built-in controller. They take effect at the next
         /// session start, so send a [`Reload`](Self::Reload) to apply them at once.
+        /// This doesn't end manual mode, the `Reload` does.
         SetControllerSettings {
             /// The whole `controller` section, or `null` to remove it.
             value: Option<ControllerSettings>,
