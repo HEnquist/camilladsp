@@ -66,7 +66,9 @@ use self::utils::{
 use self::utils::{accept_secure_stream, make_acceptor};
 use crate::ProcessingState;
 use crate::Res;
-use crate::controller::{self, ConfigSource, ControllerShared, LoadKind, LoadedConfig};
+use crate::controller::{
+    self, ConfigSource, ControllerShared, ControllerSource, LoadKind, LoadedConfig,
+};
 use crate::signal_monitor::{self, SignalLevelSide as MonitorSignalLevelSide};
 use crate::utils::decibels::linear_to_db_inplace;
 use crate::{
@@ -753,27 +755,13 @@ make_handler!(TcpStream, handle_tcp);
 #[cfg(feature = "secure-websocket")]
 make_handler!(TlsStream<TcpStream>, handle_tls);
 
-/// The config `PatchConfig` and `SetConfigValue` start from, as JSON, with its file name
-/// and what it is for. Null while nothing runs.
-///
-/// That is the raw config behind the running one, so that a patch doesn't freeze the
-/// expanded tokens or the adaptation following made. See [`crate::controller::RunningSource`].
-fn patch_base(shared_data: &SharedData) -> (serde_json::Value, Option<String>, LoadKind) {
-    let active = shared_data.active_config.lock();
-    if active.is_none() {
-        return (serde_json::Value::Null, None, LoadKind::Entry);
-    }
-    match &*shared_data.controller.running.lock() {
-        Some(running) => (
-            serde_json::to_value(&running.source.raw).unwrap(),
-            running.source.filename.clone(),
-            running.kind,
-        ),
-        None => (
-            serde_json::to_value(&*active).unwrap(),
-            None,
-            LoadKind::Entry,
-        ),
+/// The config `PatchConfig` and `SetConfigValue` start from, as JSON. That is the running
+/// config, the one `GetConfig` returns, and the patched config runs from the websocket
+/// source. Null while nothing runs.
+fn patch_base(shared_data: &SharedData) -> serde_json::Value {
+    match &*shared_data.active_config.lock() {
+        Some(active) => serde_json::to_value(active).unwrap(),
+        None => serde_json::Value::Null,
     }
 }
 
@@ -1464,7 +1452,9 @@ fn handle_command(
             Some(WsReply::GetControllerStatus {
                 result: WsResult::Ok,
                 value: ControllerStatusReport {
-                    active_config_file: status.active_config_file,
+                    source: status.source,
+                    provider: status.provider,
+                    config_file: status.config_file,
                     entry_config_file: shared_data_inst.active_config_path.lock().clone(),
                     recovering: status.recovering,
                     attempts: status.attempts,
@@ -1472,8 +1462,9 @@ fn handle_command(
                         .next_retry
                         .map(|t| t.saturating_duration_since(Instant::now()).as_secs_f32()),
                     waiting_for_source: status.waiting_for_source,
-                    manual: status.manual,
-                    following: shared.wait && settings.following_enabled() && !status.manual,
+                    following: shared.wait
+                        && settings.following_enabled()
+                        && status.source == ControllerSource::Files,
                     error_recovery: shared.wait && settings.recovery_enabled(),
                     stop_reason,
                 },
@@ -1528,7 +1519,7 @@ fn handle_command(
                         raw,
                         filename: None,
                     },
-                    LoadKind::Manual,
+                    LoadKind::Websocket,
                 ) {
                     Ok(loaded) => {
                         match shared_data_inst
@@ -1578,7 +1569,7 @@ fn handle_command(
                         raw,
                         filename: None,
                     },
-                    LoadKind::Manual,
+                    LoadKind::Websocket,
                 ) {
                     Ok(loaded) => {
                         match shared_data_inst
@@ -1622,7 +1613,7 @@ fn handle_command(
             }
         }
         WsCommand::PatchConfig { value } => {
-            let (mut conf_as_value, filename, kind) = patch_base(shared_data_inst);
+            let mut conf_as_value = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::PatchConfig {
@@ -1634,7 +1625,7 @@ fn handle_command(
             merge(&mut conf_as_value, &value);
             let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
             match updated_conf {
-                Ok(raw) => match LoadedConfig::validate(ConfigSource { raw, filename }, kind) {
+                Ok(raw) => match LoadedConfig::patched(raw) {
                     Ok(loaded) => {
                         match shared_data_inst
                             .command_sender
@@ -1677,7 +1668,7 @@ fn handle_command(
             }
         }
         WsCommand::SetConfigValue { pointer, value } => {
-            let (mut conf_as_value, filename, kind) = patch_base(shared_data_inst);
+            let mut conf_as_value = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
                 debug!("No active config to patch");
                 return Some(WsReply::SetConfigValue {
@@ -1698,7 +1689,7 @@ fn handle_command(
             }
             let updated_conf = serde_json::from_value::<config::Configuration>(conf_as_value);
             match updated_conf {
-                Ok(raw) => match LoadedConfig::validate(ConfigSource { raw, filename }, kind) {
+                Ok(raw) => match LoadedConfig::patched(raw) {
                     Ok(loaded) => {
                         match shared_data_inst
                             .command_sender

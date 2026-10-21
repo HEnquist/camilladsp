@@ -400,13 +400,43 @@ pub struct ControllerFileChecks {
     pub adapt: Option<AdaptCheck>,
 }
 
+/// Where the config the controller runs comes from.
+///
+/// - `Files`: the controller loads it from the entry config file, through a provider.
+/// - `Websocket`: it was sent over the websocket, and runs exactly as sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ControllerSource {
+    #[default]
+    Files,
+    Websocket,
+}
+
+/// The provider that supplied a config of the files source.
+///
+/// - `Single`: the entry config file as is.
+/// - `Adapt`: the entry config file adapted to the source format.
+/// - `Specific`: the per-format file the template gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ConfigProvider {
+    Single,
+    Adapt,
+    Specific,
+}
+
 /// The state of the built-in controller, returned by the `GetControllerStatus` command.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerStatusReport {
-    /// The Specific config file that runs, `null` when the entry config runs as is or
-    /// adapted, and in manual mode.
-    pub active_config_file: Option<String>,
+    /// Where the config comes from. It stays until the next switch, also while nothing runs.
+    pub source: ControllerSource,
+    /// The provider of the running config. `null` for the websocket source, and while
+    /// nothing runs.
+    pub provider: Option<ConfigProvider>,
+    /// The file that runs: the entry config file for `Single` and `Adapt`, the per-format
+    /// file for `Specific`. `null` when `provider` is.
+    pub config_file: Option<String>,
     /// The entry config file, the one `GetConfigFilePath` gives, and the one `Reload`
     /// loads.
     pub entry_config_file: Option<String>,
@@ -418,11 +448,7 @@ pub struct ControllerStatusReport {
     pub next_retry_s: Option<f32>,
     /// The source format no config was found for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
-    /// Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the
-    /// controller leaves it alone until a config is loaded from a file, for example with
-    /// `Reload`.
-    pub manual: bool,
-    /// Whether following is on, enabled and in wait mode. `false` in manual mode.
+    /// Whether following is on, enabled and in wait mode. `false` for the websocket source.
     pub following: bool,
     /// Whether error recovery is on, enabled and in wait mode.
     pub error_recovery: bool,
@@ -1128,12 +1154,12 @@ ws_protocol! {
     /// `Reload` to be applied.
     /// While the built-in controller follows the capture source, `GetConfig` returns
     /// the config that runs, which is the loaded config adapted to the source rate or
-    /// a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
-    /// it was made from, so the patch carries over to the next format change.
-    /// `SetConfig` and `SetConfigJson` put the controller in manual mode, where the
-    /// config runs exactly as sent and following is paused, until a config is loaded
-    /// from a file again with `Reload`. In manual mode, `PatchConfig` and
-    /// `SetConfigValue` patch the sent config.
+    /// a per-format config file.
+    /// `SetConfig`, `SetConfigJson`, `PatchConfig` and `SetConfigValue` switch the
+    /// controller to the websocket source, where the config runs exactly as sent and
+    /// nothing is followed, until a config is loaded from a file again with `Reload`.
+    /// `PatchConfig` and `SetConfigValue` patch the config that runs, the one
+    /// `GetConfig` returns.
     group "Config management" {
         /// Read the active configuration.
         GetConfig -> {
@@ -1178,14 +1204,16 @@ ws_protocol! {
         },
 
         /// Upload and immediately apply a new configuration as a YAML string.
-        /// Puts the built-in controller in manual mode, see the group description.
+        /// Switches the built-in controller to the websocket source, see the group
+        /// description.
         SetConfig {
             /// Config in YAML format.
             value: String,
         },
 
         /// Upload and immediately apply a new configuration as a JSON string.
-        /// Puts the built-in controller in manual mode, see the group description.
+        /// Switches the built-in controller to the websocket source, see the group
+        /// description.
         SetConfigJson {
             /// Config in JSON format.
             value: String,
@@ -1193,7 +1221,8 @@ ws_protocol! {
 
         /// Apply a partial patch to the active configuration.
         ///
-        /// If the resulting config is valid it is applied immediately.
+        /// If the resulting config is valid it is applied immediately, and the built-in
+        /// controller switches to the websocket source, see the group description.
         PatchConfig {
             /// Partial config object containing only the fields to change.
             value: serde_json::Value,
@@ -1209,6 +1238,7 @@ ws_protocol! {
         },
 
         /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+        /// Switches the built-in controller to the websocket source, like `PatchConfig`.
         SetConfigValue {
             /// JSON Pointer to the value, such as `"/devices/samplerate"`.
             pointer: String,
@@ -1217,7 +1247,8 @@ ws_protocol! {
         },
 
         /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
-        /// Ends manual mode, and following resumes if it is enabled.
+        /// Switches the built-in controller back to the files source, and following
+        /// resumes if it is enabled.
         Reload,
     }
 
@@ -1225,12 +1256,16 @@ ws_protocol! {
     /// from device errors. Its settings are the `controller` section of the statefile,
     /// and both features only work in wait mode.
     ///
-    /// A config sent with `SetConfig` or `SetConfigJson` puts the controller in manual
-    /// mode. The sent config then runs exactly as sent: it is not adapted, no other file
-    /// is selected, and a source format change stops processing as it does without
-    /// following. Error recovery still restarts the sent config. Manual mode ends when a
-    /// config is loaded from a file, with `Reload`, `SetConfigFilePath` followed by
-    /// `Reload`, `SIGHUP`, or a restart. Following then resumes from that file.
+    /// The config comes from one of two sources. From the files source, the controller
+    /// loads the entry config file through a provider: `Single` runs it as is, `Adapt`
+    /// adapts it to the source format, and `Specific` loads a per-format file instead.
+    /// A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
+    /// or `SetConfigValue`, switches to the websocket source. It then runs exactly as
+    /// sent: it is not adapted, no other file is selected, and a source format change
+    /// stops processing as it does without following. Error recovery works the same for
+    /// both sources, it restarts the config that ran. A config loaded from a file switches
+    /// back to the files source, with `Reload`, `SetConfigFilePath` followed by `Reload`,
+    /// `SIGHUP`, or a restart. Following then resumes from that file.
     group "Controller" {
         /// Get the settings of the built-in controller, the `controller` section of the
         /// statefile.
@@ -1241,14 +1276,15 @@ ws_protocol! {
 
         /// Replace the settings of the built-in controller. They take effect at the next
         /// session start, so send a [`Reload`](Self::Reload) to apply them at once.
-        /// This doesn't end manual mode, the `Reload` does.
+        /// This doesn't switch back to the files source, the `Reload` does.
         SetControllerSettings {
             /// The whole `controller` section, or `null` to remove it.
             value: Option<ControllerSettings>,
         },
 
-        /// Get the state of the built-in controller: the running Specific config file,
-        /// error recovery, and whether it is waiting for the source to change format.
+        /// Get the state of the built-in controller: the source, the provider and file of
+        /// the running config, error recovery, and whether it is waiting for the source to
+        /// change format.
         GetControllerStatus -> {
             /// The controller state.
             value: ControllerStatusReport,

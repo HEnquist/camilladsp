@@ -199,6 +199,15 @@
         },
         "unevaluatedProperties": false
       },
+      "ConfigProvider": {
+        "type": "string",
+        "description": "The provider that supplied a config of the files source.\n\n- `Single`: the entry config file as is.\n- `Adapt`: the entry config file adapted to the source format.\n- `Specific`: the per-format file the template gives.",
+        "enum": [
+          "Single",
+          "Adapt",
+          "Specific"
+        ]
+      },
       "ControllerFileChecks": {
         "type": "object",
         "description": "Value of the `CheckControllerFiles` reply, one section per follow provider.",
@@ -252,24 +261,47 @@
         },
         "unevaluatedProperties": false
       },
+      "ControllerSource": {
+        "type": "string",
+        "description": "Where the config the controller runs comes from.\n\n- `Files`: the controller loads it from the entry config file, through a provider.\n- `Websocket`: it was sent over the websocket, and runs exactly as sent.",
+        "enum": [
+          "Files",
+          "Websocket"
+        ]
+      },
       "ControllerStatusReport": {
         "type": "object",
         "description": "The state of the built-in controller, returned by the `GetControllerStatus` command.",
         "required": [
+          "source",
           "recovering",
           "attempts",
-          "manual",
           "following",
           "error_recovery",
           "stop_reason"
         ],
         "properties": {
-          "active_config_file": {
+          "source": {
+            "$ref": "#/components/schemas/ControllerSource",
+            "description": "Where the config comes from. It stays until the next switch, also while nothing runs."
+          },
+          "provider": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConfigProvider",
+                "description": "The provider of the running config. `null` for the websocket source, and while\nnothing runs."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "config_file": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The Specific config file that runs, `null` when the entry config runs as is or\nadapted, and in manual mode."
+            "description": "The file that runs: the entry config file for `Single` and `Adapt`, the per-format\nfile for `Specific`. `null` when `provider` is."
           },
           "entry_config_file": {
             "type": [
@@ -306,13 +338,9 @@
               }
             ]
           },
-          "manual": {
-            "type": "boolean",
-            "description": "Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the\ncontroller leaves it alone until a config is loaded from a file, for example with\n`Reload`."
-          },
           "following": {
             "type": "boolean",
-            "description": "Whether following is on, enabled and in wait mode. `false` in manual mode."
+            "description": "Whether following is on, enabled and in wait mode. `false` for the websocket source."
           },
           "error_recovery": {
             "type": "boolean",
@@ -2051,7 +2079,7 @@
           },
           {
             "type": "object",
-            "description": "Upload and immediately apply a new configuration as a YAML string.\nPuts the built-in controller in manual mode, see the group description.",
+            "description": "Upload and immediately apply a new configuration as a YAML string.\nSwitches the built-in controller to the websocket source, see the group\ndescription.",
             "required": [
               "value",
               "command"
@@ -2072,7 +2100,7 @@
           },
           {
             "type": "object",
-            "description": "Upload and immediately apply a new configuration as a JSON string.\nPuts the built-in controller in manual mode, see the group description.",
+            "description": "Upload and immediately apply a new configuration as a JSON string.\nSwitches the built-in controller to the websocket source, see the group\ndescription.",
             "required": [
               "value",
               "command"
@@ -2093,7 +2121,7 @@
           },
           {
             "type": "object",
-            "description": "Apply a partial patch to the active configuration.\n\nIf the resulting config is valid it is applied immediately.",
+            "description": "Apply a partial patch to the active configuration.\n\nIf the resulting config is valid it is applied immediately, and the built-in\ncontroller switches to the websocket source, see the group description.",
             "required": [
               "value",
               "command"
@@ -2134,7 +2162,7 @@
           },
           {
             "type": "object",
-            "description": "Set a single value in the active configuration using a JSON Pointer (RFC 6901).",
+            "description": "Set a single value in the active configuration using a JSON Pointer (RFC 6901).\nSwitches the built-in controller to the websocket source, like `PatchConfig`.",
             "required": [
               "pointer",
               "value",
@@ -2159,7 +2187,7 @@
           },
           {
             "type": "object",
-            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.\nEnds manual mode, and following resumes if it is enabled.",
+            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.\nSwitches the built-in controller back to the files source, and following\nresumes if it is enabled.",
             "required": [
               "command"
             ],
@@ -2191,7 +2219,7 @@
           },
           {
             "type": "object",
-            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.\nThis doesn't end manual mode, the `Reload` does.",
+            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.\nThis doesn't switch back to the files source, the `Reload` does.",
             "required": [
               "command"
             ],
@@ -2218,7 +2246,7 @@
           },
           {
             "type": "object",
-            "description": "Get the state of the built-in controller: the running Specific config file,\nerror recovery, and whether it is waiting for the source to change format.",
+            "description": "Get the state of the built-in controller: the source, the provider and file of\nthe running config, error recovery, and whether it is waiting for the source to\nchange format.",
             "required": [
               "command"
             ],

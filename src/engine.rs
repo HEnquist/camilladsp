@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 
 use crate::audiodevice::query_capture_source;
 use crate::controller::{
-    self, ConfigSource, ControllerSettings, ControllerShared, LoadKind, LoadedConfig, Provider,
-    Selected, Selection, SourceFormat, SourceState,
+    self, ConfigProvider, ConfigSource, ControllerSettings, ControllerShared, ControllerSource,
+    LoadKind, LoadedConfig, Provider, Selected, Selection, SourceFormat, SourceState,
 };
 use crate::engine_pipeline::start_pipeline;
 use crate::engine_process_signals::launch_process_signals_thread;
@@ -138,10 +138,8 @@ enum Pending {
         validated: Option<Box<(config::Configuration, ImpulseCache)>>,
         query: bool,
     },
-    /// A patched Specific variant.
-    Variant(Box<LoadedConfig>),
-    /// A config sent over the websocket, to run as sent.
-    Manual(Box<LoadedConfig>),
+    /// A config from the websocket source, to run as sent.
+    Websocket(Box<LoadedConfig>),
 }
 
 /// Whether capture and playback run on one ASIO driver, and so share a clock.
@@ -176,9 +174,8 @@ struct Controller {
     last_format: Option<SourceFormat>,
     /// Retries since the last session that ran long enough.
     attempts: usize,
-    /// A config sent over the websocket runs, and following is paused until an entry is
-    /// loaded from a file.
-    manual: bool,
+    /// Where the config comes from. Only the files source is followed.
+    source: ControllerSource,
     shared_configs: SharedConfigs,
     status_structs: StatusStructs,
     rx: crossbeam_channel::Receiver<ControllerMessage>,
@@ -186,19 +183,22 @@ struct Controller {
 
 impl Controller {
     fn following(&self, settings: &ControllerSettings) -> bool {
-        self.wait && settings.following_enabled() && !self.manual
+        self.wait && settings.following_enabled() && self.source == ControllerSource::Files
     }
 
-    fn set_manual(&mut self, manual: bool) {
-        if manual != self.manual {
-            if manual {
-                info!("A config was sent over the websocket, following is paused until a reload");
-            } else {
-                debug!("A config was loaded from a file, leaving manual mode");
+    fn set_source(&mut self, source: ControllerSource) {
+        if source != self.source {
+            match source {
+                ControllerSource::Websocket => info!(
+                    "A config was sent over the websocket, it runs as sent and is not followed until a reload"
+                ),
+                ControllerSource::Files => {
+                    debug!("A config was loaded from a file, back to the files source")
+                }
             }
         }
-        self.manual = manual;
-        self.shared.status.lock().manual = manual;
+        self.source = source;
+        self.shared.status.lock().source = source;
     }
 
     fn recovery(&self, settings: &ControllerSettings) -> bool {
@@ -235,16 +235,15 @@ impl Controller {
                 }
                 *self.shared.entry.lock() = Some(loaded.source.clone());
                 self.entry = Some(loaded.source);
-                self.set_manual(false);
+                self.set_source(ControllerSource::Files);
                 Pending::Entry {
                     validated: Some(Box::new((loaded.validated, loaded.impulses))),
                     query: true,
                 }
             }
-            LoadKind::Variant => Pending::Variant(Box::new(loaded)),
-            LoadKind::Manual => {
-                self.set_manual(true);
-                Pending::Manual(Box::new(loaded))
+            LoadKind::Websocket => {
+                self.set_source(ControllerSource::Websocket);
+                Pending::Websocket(Box::new(loaded))
             }
         }
     }
@@ -255,18 +254,7 @@ impl Controller {
         let settings = self.shared.settings();
         let following = self.following(&settings);
         match pending {
-            Pending::Variant(loaded) => {
-                let format = if following {
-                    self.last_format.as_ref()
-                } else {
-                    None
-                };
-                match controller::select_variant(*loaded, format) {
-                    Ok(selected) => Selection::Run(selected),
-                    Err(err) => Selection::Invalid(err),
-                }
-            }
-            Pending::Manual(loaded) => Selection::Run(controller::select_manual(*loaded)),
+            Pending::Websocket(loaded) => Selection::Run(controller::select_websocket(*loaded)),
             Pending::Entry { validated, query } => {
                 let Some(entry) = self.entry.clone() else {
                     return Selection::Invalid("There is no config to run".to_string());
@@ -314,12 +302,12 @@ impl Controller {
     fn idle(&mut self) -> Next {
         {
             let mut status = self.shared.status.lock();
-            status.active_config_file = None;
+            status.provider = None;
+            status.config_file = None;
             status.recovering = false;
             status.next_retry = None;
             status.waiting_for_source = None;
         }
-        *self.shared.running.lock() = None;
         debug!("Wait for config");
         let mut pending = None;
         loop {
@@ -374,7 +362,11 @@ impl Controller {
             *active_cfg_shared = None;
             *prev_cfg_shared = Some(result.last.config.clone());
         }
-        *self.shared.running.lock() = None;
+        {
+            let mut status = self.shared.status.lock();
+            status.provider = None;
+            status.config_file = None;
+        }
 
         let last = result.last;
         match result.end {
@@ -421,7 +413,7 @@ impl Controller {
             } => {
                 let format = controller::snap_format(&format);
                 // Asked again rather than taken from the session start, since a config
-                // sent during the session pauses following.
+                // sent during the session switches to the websocket source.
                 let follow = self.following(&self.shared.settings());
                 if !follow || !(capture || is_asio_full_duplex(&last.config)) {
                     return Next::Idle;
@@ -446,7 +438,7 @@ impl Controller {
     /// Record a config as the one running, for the websocket getters.
     fn publish_running(&self, selected: &Selected) {
         match &selected.provider {
-            Provider::Entry => debug!("Running the entry config"),
+            Provider::Single => debug!("Running the entry config"),
             Provider::Specific(file) => info!(
                 "Following: running '{file}' for {}",
                 selected
@@ -463,15 +455,19 @@ impl Controller {
                     .map(|f| f.to_string())
                     .unwrap_or_default()
             ),
-            Provider::Manual => debug!("Running a config sent over the websocket"),
+            Provider::Websocket => debug!("Running a config sent over the websocket"),
         }
         *self.shared_configs.active.lock() = Some(selected.config.clone());
-        *self.shared.running.lock() = Some(selected.running.clone());
-        let mut status = self.shared.status.lock();
-        status.active_config_file = match &selected.provider {
-            Provider::Specific(file) => Some(file.clone()),
-            _ => None,
+        let entry_file = || self.entry.as_ref().and_then(|e| e.filename.clone());
+        let (provider, config_file) = match &selected.provider {
+            Provider::Single => (Some(ConfigProvider::Single), entry_file()),
+            Provider::Adapt => (Some(ConfigProvider::Adapt), entry_file()),
+            Provider::Specific(file) => (Some(ConfigProvider::Specific), Some(file.clone())),
+            Provider::Websocket => (None, None),
         };
+        let mut status = self.shared.status.lock();
+        status.provider = provider;
+        status.config_file = config_file;
         status.waiting_for_source = None;
     }
 
@@ -650,9 +646,9 @@ impl Controller {
                             };
                             // The backends only follow when told so at open, so a session
                             // started without following restarts once following resumes,
-                            // after manual mode or a settings change. The other way round
-                            // the session keeps running, and a format change just isn't
-                            // followed.
+                            // after the websocket source or a settings change. The other
+                            // way round, a switch to the websocket source keeps the devices
+                            // open as they are, and a format change just isn't followed.
                             if !follow && self.following(&self.shared.settings()) {
                                 debug!("Following resumed, restarting the devices");
                                 pipeline.stop(is_starting);
@@ -974,7 +970,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         entry: None,
         last_format: None,
         attempts: 0,
-        manual: false,
+        source: ControllerSource::Files,
         shared_configs: SharedConfigs {
             active: active_config,
             previous: previous_config,

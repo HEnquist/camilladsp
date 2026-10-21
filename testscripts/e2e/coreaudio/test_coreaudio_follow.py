@@ -84,7 +84,8 @@ def variant(template, rate):
 def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
     """Adapt changes the entry config to every rate the device is switched to."""
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_adapt"])
+    entry = ca_config()
+    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_adapt"])
     wait_for_signal(cdsp)
     assert status(cdsp)["following"] is True
     for rate in (44100, 96000, 48000):
@@ -94,7 +95,7 @@ def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
         # The chunk size scales with the rate.
         expected_chunksize = {44100: 1024, 48000: 1024, 96000: 2048}[rate]
         assert config_value(cdsp, "/devices/chunksize") == expected_chunksize
-    assert status(cdsp)["active_config_file"] is None
+    assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == ("Adapt", entry)
     assert cdsp.exit() == EXIT_OK
 
 
@@ -143,7 +144,8 @@ def test_specific_switches_between_files(start_cdsp, feeder, variants):
     cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
     wait_for_signal(cdsp)
     # The entry is selected for its own rate like any other variant.
-    assert status(cdsp)["active_config_file"].endswith("variant_48000.yml")
+    assert status(cdsp)["provider"] == "Specific"
+    assert status(cdsp)["config_file"].endswith("variant_48000.yml")
     assert cdsp.send("CheckControllerFiles") == {
         "specific": [
             {"file": variant(template, rate), "samplerate": rate, "channels": None,
@@ -156,7 +158,7 @@ def test_specific_switches_between_files(start_cdsp, feeder, variants):
         switch_source(rate)
         wait_for_rate(cdsp, rate)
         wait_for_signal(cdsp)
-        assert status(cdsp)["active_config_file"].endswith(f"variant_{rate}.yml")
+        assert status(cdsp)["config_file"].endswith(f"variant_{rate}.yml")
         # The entry stays the config file, so a restart starts from it again.
         assert cdsp.send("GetConfigFilePath") == entry
 
@@ -182,7 +184,7 @@ def test_specific_with_a_missing_file_waits_for_the_source(
     switch_source(96000)
     wait_for_rate(cdsp, 96000, timeout=5.0)
     assert status(cdsp)["waiting_for_source"] is None
-    assert status(cdsp)["active_config_file"].endswith("variant_96000.yml")
+    assert status(cdsp)["config_file"].endswith("variant_96000.yml")
 
 
 def test_a_stop_ends_the_wait_for_the_source(start_cdsp, feeder, variants):
@@ -221,10 +223,11 @@ def test_specific_falls_back_to_adapt(start_cdsp, ca_config, feeder, variants):
     assert checks["adapt"]["problem"] is None
     switch_source(44100)
     wait_for_rate(cdsp, 44100)
-    assert status(cdsp)["active_config_file"] is None
+    assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == ("Adapt", entry)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)
-    assert status(cdsp)["active_config_file"].endswith("variant_96000.yml")
+    assert status(cdsp)["provider"] == "Specific"
+    assert status(cdsp)["config_file"].endswith("variant_96000.yml")
 
 
 def test_a_variant_at_the_wrong_rate_is_rejected(start_cdsp, ca_config, feeder, variants):
@@ -260,22 +263,26 @@ def test_a_loaded_entry_starts_at_the_followed_rate(start_cdsp, ca_config, feede
     cdsp.poll_until("GetState", "Running")
 
 
-def test_a_patch_adapts_from_the_raw_config(start_cdsp, ca_config, feeder):
-    """PatchConfig works on the entry behind the adapted config, so following keeps
-    working and the patch survives the next rate change."""
+def test_a_patch_keeps_the_rate_and_is_not_followed(start_cdsp, ca_config, feeder):
+    """A patch applies to the running config, so the adapted rate stays. It switches to
+    the websocket source, so the next rate change stops processing rather than adapting
+    the patched config."""
     feeder()
     cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_adapt"])
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)
     cdsp.send("SetConfigValue", pointer="/devices/chunksize", value=512)
-    # Adapted from the patched entry: 512 at 48 kHz is 1024 at 96 kHz.
-    poll_config_value(cdsp, "/devices/chunksize", 1024)
+    poll_config_value(cdsp, "/devices/chunksize", 512)
     assert config_value(cdsp, "/devices/samplerate") == 96000
+    assert status(cdsp)["source"] == "Websocket"
     # The chunk size change restarts the devices. A switch while the capture is opening
     # can be undone by the open setting the device rate, so let it come up first.
     cdsp.poll_until("GetState", "Running")
     wait_for_signal(cdsp)
     switch_source(48000)
-    wait_for_rate(cdsp, 48000)
-    assert config_value(cdsp, "/devices/chunksize") == 512
+    reason = cdsp.poll_until_true("GetStopReason", lambda v: v != "None")
+    assert reason["CaptureFormatChange"]["samplerate"] == 48000
+    cdsp.poll_until("GetState", "Inactive")
+    time.sleep(2.0)
+    assert cdsp.send("GetState") == "Inactive"

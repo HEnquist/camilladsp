@@ -343,19 +343,19 @@ def test_specific_switches_files_on_a_channel_change(start_cdsp, feeder, variant
     first = feeder()
     cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
     wait_for_signal(cdsp)
-    assert status(cdsp)["active_config_file"] == entry
+    assert status(cdsp)["config_file"] == entry
     first.stop()
     feeder(channels=4)
     cdsp.poll_until_true(
         "GetControllerStatus",
-        lambda s: s["active_config_file"] == variant(template, 48000, 4),
+        lambda s: s["config_file"] == variant(template, 48000, 4),
     )
     cdsp.poll_until("GetState", "Running")
     wait_for_capture("channels", "4")
     assert cdsp.send("GetConfigFilePath") == entry
     cdsp.send("Reload")
     cdsp.poll_until("GetState", "Running")
-    assert status(cdsp)["active_config_file"] == variant(template, 48000, 4)
+    assert status(cdsp)["config_file"] == variant(template, 48000, 4)
     wait_for_capture("channels", "4")
 
 
@@ -373,8 +373,11 @@ def test_specific_and_adapt_chain_through_rates(start_cdsp, alsa_config, feeder,
         current = feeder(rate=rate)
         wait_for_rate(cdsp, rate)
         wait_for_signal(cdsp)
-        expected = variant(template, 96000, 2) if rate == 96000 else None
-        assert status(cdsp)["active_config_file"] == expected
+        if rate == 96000:
+            expected = ("Specific", variant(template, 96000, 2))
+        else:
+            expected = ("Adapt", entry)
+        assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == expected
 
 
 def test_specific_follows_rate_and_channels_changing_together(start_cdsp, feeder, variants):
@@ -390,7 +393,7 @@ def test_specific_follows_rate_and_channels_changing_together(start_cdsp, feeder
         current = feeder(rate=rate, channels=channels)
         cdsp.poll_until_true(
             "GetControllerStatus",
-            lambda s: s["active_config_file"] == variant(template, rate, channels),
+            lambda s: s["config_file"] == variant(template, rate, channels),
         )
         wait_for_rate(cdsp, rate)
         wait_for_capture("channels", str(channels))
@@ -407,12 +410,12 @@ def test_specific_selects_a_file_by_sample_format(start_cdsp, alsa_config, feede
     first = feeder(fmt="S16_LE")
     cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
     wait_for_signal(cdsp)
-    assert status(cdsp)["active_config_file"] == entry
+    assert status(cdsp)["config_file"] == entry
     first.stop()
     feeder(fmt="S32_LE")
     cdsp.poll_until_true(
         "GetControllerStatus",
-        lambda s: s["active_config_file"] == template.replace("$format$", "S32_LE"),
+        lambda s: s["config_file"] == template.replace("$format$", "S32_LE"),
     )
     cdsp.poll_until("GetState", "Running")
     wait_for_capture("format", "S32_LE")

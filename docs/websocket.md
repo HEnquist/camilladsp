@@ -629,12 +629,12 @@ effect immediately. Changes via `SetConfigFilePath` require a subsequent
 `Reload` to be applied.
 While the built-in controller follows the capture source, `GetConfig` returns
 the config that runs, which is the loaded config adapted to the source rate or
-a per-format config file. `PatchConfig` and `SetConfigValue` patch the config
-it was made from, so the patch carries over to the next format change.
-`SetConfig` and `SetConfigJson` put the controller in manual mode, where the
-config runs exactly as sent and following is paused, until a config is loaded
-from a file again with `Reload`. In manual mode, `PatchConfig` and
-`SetConfigValue` patch the sent config.
+a per-format config file.
+`SetConfig`, `SetConfigJson`, `PatchConfig` and `SetConfigValue` switch the
+controller to the websocket source, where the config runs exactly as sent and
+nothing is followed, until a config is loaded from a file again with `Reload`.
+`PatchConfig` and `SetConfigValue` patch the config that runs, the one
+`GetConfig` returns.
 
 #### `GetConfig`
 
@@ -683,7 +683,8 @@ Arguments:
 #### `SetConfig`
 
 Upload and immediately apply a new configuration as a YAML string.
-Puts the built-in controller in manual mode, see the group description.
+Switches the built-in controller to the websocket source, see the group
+description.
 
 Arguments:
 
@@ -692,7 +693,8 @@ Arguments:
 #### `SetConfigJson`
 
 Upload and immediately apply a new configuration as a JSON string.
-Puts the built-in controller in manual mode, see the group description.
+Switches the built-in controller to the websocket source, see the group
+description.
 
 Arguments:
 
@@ -702,7 +704,8 @@ Arguments:
 
 Apply a partial patch to the active configuration.
 
-If the resulting config is valid it is applied immediately.
+If the resulting config is valid it is applied immediately, and the built-in
+controller switches to the websocket source, see the group description.
 
 Arguments:
 
@@ -721,6 +724,7 @@ Returns (any JSON value): Value at the specified JSON Pointer path.
 #### `SetConfigValue`
 
 Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+Switches the built-in controller to the websocket source, like `PatchConfig`.
 
 Arguments:
 
@@ -730,7 +734,8 @@ Arguments:
 #### `Reload`
 
 Reload the current config file from disk. Equivalent to sending `SIGHUP`.
-Ends manual mode, and following resumes if it is enabled.
+Switches the built-in controller back to the files source, and following
+resumes if it is enabled.
 
 ### Controller
 
@@ -738,12 +743,16 @@ The built-in controller follows the format of the capture source and recovers
 from device errors. Its settings are the `controller` section of the statefile,
 and both features only work in wait mode.
 
-A config sent with `SetConfig` or `SetConfigJson` puts the controller in manual
-mode. The sent config then runs exactly as sent: it is not adapted, no other file
-is selected, and a source format change stops processing as it does without
-following. Error recovery still restarts the sent config. Manual mode ends when a
-config is loaded from a file, with `Reload`, `SetConfigFilePath` followed by
-`Reload`, `SIGHUP`, or a restart. Following then resumes from that file.
+The config comes from one of two sources. From the files source, the controller
+loads the entry config file through a provider: `Single` runs it as is, `Adapt`
+adapts it to the source format, and `Specific` loads a per-format file instead.
+A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
+or `SetConfigValue`, switches to the websocket source. It then runs exactly as
+sent: it is not adapted, no other file is selected, and a source format change
+stops processing as it does without following. Error recovery works the same for
+both sources, it restarts the config that ran. A config loaded from a file switches
+back to the files source, with `Reload`, `SetConfigFilePath` followed by `Reload`,
+`SIGHUP`, or a restart. Following then resumes from that file.
 
 #### `GetControllerSettings`
 
@@ -756,7 +765,7 @@ Returns ([`ControllerSettings`](#controllersettings) or `null`): The `controller
 
 Replace the settings of the built-in controller. They take effect at the next
 session start, so send a `Reload` to apply them at once.
-This doesn't end manual mode, the `Reload` does.
+This doesn't switch back to the files source, the `Reload` does.
 
 Arguments:
 
@@ -764,8 +773,9 @@ Arguments:
 
 #### `GetControllerStatus`
 
-Get the state of the built-in controller: the running Specific config file,
-error recovery, and whether it is waiting for the source to change format.
+Get the state of the built-in controller: the source, the provider and file of
+the running config, error recovery, and whether it is waiting for the source to
+change format.
 
 Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller state.
 
@@ -1084,14 +1094,15 @@ The state of the built-in controller, returned by the `GetControllerStatus` comm
 
 Fields:
 
-- `active_config_file` (`string` or `null`, optional): The Specific config file that runs, `null` when the entry config runs as is or adapted, and in manual mode.
+- `source` ([`ControllerSource`](#controllersource)): Where the config comes from. It stays until the next switch, also while nothing runs.
+- `provider` ([`ConfigProvider`](#configprovider) or `null`, optional): The provider of the running config. `null` for the websocket source, and while nothing runs.
+- `config_file` (`string` or `null`, optional): The file that runs: the entry config file for `Single` and `Adapt`, the per-format file for `Specific`. `null` when `provider` is.
 - `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives, and the one `Reload` loads.
 - `recovering` (`boolean`): Waiting to retry after a device error.
 - `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
 - `next_retry_s` (`number` or `null`, optional): Seconds until the next retry, while waiting for one.
 - `waiting_for_source` ([`SourceFormat`](#sourceformat) or `null`, optional): The source format no config was found for, while waiting for the source to change.
-- `manual` (`boolean`): Manual mode: a config sent with `SetConfig` or `SetConfigJson` runs as sent, and the controller leaves it alone until a config is loaded from a file, for example with `Reload`.
-- `following` (`boolean`): Whether following is on, enabled and in wait mode. `false` in manual mode.
+- `following` (`boolean`): Whether following is on, enabled and in wait mode. `false` for the websocket source.
 - `error_recovery` (`boolean`): Whether error recovery is on, enabled and in wait mode.
 - `stop_reason` ([`StopReason`](#stopreason)): Why processing last stopped.
 
@@ -1180,6 +1191,25 @@ Fields:
 
 - `specific` (`string` or `null`, optional): Template for the Specific provider, absent to disable it.
 - `adapt` (`boolean` or `null`, optional): Enable the Adapt provider.
+
+### `ControllerSource`
+
+Where the config the controller runs comes from.
+
+- `Files`: the controller loads it from the entry config file, through a provider.
+- `Websocket`: it was sent over the websocket, and runs exactly as sent.
+
+One of `"Files"`, `"Websocket"`.
+
+### `ConfigProvider`
+
+The provider that supplied a config of the files source.
+
+- `Single`: the entry config file as is.
+- `Adapt`: the entry config file adapted to the source format.
+- `Specific`: the per-format file the template gives.
+
+One of `"Single"`, `"Adapt"`, `"Specific"`.
 
 ### `FileCheck`
 

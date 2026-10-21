@@ -795,7 +795,8 @@ A change takes effect at the next session start, so send a `Reload` to apply it 
 ### Following the capture format
 The config file that is loaded explicitly, from the command line, the statefile,
 `SetConfigFilePath` plus `Reload` and so on, is the _entry config_.
-A config sent over the websocket is not an entry config, see [Manual mode](#manual-mode).
+A config sent over the websocket is not an entry config, see
+[Config sources and providers](#config-sources-and-providers).
 When the capture device reports that the source changed format, the controller asks two
 config providers for a config to run for the new format:
 
@@ -895,8 +896,8 @@ so `stop_on_rate_change` is always on.
 `GetConfig` returns the config that runs, which may be an adapted config or a Specific file.
 `GetConfigFilePath` and the statefile keep the path of the entry config,
 so a restart or `Reload` starts from the entry config and selects again.
-`PatchConfig` and `SetConfigValue` patch the config the running one was made from,
-so a patch carries over to the next format change.
+`PatchConfig` and `SetConfigValue` patch the config that runs, and stop following it,
+see [Config sources and providers](#config-sources-and-providers).
 
 The backends report format changes differently:
 - CoreAudio reports the new rate as soon as the device changes rate,
@@ -909,10 +910,25 @@ The backends report format changes differently:
 - The file backends and WASAPI detect a rate change by measuring the incoming rate.
 - ASIO reports a rate change from the driver.
 
-### Manual mode
-A config sent with `SetConfig` or `SetConfigJson` puts the controller in _manual mode_.
-This is meant for trying out a config, for example the unsaved changes in a GUI editor.
-The sent config then runs exactly as it was sent:
+### Config sources and providers
+The controller supervises every session, whatever config runs: it retries after errors,
+goes idle, or exits.
+Which config runs depends on where it comes from, the _source_:
+- The _files_ source: the controller loads the entry config file, through a _provider_.
+- The _websocket_ source: a config sent with `SetConfig` or `SetConfigJson`,
+  or patched with `PatchConfig` or `SetConfigValue`, runs exactly as it is.
+
+The files source has three providers:
+- __Single__ runs the entry config as is.
+  It is used while following is off, and while following is on but the source format is not known.
+- __Adapt__ adapts the entry config to the source format.
+- __Specific__ loads the file the template gives for the source format.
+
+Adapt and Specific are described in [Following the capture format](#following-the-capture-format).
+
+The websocket source is meant for a config that a client wants to run as it is,
+for example the unsaved changes in a GUI editor.
+Following only exists for the files source, so a config from the websocket source is left alone:
 - It is not adapted to the source rate, and no Specific file replaces it.
   If the controller kept following, the next format change would silently replace
   what the client sent, while the client still shows it as running.
@@ -921,16 +937,32 @@ The sent config then runs exactly as it was sent:
   `stop_on_rate_change` from the sent config applies, as it does without following.
   When the sent config doesn't change the devices, they keep running as they were opened,
   with `stop_on_rate_change` on, until they restart.
-- Error recovery still works, since it restarts the same config.
-- `PatchConfig` and `SetConfigValue` patch the sent config, and it stays in manual mode.
+- Error recovery works the same as for the files source, since it restarts the same config.
 - The entry config, `GetConfigFilePath` and the statefile are not changed.
 
-Manual mode ends when a config is loaded from a file again: with `Reload`,
+`PatchConfig` and `SetConfigValue` patch the config that runs, the one `GetConfig` returns.
+A patched config is then the client's, like a sent one, and runs from the websocket source.
+It keeps the rate following selected it for, also with `--samplerate`,
+since the running config already has the command line overrides applied.
+The cost is that a client that adjusts a filter gain with `SetConfigValue`
+stops following until the next `Reload`.
+Patching the entry config and selecting again would keep a patch through Adapt,
+but lose it as soon as Specific switches to another file, with nothing telling the client.
+
+A config loaded from a file switches back to the files source: `Reload`,
 `SetConfigFilePath` followed by `Reload`, `SIGHUP`, or a restart of the process,
-since manual mode is not saved in the statefile.
+since the websocket source is not saved in the statefile.
 The controller then starts from the entry config file, and follows again if following is enabled.
-`SetControllerSettings` doesn't end manual mode by itself, the `Reload` after it does.
-`GetControllerStatus` reports `manual: true` while it lasts, with `following: false`.
+`SetControllerSettings` doesn't switch back by itself, the `Reload` after it does.
+A config that doesn't validate changes nothing, and the source stays as it was.
+
+`GetControllerStatus` reports the source as `source`, either `Files` or `Websocket`.
+It stays until the next switch, also while nothing runs,
+so a client can see that a stopped session ran a config from the websocket.
+For the files source, `provider` gives the provider of the running config, and `config_file` the file that runs:
+the entry config file for Single and Adapt, and the Specific file for Specific.
+Both are `null` for the websocket source, and while nothing runs.
+`following` is `false` for the websocket source.
 
 ### Error recovery
 When processing stops because of a capture or playback error, the controller tries again with
@@ -942,9 +974,9 @@ A stop because the stream ended, a format change, or a config that doesn't valid
 retried.
 A `Stop` or a new config cancels the retries.
 
-`GetControllerStatus` shows the state of the controller: the Specific file that runs,
-whether it is retrying and how many attempts it has made, the format it is waiting for,
-and whether it is in manual mode.
+`GetControllerStatus` shows the state of the controller: the source, the provider and the file
+of the running config, whether it is retrying and how many attempts it has made,
+and the format it is waiting for.
 
 ## Controlling via websocket
 See the [separate readme for the websocket server](./docs/websocket.md)

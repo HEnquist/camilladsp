@@ -86,6 +86,12 @@ def start_waiting(source_cdsp, source):
     return cdsp
 
 
+def running_from(cdsp):
+    """The source, provider and file of the running config, from `GetControllerStatus`."""
+    state = cdsp.send("GetControllerStatus")
+    return state["source"], state["provider"], state["config_file"]
+
+
 def test_startup_asks_the_source_first(source_cdsp, source):
     """Rule 14: the first session opens at the source's rate, not the entry's."""
     source.play(44100)
@@ -101,12 +107,16 @@ def test_a_source_change_is_followed(source_cdsp, source):
     for rate in (96000, 44100):
         source.play(rate)
         wait_for_rate(cdsp, rate)
+        # Adapt runs the entry file, adapted.
+        assert running_from(cdsp) == ("Files", "Adapt", cdsp.config_path)
 
 
 def test_an_inactive_source_runs_the_entry_config(source_cdsp, source):
-    """Nothing plays at startup, so the entry runs as is, and captures silence."""
+    """Nothing plays at startup, so the entry runs as is from Single, and captures
+    silence."""
     cdsp = source_cdsp()
     wait_for_rate(cdsp, 48000)
+    assert running_from(cdsp) == ("Files", "Single", cdsp.config_path)
     cdsp.poll_until_true(
         "GetCaptureSignalPeak", lambda peaks: all(peak < -100.0 for peak in peaks)
     )
@@ -114,6 +124,8 @@ def test_an_inactive_source_runs_the_entry_config(source_cdsp, source):
 
 def test_an_unsupported_format_waits_and_keeps_waiting(source_cdsp, source):
     cdsp = start_waiting(source_cdsp, source)
+    # Nothing runs while waiting, so there is no provider.
+    assert running_from(cdsp) == ("Files", None, None)
     # Asked once a second, and still the same format.
     time.sleep(2.5)
     assert waiting_for(cdsp)["channels"] == 4
@@ -206,8 +218,8 @@ def specific(tmp_path, config_file, source):
 
 @pytest.mark.parametrize("provider", ["adapt", "specific"])
 def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specific, provider):
-    """Manual mode: a source change stops the sent config rather than following it, and
-    nothing restarts it. `Reload` goes back to the entry file and follows again."""
+    """The websocket source: a source change stops the sent config rather than following
+    it, and nothing restarts it. `Reload` goes back to the entry file and follows again."""
     template, specific_args = specific
     source.play(48000)
     if provider == "adapt":
@@ -218,9 +230,9 @@ def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specifi
     wait_for_rate(cdsp, 48000)
     send_config(cdsp, cdsp.config_path, "sent")
     state = cdsp.send("GetControllerStatus")
-    assert (state["manual"], state["following"]) == (True, False)
+    assert (state["source"], state["following"]) == ("Websocket", False)
     assert state["entry_config_file"] == cdsp.config_path
-    assert state["active_config_file"] is None
+    assert (state["provider"], state["config_file"]) == (None, None)
 
     source.play(96000)
     cdsp.poll_until("GetState", "Inactive")
@@ -231,16 +243,46 @@ def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specifi
     assert cdsp.send("GetState") == "Inactive"
     assert cdsp.send("GetControllerStatus")["waiting_for_source"] is None
 
-    # New settings don't end manual mode by themselves.
+    # The source stays while idle, and new settings don't switch it by themselves.
     cdsp.send("SetControllerSettings", cdsp.send("GetControllerSettings"))
-    assert cdsp.send("GetControllerStatus")["manual"] is True
+    assert cdsp.send("GetControllerStatus")["source"] == "Websocket"
 
     cdsp.send("Reload")
     wait_for_rate(cdsp, 96000)
     state = cdsp.send("GetControllerStatus")
-    assert (state["manual"], state["following"]) == (False, True)
+    assert (state["source"], state["following"]) == ("Files", True)
     if provider == "specific":
-        assert state["active_config_file"] == template.replace("$samplerate$", "96000")
+        # Specific runs the variant, not the entry.
+        variant = template.replace("$samplerate$", "96000")
+        assert (state["provider"], state["config_file"]) == ("Specific", variant)
+    else:
+        assert (state["provider"], state["config_file"]) == ("Adapt", cdsp.config_path)
+
+
+def test_a_patch_runs_from_the_websocket_source(source_cdsp, source):
+    """A `SetConfigValue` while Adapt runs at 96 kHz patches the running config, so it
+    keeps 96 kHz. It switches to the websocket source, so a later rate change stops
+    processing rather than adapting the patched config."""
+    source.play(96000)
+    cdsp = source_cdsp()
+    wait_for_rate(cdsp, 96000)
+    chunksize = config_value(cdsp, "/devices/chunksize")
+    cdsp.send("SetConfigValue", "patched", pointer="/title")
+    cdsp.poll_until("GetConfigTitle", "patched")
+    assert running_from(cdsp) == ("Websocket", None, None)
+    assert config_value(cdsp, "/devices/samplerate") == 96000
+    assert config_value(cdsp, "/devices/chunksize") == chunksize
+    assert cdsp.send("GetState") == "Running"
+
+    source.play(44100)
+    cdsp.poll_until("GetState", "Inactive")
+    time.sleep(2.0)
+    assert cdsp.send("GetState") == "Inactive"
+
+    cdsp.send("Reload")
+    wait_for_rate(cdsp, 44100)
+    assert running_from(cdsp) == ("Files", "Adapt", cdsp.config_path)
+    assert cdsp.send("GetConfigTitle") != "patched"
 
 
 def test_a_sent_config_is_not_adapted(source_cdsp, source):
@@ -261,6 +303,7 @@ def test_without_following_the_source_is_ignored(source_cdsp, source):
     source.play(44100)
     cdsp = source_cdsp(extra_args=["--wait"])
     wait_for_rate(cdsp, 48000)
+    assert running_from(cdsp) == ("Files", "Single", cdsp.config_path)
     source.play(96000)
     time.sleep(1.0)
     assert cdsp.send("GetState") == "Running"

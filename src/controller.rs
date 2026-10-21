@@ -20,11 +20,12 @@
 //! of the entry config, the reported source format and the settings. The state machine
 //! that runs sessions and decides what happens when one ends is in `engine.rs`.
 //!
-//! The entry config is whatever the user loaded explicitly, by file, by `SetConfig` and so
-//! on. When the capture source changes format, following picks the config to run for the
-//! new format from two providers. Specific expands a file name template with the reported
-//! format and loads that file. Adapt changes the rate of the entry config, the way the
-//! `-r` override does.
+//! A config comes from one of two sources. From the files source, the controller loads the
+//! entry config, the active config file, through a provider. Single runs it as is. When the
+//! capture source changes format, following picks the config to run for the new format
+//! from two more providers. Specific expands a file name template with the reported format
+//! and loads that file. Adapt changes the rate of the entry config, the way the `-r`
+//! override does. A config from the websocket source runs exactly as sent.
 
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
@@ -35,8 +36,8 @@ use std::time::Instant;
 use crate::config::{self, Configuration};
 use crate::filters::fftconv::ImpulseCache;
 pub use camilladsp_schema::protocol::{
-    AdaptCheck, ControllerFileChecks, ControllerSettings, FileCheck, FollowCapture, SourceFormat,
-    TOKEN_CHANNELS, TOKEN_FORMAT, TOKEN_SAMPLERATE, TOKENS,
+    AdaptCheck, ConfigProvider, ControllerFileChecks, ControllerSettings, ControllerSource,
+    FileCheck, FollowCapture, SourceFormat, TOKEN_CHANNELS, TOKEN_FORMAT, TOKEN_SAMPLERATE, TOKENS,
 };
 
 /// How close a reported rate has to be to a standard rate to be snapped to it, relative.
@@ -68,15 +69,12 @@ pub struct ConfigSource {
 /// What a loaded config is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadKind {
-    /// A new entry config.
+    /// A new entry config, which switches to the files source.
     Entry,
-    /// A patched version of the running Specific variant. It runs until the next switch,
-    /// and the entry stays as it is.
-    Variant,
-    /// A config sent over the websocket. It puts the controller in manual mode, where it
-    /// runs exactly as sent and following is paused, until an entry is loaded from a file.
-    /// The entry stays as it is.
-    Manual,
+    /// A config sent or patched over the websocket. It switches to the websocket source,
+    /// where it runs exactly as sent, until an entry is loaded from a file. The entry stays
+    /// as it is.
+    Websocket,
 }
 
 /// A config sent to the controller, along with the result of validating it as is.
@@ -115,26 +113,44 @@ impl LoadedConfig {
             LoadKind::Entry,
         )
     }
-}
 
-/// The raw config behind the running one, which `PatchConfig` and `SetConfigValue` patch.
-#[derive(Clone, Debug)]
-pub struct RunningSource {
-    pub source: ConfigSource,
-    pub kind: LoadKind,
+    /// Validate a patched copy of the running config, for the websocket source.
+    ///
+    /// The running config already has the CLI overrides applied, and the adaptation
+    /// following made, so applying `-r` again would put it back at the override rate. With
+    /// `-r` set, it is validated at its own capture rate instead, which leaves the rate as it
+    /// is. The other overrides give the same result when applied again. Its tokens are
+    /// already expanded and its relative paths resolved, so it needs no file name.
+    pub fn patched(raw: Configuration) -> crate::Res<Self> {
+        let rate = config::OVERRIDES
+            .read()
+            .samplerate
+            .and_then(|_| NonZeroUsize::new(capture_rate_of(&raw)));
+        let mut validated = raw.clone();
+        let impulses = config::validate_config_at_rate(&mut validated, None, rate)?;
+        Ok(LoadedConfig {
+            source: ConfigSource {
+                raw,
+                filename: None,
+            },
+            kind: LoadKind::Websocket,
+            validated,
+            impulses,
+        })
+    }
 }
 
 /// Which provider supplied a config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Provider {
-    /// The entry config as is, no following involved.
-    Entry,
+    /// The entry config as is.
+    Single,
     /// The Specific provider, with the file it loaded.
     Specific(String),
     /// The Adapt provider.
     Adapt,
-    /// A config sent over the websocket, run as sent.
-    Manual,
+    /// A config from the websocket source, run as sent.
+    Websocket,
 }
 
 /// A config ready to run.
@@ -144,8 +160,6 @@ pub struct Selected {
     pub provider: Provider,
     /// The source format following selected it for, if any.
     pub format: Option<SourceFormat>,
-    /// The raw config behind it, for patching.
-    pub running: RunningSource,
 }
 
 /// The outcome of [`select_config`].
@@ -161,8 +175,13 @@ pub enum Selection {
 /// Live state of the controller, for `GetControllerStatus`.
 #[derive(Clone, Debug, Default)]
 pub struct ControllerStatus {
-    /// The running Specific variant, `None` when the entry config runs as is or adapted.
-    pub active_config_file: Option<String>,
+    /// Where the config comes from, kept until the next switch.
+    pub source: ControllerSource,
+    /// The provider of the running config, `None` for the websocket source and while
+    /// nothing runs.
+    pub provider: Option<ConfigProvider>,
+    /// The file that runs, `None` when `provider` is.
+    pub config_file: Option<String>,
     /// Waiting to retry after an error.
     pub recovering: bool,
     /// Retry attempts since the last session that ran long enough.
@@ -171,8 +190,6 @@ pub struct ControllerStatus {
     pub next_retry: Option<Instant>,
     /// The format no provider had a config for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
-    /// A config sent over the websocket runs, and the controller leaves it alone.
-    pub manual: bool,
 }
 
 /// Controller state shared with the websocket server.
@@ -181,8 +198,6 @@ pub struct ControllerShared {
     /// The settings, `None` when the statefile has no controller section.
     pub settings: Arc<Mutex<Option<ControllerSettings>>>,
     pub status: Arc<Mutex<ControllerStatus>>,
-    /// The raw config behind the running one, `None` while nothing runs.
-    pub running: Arc<Mutex<Option<RunningSource>>>,
     /// The entry config, for checking the Specific files against.
     pub entry: Arc<Mutex<Option<ConfigSource>>>,
     /// Whether the process runs in wait mode, without which the controller does nothing.
@@ -329,7 +344,7 @@ fn specific_config(
         error!("Specific: not using '{path_str}', {err}");
         return None;
     }
-    let mut conf = raw.clone();
+    let mut conf = raw;
     let impulses =
         match config::validate_config_at_rate(&mut conf, Some(&path_str), format.known_rate()) {
             Ok(impulses) => impulses,
@@ -341,15 +356,8 @@ fn specific_config(
     Some(Box::new(Selected {
         config: conf,
         impulses,
-        provider: Provider::Specific(path_str.clone()),
+        provider: Provider::Specific(path_str),
         format: Some(format.clone()),
-        running: RunningSource {
-            source: ConfigSource {
-                raw,
-                filename: Some(path_str),
-            },
-            kind: LoadKind::Variant,
-        },
     }))
 }
 
@@ -398,10 +406,6 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
         impulses,
         provider: Provider::Adapt,
         format: Some(format.clone()),
-        running: RunningSource {
-            source: entry.clone(),
-            kind: LoadKind::Entry,
-        },
     }))
 }
 
@@ -429,10 +433,6 @@ pub fn select_config(
     settings: &ControllerSettings,
     validated: Option<(Configuration, ImpulseCache)>,
 ) -> Selection {
-    let running = RunningSource {
-        source: entry.clone(),
-        kind: LoadKind::Entry,
-    };
     let Some(format) = format else {
         let (config, impulses) = match validated {
             Some(v) => v,
@@ -447,9 +447,8 @@ pub fn select_config(
         return Selection::Run(Box::new(Selected {
             config,
             impulses,
-            provider: Provider::Entry,
+            provider: Provider::Single,
             format: None,
-            running,
         }));
     };
     let format = snap_format(format);
@@ -466,40 +465,13 @@ pub fn select_config(
     Selection::NoConfig(format)
 }
 
-/// Validate a patched Specific variant, at the rate it was selected for.
-pub fn select_variant(
-    loaded: LoadedConfig,
-    format: Option<&SourceFormat>,
-) -> Result<Box<Selected>, String> {
-    let rate = format.and_then(SourceFormat::known_rate);
-    let mut conf = loaded.source.raw.clone();
-    let impulses =
-        config::validate_config_at_rate(&mut conf, loaded.source.filename.as_deref(), rate)
-            .map_err(|e| e.to_string())?;
-    let file = loaded.source.filename.clone().unwrap_or_default();
-    Ok(Box::new(Selected {
-        config: conf,
-        impulses,
-        provider: Provider::Specific(file),
-        format: format.cloned(),
-        running: RunningSource {
-            source: loaded.source,
-            kind: LoadKind::Variant,
-        },
-    }))
-}
-
-/// Run a config sent over the websocket exactly as sent, validated as it is.
-pub fn select_manual(loaded: LoadedConfig) -> Box<Selected> {
+/// Run a config from the websocket source exactly as sent, validated as it is.
+pub fn select_websocket(loaded: LoadedConfig) -> Box<Selected> {
     Box::new(Selected {
         config: loaded.validated,
         impulses: loaded.impulses,
-        provider: Provider::Manual,
+        provider: Provider::Websocket,
         format: None,
-        running: RunningSource {
-            source: loaded.source,
-            kind: LoadKind::Manual,
-        },
     })
 }
 
@@ -937,7 +909,7 @@ mod tests {
             &settings(None, Some(true)),
             None,
         ));
-        assert_eq!(selected.provider, Provider::Entry);
+        assert_eq!(selected.provider, Provider::Single);
         assert_eq!(selected.config.devices.samplerate(), 48000);
     }
 
@@ -953,13 +925,30 @@ mod tests {
     #[test]
     fn a_sent_config_runs_as_sent() {
         let source = entry(base_config(48000, 2, ""));
-        let loaded = LoadedConfig::validate(source.clone(), LoadKind::Manual).unwrap();
-        let selected = select_manual(loaded);
-        assert_eq!(selected.provider, Provider::Manual);
+        let loaded = LoadedConfig::validate(source, LoadKind::Websocket).unwrap();
+        assert_eq!(loaded.kind, LoadKind::Websocket);
+        let selected = select_websocket(loaded);
+        assert_eq!(selected.provider, Provider::Websocket);
         assert_eq!(selected.format, None);
         assert_eq!(selected.config.devices.samplerate(), 48000);
-        assert_eq!(selected.running.kind, LoadKind::Manual);
-        assert_eq!(selected.running.source, source);
+    }
+
+    #[test]
+    fn a_patched_config_keeps_its_rate() {
+        // An entry adapted to 96 kHz, then patched: it stays at 96 kHz, with the chunksize
+        // Adapt scaled, rather than going back to the rate of the entry.
+        let adapted = run(select_config(
+            &entry(base_config(48000, 2, "")),
+            Some(&format(96000, Some(2))),
+            &settings(None, Some(true)),
+            None,
+        ));
+        let loaded = LoadedConfig::patched(adapted.config).unwrap();
+        assert_eq!(loaded.kind, LoadKind::Websocket);
+        assert_eq!(loaded.source.filename, None);
+        let selected = select_websocket(loaded);
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.chunksize(), 2048);
     }
 
     #[test]
@@ -1111,7 +1100,6 @@ pipeline:
         assert!(
             matches!(selected.provider, Provider::Specific(ref f) if f.ends_with("conf_96000_2.yml"))
         );
-        assert_eq!(selected.running.kind, LoadKind::Variant);
 
         // A missing file with Specific only gives no config.
         assert!(matches!(
