@@ -48,10 +48,15 @@ pub const EXIT_FORCED: i32 = 103;
 
 /// First wait before retrying after a device error.
 const RECOVERY_FIRST_DELAY: Duration = Duration::from_secs(1);
-/// Longest wait between retries.
-const RECOVERY_MAX_DELAY: Duration = Duration::from_secs(30);
+/// Longest wait between retries. A device that is switched back on should not have to wait
+/// long, and a failed open every 10 s costs next to nothing, even for ASIO.
+const RECOVERY_MAX_DELAY: Duration = Duration::from_secs(10);
 /// A session that runs this long past its startup resets the backoff.
 const RECOVERY_RESET_AFTER: Duration = Duration::from_secs(10);
+/// Retries up to this one are all logged at warn.
+const RECOVERY_WARN_ATTEMPTS: usize = 5;
+/// After those, only every this many retries is logged at warn, the rest at debug.
+const RECOVERY_WARN_EVERY: usize = 10;
 /// How often the source is queried while waiting for it to change.
 const SOURCE_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -160,6 +165,12 @@ fn recovery_delay(attempt: usize) -> Duration {
     (RECOVERY_FIRST_DELAY * 2u32.pow(doublings)).min(RECOVERY_MAX_DELAY)
 }
 
+/// Whether retry number `attempt` is logged at warn. The first few are, then only every
+/// tenth, so a device that stays away for a day doesn't fill the log.
+fn log_attempt_at_warn(attempt: usize) -> bool {
+    attempt <= RECOVERY_WARN_ATTEMPTS || attempt.is_multiple_of(RECOVERY_WARN_EVERY)
+}
+
 /// Decides which config runs and what happens when a session ends.
 ///
 /// This is the only place that does. With following and recovery off it behaves as the
@@ -174,6 +185,8 @@ struct Controller {
     last_format: Option<SourceFormat>,
     /// Retries since the last session that ran long enough.
     attempts: usize,
+    /// Whether the last session got past its startup barrier.
+    last_started: bool,
     /// Where the config comes from. Only the files source is followed.
     source: ControllerSource,
     shared_configs: SharedConfigs,
@@ -355,6 +368,7 @@ impl Controller {
         debug!("Config ready, start processing");
         SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::Relaxed);
         let result = self.run_session(selected, follow);
+        self.last_started = result.ran_for.is_some();
 
         {
             let mut active_cfg_shared = self.shared_configs.active.lock();
@@ -471,11 +485,38 @@ impl Controller {
         status.waiting_for_source = None;
     }
 
+    /// A session got past its startup barrier. If it was a retry, log where the outage
+    /// ended. A device that fails right after it opens gets this far on every retry, so
+    /// only the first retry, or one after a retry that failed to start, is logged at info.
+    fn session_started(&mut self) {
+        let mut status = self.shared.status.lock();
+        if status.recovering {
+            if self.attempts == 1 || !self.last_started {
+                info!(
+                    "Error recovery: running again, on attempt {}",
+                    self.attempts
+                );
+            } else {
+                debug!(
+                    "Error recovery: running again, on attempt {}",
+                    self.attempts
+                );
+            }
+        }
+        status.recovering = false;
+    }
+
     /// Wait out the backoff after an error, then retry the same config.
     fn backoff(&mut self, selected: Box<Selected>) -> Next {
         let delay = recovery_delay(self.attempts);
         let reason = self.status_structs.status.read().stop_reason.clone();
-        warn!(
+        let level = if log_attempt_at_warn(self.attempts) {
+            log::Level::Warn
+        } else {
+            log::Level::Debug
+        };
+        log::log!(
+            level,
             "Error recovery: attempt {} in {} s, after {reason:?}",
             self.attempts,
             delay.as_secs_f32()
@@ -488,9 +529,15 @@ impl Controller {
             status.next_retry = Some(deadline);
         }
         let next = match self.rx.recv_deadline(deadline) {
+            // The settings can change during the wait without waking it, so a retry that
+            // was scheduled before recovery was turned off is dropped here.
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                self.shared.status.lock().next_retry = None;
-                return Next::Start(selected);
+                if self.recovery(&self.shared.settings()) {
+                    self.shared.status.lock().next_retry = None;
+                    return Next::Start(selected);
+                }
+                info!("Error recovery was turned off, not retrying");
+                Next::Idle
             }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => Next::Exit(EXIT_OK),
             Ok(ControllerMessage::ConfigChanged(loaded)) => {
@@ -726,7 +773,7 @@ impl Controller {
                                 if pipeline.release_barrier_if_ready() {
                                     is_starting = false;
                                     started_at = Some(Instant::now());
-                                    self.shared.status.lock().recovering = false;
+                                    self.session_started();
                                     // Startup is complete once the second device reports in,
                                     // and which one that is depends on how the two threads
                                     // are scheduled. So the reason the previous session
@@ -742,7 +789,7 @@ impl Controller {
                                 if pipeline.release_barrier_if_ready() {
                                     is_starting = false;
                                     started_at = Some(Instant::now());
-                                    self.shared.status.lock().recovering = false;
+                                    self.session_started();
                                     crate::set_stop_reason(&status_structs.status, StopReason::None);
                                 }
                             }
@@ -970,6 +1017,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         entry: None,
         last_format: None,
         attempts: 0,
+        last_started: false,
         source: ControllerSource::Files,
         shared_configs: SharedConfigs {
             active: active_config,
@@ -983,13 +1031,19 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
 
 #[cfg(test)]
 mod tests {
-    use super::recovery_delay;
+    use super::{log_attempt_at_warn, recovery_delay};
     use std::time::Duration;
 
     #[test]
     fn recovery_backoff_doubles_up_to_the_cap() {
-        let delays: Vec<u64> = (1..=8).map(|a| recovery_delay(a).as_secs()).collect();
-        assert_eq!(delays, vec![1, 2, 4, 8, 16, 30, 30, 30]);
-        assert_eq!(recovery_delay(1000), Duration::from_secs(30));
+        let delays: Vec<u64> = (1..=6).map(|a| recovery_delay(a).as_secs()).collect();
+        assert_eq!(delays, vec![1, 2, 4, 8, 10, 10]);
+        assert_eq!(recovery_delay(1000), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn recovery_logs_the_first_attempts_then_every_tenth_at_warn() {
+        let warned: Vec<usize> = (1..=40).filter(|a| log_attempt_at_warn(*a)).collect();
+        assert_eq!(warned, vec![1, 2, 3, 4, 5, 10, 20, 30, 40]);
     }
 }

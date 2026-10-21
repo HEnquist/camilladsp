@@ -968,11 +968,20 @@ Both are `null` for the websocket source, and while nothing runs.
 When processing stops because of a capture or playback error, the controller tries again with
 the config that was running.
 The first retry comes after 1 second, and the wait doubles for each failed attempt, up to
-30 seconds. It keeps trying until the device comes back.
+10 seconds. It keeps trying until the device comes back,
+for example when a DAC that was switched off is switched on again.
+A failed attempt only costs one device open, so retrying every 10 seconds is cheap.
 A session that has run for 10 seconds resets the wait.
 A stop because the stream ended, a format change, or a config that doesn't validate is not
 retried.
 A `Stop` or a new config cancels the retries.
+Turning error recovery off with `SetControllerSettings` cancels a retry that is waiting,
+once its wait is over.
+
+The first five attempts are logged as warnings, and after that only every tenth,
+the others at debug level.
+When a retry gets processing running again, its attempt number is logged at info level,
+so the log shows where the outage ended.
 
 `GetControllerStatus` shows the state of the controller: the source, the provider and the file
 of the running config, whether it is retrying and how many attempts it has made,

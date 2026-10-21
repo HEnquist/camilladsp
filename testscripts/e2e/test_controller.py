@@ -112,6 +112,25 @@ def test_a_stop_cancels_the_recovery(start_cdsp, config_file):
     assert stopped["next_retry_s"] is None
 
 
+def test_turning_recovery_off_cancels_a_pending_retry(control_cdsp):
+    """A failed dummy device is rebuilt working, so a retry that still ran would start
+    processing again. With recovery turned off during the wait, nothing runs."""
+    cdsp = control_cdsp(extra_args=["--wait", "--error_recovery"])
+    cdsp.capture_control.set("error", 1)
+    cdsp.poll_until_true("GetControllerStatus", lambda s: s["recovering"])
+    settings = cdsp.send("GetControllerSettings")
+    settings["error_recovery"] = False
+    cdsp.send("SetControllerSettings", settings)
+    stopped = cdsp.poll_until_true(
+        "GetControllerStatus", lambda s: not s["recovering"], timeout=5.0
+    )
+    assert stopped["error_recovery"] is False
+    assert stopped["next_retry_s"] is None
+    # Past the 1 s deadline of the first retry, and still nothing runs.
+    time.sleep(1.5)
+    assert cdsp.send("GetState") == "Inactive"
+
+
 def test_a_new_config_cancels_the_recovery(start_cdsp, config_file):
     cdsp = start_cdsp(
         config=config_file(FAILING_PLAYBACK),
