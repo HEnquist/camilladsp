@@ -376,6 +376,15 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
                 return None;
             }
         };
+    if conf.devices.samplerate() != entry.raw.devices.samplerate()
+        && let Some(problem) = rate_change_problem(&entry.raw)
+    {
+        warn!(
+            "Adapt: can't change the samplerate to {}, {problem}",
+            conf.devices.samplerate()
+        );
+        return None;
+    }
     Some(Box::new(Selected {
         config: conf,
         impulses,
@@ -386,6 +395,20 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
             kind: LoadKind::Entry,
         },
     }))
+}
+
+/// Why Adapt can't run a config at another samplerate than its own, `None` if it can.
+/// Only matters where Adapt changes `samplerate`, a resampler keeps the config's rate.
+fn rate_change_problem(raw: &Configuration) -> Option<String> {
+    let settings = config::rate_dependent_settings(raw);
+    if settings.is_empty() {
+        return None;
+    }
+    let rate = raw.devices.samplerate();
+    Some(format!(
+        "these settings are only right at {rate} Hz: {}. Give delays, attack and release times in a time unit rather than in samples, add $samplerate$ to the coefficient file names, or set samplerate to [{rate}] to resample every other rate to {rate} Hz",
+        settings.join(", ")
+    ))
 }
 
 /// Select the config to run, for an entry config and the last known source format.
@@ -599,9 +622,18 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
         };
     };
     let mut conf = entry.raw.clone();
-    let problem = config::validate_config(&mut conf, entry.filename.as_deref())
-        .err()
-        .map(|err| err.to_string());
+    // Adapt changes `samplerate` for a rate in a list other than the first, and for any
+    // other rate when the config has no resampler.
+    let changes_rate = match entry.raw.devices.samplerate_list() {
+        Some(rates) => rates.len() > 1,
+        None => entry.raw.devices.resampler.is_none(),
+    };
+    let problem = match config::validate_config(&mut conf, entry.filename.as_deref()) {
+        Err(err) => Some(err.to_string()),
+        Ok(_) if changes_rate => rate_change_problem(&entry.raw)
+            .map(|problem| format!("Adapt can't change the samplerate, {problem}")),
+        Ok(_) => None,
+    };
     AdaptCheck {
         file: entry.filename.clone(),
         samplerate: Some(capture_rate_of(&conf)),
@@ -1400,6 +1432,69 @@ pipeline:
         assert_eq!(list.samplerate(), 96000);
         assert_eq!(list.samplerate_list().unwrap().len(), 2);
         assert!(parsed("[]").is_err());
+    }
+
+    const DELAY_IN_SAMPLES: &str = "filters:
+  delay:
+    type: Delay
+    parameters: {delay: 10, delay_unit: samples}
+pipeline:
+  - type: Filter
+    channels: [0]
+    names: [delay]
+";
+
+    fn adapt_runs(conf: Configuration, rate: usize) -> bool {
+        match select_config(
+            &entry(conf),
+            Some(&format(rate, None)),
+            &settings(None, Some(true)),
+            None,
+        ) {
+            Selection::Run(_) => true,
+            Selection::NoConfig(_) => false,
+            Selection::Invalid(err) => panic!("invalid: {err}"),
+        }
+    }
+
+    #[test]
+    fn adapt_refuses_to_change_the_rate_of_rate_dependent_settings() {
+        let conf = base_config(48000, 2, DELAY_IN_SAMPLES);
+        assert!(!adapt_runs(conf.clone(), 96000));
+        // At its own rate nothing changes.
+        assert!(adapt_runs(conf, 48000));
+        // A listed rate other than the first runs natively, at another rate.
+        let listed = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000, 96000]);
+        assert!(!adapt_runs(listed, 96000));
+    }
+
+    #[test]
+    fn rate_dependent_settings_run_when_the_source_is_resampled() {
+        let extra = format!("  resampler:\n    type: Synchronous\n{DELAY_IN_SAMPLES}");
+        assert!(adapt_runs(base_config(48000, 2, &extra), 96000));
+        let single = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
+        assert!(adapt_runs(single, 96000));
+        let listed = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000, 96000]);
+        assert!(adapt_runs(listed, 44100));
+    }
+
+    #[test]
+    fn check_files_reports_rate_dependent_settings() {
+        let problem = |conf| {
+            check_files(&settings(None, Some(true)), Some(&entry(conf)))
+                .adapt
+                .unwrap()
+                .problem
+        };
+        let reported = problem(base_config(48000, 2, DELAY_IN_SAMPLES)).unwrap();
+        assert!(
+            reported.contains("filter 'delay': delay in samples"),
+            "{reported}"
+        );
+        let extra = format!("  resampler:\n    type: Synchronous\n{DELAY_IN_SAMPLES}");
+        assert_eq!(problem(base_config(48000, 2, &extra)), None);
+        let single = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
+        assert_eq!(problem(single), None);
     }
 
     #[test]

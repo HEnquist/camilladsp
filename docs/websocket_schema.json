@@ -53,7 +53,7 @@
               "string",
               "null"
             ],
-            "description": "What is wrong with the config, `null` if it is usable."
+            "description": "What is wrong with the config, `null` if it is usable. Also lists the settings that\nare only right at the config's own rate, when Adapt would change its samplerate."
           }
         },
         "unevaluatedProperties": false

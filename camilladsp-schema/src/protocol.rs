@@ -384,7 +384,8 @@ pub struct AdaptCheck {
     pub channels: Option<usize>,
     /// Capture sample format, `null` when it is automatic or no config is loaded.
     pub format: Option<String>,
-    /// What is wrong with the config, `null` if it is usable.
+    /// What is wrong with the config, `null` if it is usable. Also lists the settings that
+    /// are only right at the config's own rate, when Adapt would change its samplerate.
     pub problem: Option<String>,
 }
 

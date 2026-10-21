@@ -1190,7 +1190,7 @@ Fields:
 - `samplerates` (array of non-negative `integer` or `null`, optional): The rates that run natively, when `samplerate` is a list, with the preferred one first. Other rates are resampled to the first one. `null` for a single `samplerate`, and then every rate runs natively.
 - `channels` (non-negative `integer` or `null`, optional): Capture channels, `null` when no config is loaded.
 - `format` (`string` or `null`, optional): Capture sample format, `null` when it is automatic or no config is loaded.
-- `problem` (`string` or `null`, optional): What is wrong with the config, `null` if it is usable.
+- `problem` (`string` or `null`, optional): What is wrong with the config, `null` if it is usable. Also lists the settings that are only right at the config's own rate, when Adapt would change its samplerate.
 
 ### `DeviceCapabilitySet`
 

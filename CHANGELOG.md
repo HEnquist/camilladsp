@@ -7,12 +7,15 @@ New features:
 - `samplerate` can be a list of the rates the hardware runs natively. Following with Adapt runs
   a listed rate natively and resamples other rates to the first one, which is also the rate used
   without Adapt.
+- Following with Adapt refuses to change the `samplerate` of a config with settings that are only
+  right at its own rate, such as delays in samples or `Free` biquads.
 - Alsa: follow a player on the Loopback, with the capture open the whole time.
   Needs a kernel where the Loopback's `PCM Notify` works, Linux 7.4 or a stable kernel with the fix.
 
 Changes:
 - The `CaptureFormatChange` and `PlaybackFormatChange` stop reasons give the new `samplerate`,
   `channels` and `format`, instead of only the rate.
+- Overriding the samplerate also scales a `target_level` given in the config, like `chunksize`.
 
 Removed:
 - Alsa: the `stop_on_inactive` capture option. It was a workaround for camilladsp-controller,

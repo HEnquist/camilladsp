@@ -709,9 +709,11 @@ To change the values, CamillaDSP has to be restarted.
 If the config file has resampling disabled, then overriding the samplerate will change the `samplerate` parameter.
 But if resampling is enabled, it will instead change the `capture_samplerate` parameter.
 If then `enable_rate_adjust` is false and `capture_samplerate`=`samplerate`, then resampling will be disabled.
-When overriding the samplerate, two other parameters are scaled as well.
+When overriding the samplerate, three other parameters are scaled as well.
 Firstly, the `chunksize` is multiplied or divided by integer factors to try to keep the pipeline running at a constant number of chunks per second.
-Secondly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate.
+Secondly, a `target_level` given in the config is scaled by the same factor, so that it stays the same time.
+When `target_level` is left out, it follows `chunksize` already.
+Thirdly, the value of `extra_samples` is scaled to give the extra samples the same duration at the new samplerate.
 But if the `extra_samples` override is used, the given value is used without scaling it.
 
 
@@ -844,6 +846,27 @@ Without Adapt, and until a source rate is known, the first rate is used.
 This makes a config with a list usable everywhere, also as a Specific file.
 The `--samplerate` override uses the list the same way Adapt does.
 Once the controller has a source rate to run at, the override is ignored, since that sets the rate anyway.
+
+Some settings are only right at the rate the config is written for.
+When Adapt changes `samplerate`, they would run at the wrong frequencies.
+For example, a crossover made of `Free` biquads for 48 kHz would be an octave too high at 96 kHz,
+which can send bass to a tweeter.
+Adapt therefore refuses to change the `samplerate` of a config that uses any of these in its pipeline:
+- `Delay` filters and the `RACE` processor with `delay_unit: samples`,
+- attack or release times in samples, in the `Compressor`, `NoiseGate` and `LookaheadLimiter`,
+- `Biquad` filters of type `Free`, and `DiffEq` filters,
+- `Conv` filters of type `Values`, and `Raw` or `Wav` filters without `$samplerate$` in the file name,
+- the `Dither` types made for one rate, such as `Shibata441` and `Gesemann48`.
+
+This only applies when Adapt changes `samplerate`.
+That is, when the config has no resampler, or when a source runs natively at a rate in the list other than the first.
+When the source is resampled to the config's own rate, every setting stays right.
+Values in samples can be given in a time unit instead, and coefficient files can get `$samplerate$`
+in their names, with one file per rate.
+For the rest, give `samplerate` as a list with only the config's own rate, like `[48000]`.
+Every other rate is then resampled to it, and Adapt works with any config.
+The refusal is logged with the settings it found, and with Adapt alone the controller then waits for the source.
+`CheckControllerFiles` reports the settings as the problem of the Adapt section, before any rate change happens.
 
 The Specific provider is asked first, then Adapt. Either one can be used alone.
 Adapt always starts from the entry config, so switching back and forth doesn't drift.

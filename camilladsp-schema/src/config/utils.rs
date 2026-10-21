@@ -390,10 +390,156 @@ pub fn set_capture_format_by_name(capture: &mut CaptureDevice, name: &str) -> Re
     Ok(())
 }
 
+/// Why a filter is only right at the samplerate its config is written for, `None` if it
+/// is right at any rate. Raw and Wav files are checked for `$samplerate$` in their
+/// names, so this needs the filter as written, before the tokens are expanded.
+///
+/// There is no catch-all arm, so a new filter type doesn't compile until someone decides
+/// whether it depends on the rate.
+fn filter_rate_dependence(filter: &Filter) -> Option<&'static str> {
+    match filter {
+        Filter::Conv { parameters, .. } => match parameters {
+            ConvParameters::Raw(ConvParametersRaw { filename, .. })
+            | ConvParameters::Wav(ConvParametersWav { filename, .. }) => (!filename
+                .contains("$samplerate$"))
+            .then_some("coefficient file without $samplerate$ in its name"),
+            ConvParameters::Values { .. } => Some("coefficients given as values"),
+            ConvParameters::Dummy { .. } => None,
+        },
+        Filter::Biquad { parameters, .. } => match parameters {
+            BiquadParameters::Free { .. } => Some("coefficients given as values"),
+            BiquadParameters::Highpass { .. }
+            | BiquadParameters::Lowpass { .. }
+            | BiquadParameters::Peaking(_)
+            | BiquadParameters::Highshelf(_)
+            | BiquadParameters::HighshelfFO { .. }
+            | BiquadParameters::Lowshelf(_)
+            | BiquadParameters::LowshelfFO { .. }
+            | BiquadParameters::HighpassFO { .. }
+            | BiquadParameters::LowpassFO { .. }
+            | BiquadParameters::Allpass(_)
+            | BiquadParameters::AllpassFO { .. }
+            | BiquadParameters::Bandpass(_)
+            | BiquadParameters::Notch(_)
+            | BiquadParameters::GeneralNotch(_)
+            | BiquadParameters::LinkwitzTransform { .. } => None,
+        },
+        Filter::BiquadCombo { parameters, .. } => match parameters {
+            BiquadComboParameters::LinkwitzRileyHighpass { .. }
+            | BiquadComboParameters::LinkwitzRileyLowpass { .. }
+            | BiquadComboParameters::ButterworthHighpass { .. }
+            | BiquadComboParameters::ButterworthLowpass { .. }
+            | BiquadComboParameters::Tilt { .. }
+            | BiquadComboParameters::NPointPeq { .. }
+            | BiquadComboParameters::GraphicEqualizer(_) => None,
+        },
+        Filter::Delay { parameters, .. } => {
+            (parameters.delay_unit() == DelayUnit::Samples).then_some("delay in samples")
+        }
+        Filter::DiffEq { .. } => Some("coefficients given as values"),
+        Filter::Dither { parameters, .. } => match parameters {
+            DitherParameters::None { .. }
+            | DitherParameters::Flat { .. }
+            | DitherParameters::Highpass { .. } => None,
+            DitherParameters::Fweighted441 { .. }
+            | DitherParameters::FweightedLong441 { .. }
+            | DitherParameters::FweightedShort441 { .. }
+            | DitherParameters::Gesemann441 { .. }
+            | DitherParameters::Gesemann48 { .. }
+            | DitherParameters::Lipshitz441 { .. }
+            | DitherParameters::LipshitzLong441 { .. }
+            | DitherParameters::Shibata441 { .. }
+            | DitherParameters::ShibataHigh441 { .. }
+            | DitherParameters::ShibataLow441 { .. }
+            | DitherParameters::Shibata48 { .. }
+            | DitherParameters::ShibataHigh48 { .. }
+            | DitherParameters::ShibataLow48 { .. }
+            | DitherParameters::Shibata882 { .. }
+            | DitherParameters::ShibataLow882 { .. }
+            | DitherParameters::Shibata96 { .. }
+            | DitherParameters::ShibataLow96 { .. }
+            | DitherParameters::Shibata192 { .. }
+            | DitherParameters::ShibataLow192 { .. } => Some("noise shaping made for one rate"),
+        },
+        Filter::LookaheadLimiter { parameters, .. } => {
+            in_samples(parameters.attack_unit, parameters.release_unit)
+        }
+        Filter::Gain { .. }
+        | Filter::Volume { .. }
+        | Filter::Loudness { .. }
+        | Filter::Clipper { .. } => None,
+    }
+}
+
+/// Why a processor is only right at the samplerate its config is written for, `None` if
+/// it is right at any rate. Like [`filter_rate_dependence`], with no catch-all arm.
+fn processor_rate_dependence(processor: &Processor) -> Option<&'static str> {
+    match processor {
+        Processor::Compressor { parameters, .. } => {
+            in_samples(parameters.attack_unit, parameters.release_unit)
+        }
+        Processor::NoiseGate { parameters, .. } => {
+            in_samples(parameters.attack_unit, parameters.release_unit)
+        }
+        Processor::LookaheadLimiter { parameters, .. } => {
+            in_samples(parameters.attack_unit, parameters.release_unit)
+        }
+        Processor::RACE { parameters, .. } => {
+            (parameters.delay_unit() == DelayUnit::Samples).then_some("delay in samples")
+        }
+    }
+}
+
+fn in_samples(attack: TimeUnit, release: TimeUnit) -> Option<&'static str> {
+    (attack == TimeUnit::Samples || release == TimeUnit::Samples)
+        .then_some("attack or release in samples")
+}
+
+/// The filters and processors in the pipeline that are only right at the samplerate the
+/// config is written for, each as "filter 'name': reason". Running them at another rate
+/// shifts every frequency they work at, so Adapt refuses to change the rate of a config
+/// that has any.
+///
+/// Takes the config as written, before its tokens are expanded.
+pub fn rate_dependent_settings(conf: &Configuration) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut add = |kind: &str, name: &str, reason: Option<&str>| {
+        // A filter used on several channels is listed once.
+        if let Some(reason) = reason {
+            let setting = format!("{kind} '{name}': {reason}");
+            if !found.contains(&setting) {
+                found.push(setting);
+            }
+        }
+    };
+    for step in conf.pipeline.iter().flatten() {
+        match step {
+            PipelineStep::Filter(step) => {
+                for name in &step.names {
+                    if let Some(filter) = conf.filters.as_ref().and_then(|f| f.get(name)) {
+                        add("filter", name, filter_rate_dependence(filter));
+                    }
+                }
+            }
+            PipelineStep::Processor(step) => {
+                if let Some(processor) = conf.processors.as_ref().and_then(|p| p.get(&step.name)) {
+                    add(
+                        "processor",
+                        &step.name,
+                        processor_rate_dependence(processor),
+                    );
+                }
+            }
+            PipelineStep::Mixer(_) => {}
+        }
+    }
+    found
+}
+
 /// Adapt a configuration to a new capture sample rate, the way the `-r` override does.
 ///
 /// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk
-/// duration about the same. With a resampler, `capture_samplerate` is changed, and the
+/// duration about the same. An explicit `target_level` is scaled the same way. With a resampler, `capture_samplerate` is changed, and the
 /// resampler is dropped if that leaves a 1:1 conversion and rate adjust is off.
 ///
 /// When `samplerate` is a list, a listed rate runs natively, and any other rate is resampled
@@ -442,11 +588,14 @@ pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsi
     if configuration.devices.resampler.is_none() {
         debug!("Adapt samplerate to {rate_value}");
         configuration.devices.samplerate = SampleRates::Single(rate);
-        let scaled_chunksize = if rate_value > cfg_rate {
-            cfg_chunksize * (rate_value as f32 / cfg_rate as f32).round() as usize
-        } else {
-            cfg_chunksize / (cfg_rate as f32 / rate_value as f32).round() as usize
+        let scale = |frames: usize| {
+            if rate_value > cfg_rate {
+                frames * (rate_value as f32 / cfg_rate as f32).round() as usize
+            } else {
+                frames / (cfg_rate as f32 / rate_value as f32).round() as usize
+            }
         };
+        let scaled_chunksize = scale(cfg_chunksize);
         // Scaling down is an integer division, so a small enough chunksize
         // divides away entirely. Zero would hang the capture loop, and a
         // configuration this odd should still run, so keep one frame.
@@ -458,6 +607,12 @@ pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsi
         });
         debug!("Samplerate changed, adjusting chunksize: {cfg_chunksize} -> {scaled_chunksize}");
         configuration.devices.chunksize = scaled_chunksize;
+        // Unset, it follows chunksize already.
+        if let Some(target_level) = configuration.devices.target_level {
+            let scaled = scale(target_level);
+            debug!("Samplerate changed, adjusting target_level: {target_level} -> {scaled}");
+            configuration.devices.target_level = Some(scaled);
+        }
         #[allow(unreachable_patterns)]
         match &mut configuration.devices.capture {
             CaptureDevice::RawFile(dev) => {
@@ -1287,8 +1442,9 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        check_all_finite, deserialize_config, max_channels, parse_config, used_capture_channels,
-        validate_config, validate_resampler, validate_unused,
+        adapt_to_capture_rate, check_all_finite, deserialize_config, max_channels, parse_config,
+        rate_dependent_settings, used_capture_channels, validate_config, validate_resampler,
+        validate_unused,
     };
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
     use crate::config::{IssueKind, Issues, format_path};
@@ -1853,5 +2009,85 @@ pipeline:
         );
         // An empty file name is invalid, not a missing file.
         assert!(issues.iter().all(|issue| issue.kind == IssueKind::Invalid));
+    }
+
+    fn rate_dependent(yaml: &str) -> Vec<String> {
+        rate_dependent_settings(&parse(yaml).unwrap())
+    }
+
+    #[test]
+    fn filters_only_right_at_one_rate_are_found() {
+        let dependent = [
+            "type: Biquad\n    parameters: {type: Free, a1: 0, a2: 0, b0: 1, b1: 0, b2: 0}",
+            "type: DiffEq\n    parameters: {a: [1.0], b: [1.0]}",
+            "type: Conv\n    parameters: {type: Values, values: [1.0]}",
+            "type: Conv\n    parameters: {type: Raw, filename: fir.txt}",
+            "type: Conv\n    parameters: {type: Wav, filename: fir_48000.wav}",
+            "type: Delay\n    parameters: {delay: 10, delay_unit: samples}",
+            "type: Dither\n    parameters: {type: Shibata441, bits: 16}",
+            "type: LookaheadLimiter\n    parameters: {attack: 10, attack_unit: samples, release: 1, release_unit: s}",
+        ];
+        for filter in dependent {
+            assert_eq!(rate_dependent(&with_filter(filter)).len(), 1, "{filter}");
+        }
+        let independent = [
+            "type: Biquad\n    parameters: {type: Lowpass, freq: 1000, q: 0.7}",
+            "type: BiquadCombo\n    parameters: {type: LinkwitzRileyLowpass, freq: 1000, order: 4}",
+            "type: Conv\n    parameters: {type: Raw, filename: fir_$samplerate$.txt}",
+            "type: Conv\n    parameters: {type: Wav, filename: fir_$samplerate$.wav}",
+            "type: Delay\n    parameters: {delay: 10, delay_unit: ms}",
+            "type: Dither\n    parameters: {type: Highpass, bits: 16}",
+            "type: Gain\n    parameters: {gain: -3}",
+        ];
+        for filter in independent {
+            assert!(rate_dependent(&with_filter(filter)).is_empty(), "{filter}");
+        }
+    }
+
+    #[test]
+    fn processors_only_right_at_one_rate_are_found() {
+        let pipeline = "  - {type: Processor, name: comp}\n  - {type: Processor, name: race}\n";
+        assert!(rate_dependent(&with_processors(pipeline)).is_empty());
+        let in_samples = with_processors(pipeline)
+            .replace(
+                "attack: 25, attack_unit: ms",
+                "attack: 25, attack_unit: samples",
+            )
+            .replace("delay: 1, delay_unit: ms", "delay: 1, delay_unit: samples");
+        assert_eq!(
+            rate_dependent(&in_samples),
+            [
+                "processor 'comp': attack or release in samples",
+                "processor 'race': delay in samples"
+            ]
+        );
+    }
+
+    #[test]
+    fn only_filters_in_the_pipeline_count_and_each_once() {
+        let filter = "type: Delay\n    parameters: {delay: 10, delay_unit: samples}";
+        let unused = with_filter(filter).replace("names: [f]", "names: []");
+        assert!(rate_dependent(&unused).is_empty());
+        let twice = format!(
+            "{}  - type: Filter\n    channels: [1]\n    names: [f]\n",
+            with_filter(filter)
+        );
+        assert_eq!(rate_dependent(&twice), ["filter 'f': delay in samples"]);
+    }
+
+    #[test]
+    fn an_explicit_target_level_is_scaled_with_the_rate() {
+        let adapted = |yaml: &str, rate| {
+            let mut conf = parse(yaml).unwrap();
+            adapt_to_capture_rate(&mut conf, std::num::NonZeroUsize::new(rate).unwrap());
+            conf.devices
+        };
+        let explicit = format!("{BASE}  target_level: 2000\n");
+        assert_eq!(adapted(&explicit, 88200).target_level, Some(4000));
+        assert_eq!(adapted(&explicit, 22050).target_level, Some(1000));
+        // Unset, it follows the scaled chunksize.
+        let unset = adapted(BASE, 88200);
+        assert_eq!(unset.target_level, None);
+        assert_eq!(unset.target_level(), 2048);
     }
 }

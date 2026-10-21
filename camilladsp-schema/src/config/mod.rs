@@ -2047,6 +2047,7 @@ pub use self::utils::load_validate_config;
 pub use self::utils::max_channels;
 pub use self::utils::parse_config;
 pub use self::utils::playback_channel_labels;
+pub use self::utils::rate_dependent_settings;
 pub use self::utils::set_capture_format_by_name;
 pub use self::utils::set_capture_sample_format;
 pub use self::utils::used_capture_channels;
