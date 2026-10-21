@@ -522,6 +522,11 @@ fn run_playback_inner_loop<C>(
                 device_consumer.skip(stale_bytes);
                 sample_queue_bytes -= stale_bytes;
                 write_remainder.clear();
+                // The device and the ring buffer are empty now, which is a valid level.
+                // The estimate was invalidated while stalled, and the outer thread drops
+                // chunks in that state. The device is Prepared and there is no data to
+                // write, so the estimator needs a write to mark valid.
+                buffer_fill.lock().add(0);
             }
             if device_stalled && (end_of_stream || channel_disconnected) {
                 // A stalled device will not take what is left, and waiting for it would
