@@ -202,10 +202,19 @@ a player using a `plughw` device gets its audio resampled, and one using a `hw` 
 to open or plays at the wrong rate.
 When following a loopback, CamillaDSP logs a reminder of this at startup.
 
+When it starts, CamillaDSP reads the player's format from the `PCM Slave` controls of the cable.
+A second fix, submitted for the same kernel release, makes the kernel update these controls
+also for a player that starts with the same format as a running capture.
+Without it, the controls can still show the format of an earlier stream.
+That happens when CamillaDSP is restarted while such a player keeps playing.
+CamillaDSP then first tries to open the capture at the old format, sees that the cable only
+offers the player's, and restarts at that one.
+Following still works, it just takes one extra restart.
+
 Recommended settings when following a loopback:
 - Capture from the `hw` device, like `hw:Loopback,0,0`, not `plughw`.
-  A `plug` device converts whatever the player sends, so CamillaDSP can't see the player's
-  format through it when it starts.
+  A `plug` device converts whatever the player sends, so when the capture opens at another
+  format than the player's, it can't tell, and the plugin resamples instead.
 - Leave the capture `format` out of the config. A sample format change from the player then
   only reopens the capture with the new format, with the same config.
   Nothing else in a config depends on the capture format.

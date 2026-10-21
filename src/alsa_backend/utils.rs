@@ -242,12 +242,107 @@ impl Drop for LoopbackNotify {
     }
 }
 
+/// The card, device and subdevice a `hw` or `plughw` device name spells out, like
+/// `hw:Loopback,0,0` or `hw:CARD=Loopback,DEV=0,SUBDEV=0`. The card is left as written,
+/// a name or an index. `None` for any other name, whose target only ALSA can resolve.
+#[derive(Debug, PartialEq)]
+struct HwName<'a> {
+    card: &'a str,
+    device: u32,
+    subdevice: Option<u32>,
+}
+
+impl<'a> HwName<'a> {
+    fn parse(name: &'a str) -> Option<Self> {
+        let args = name
+            .strip_prefix("hw:")
+            .or_else(|| name.strip_prefix("plughw:"))?;
+        let (mut card, mut device, mut subdevice) = (None, None, None);
+        for (index, arg) in args.split(',').enumerate() {
+            let (key, value) = match arg.split_once('=') {
+                Some((key, value)) => (key, value),
+                None => (["CARD", "DEV", "SUBDEV"].get(index).copied()?, arg),
+            };
+            let value = value.trim_matches('"');
+            match key {
+                "CARD" => card = Some(value),
+                "DEV" => device = Some(value.parse().ok()?),
+                // A negative subdevice lets ALSA pick a free one.
+                "SUBDEV" => subdevice = value.parse::<i32>().ok()?.try_into().ok(),
+                _ => return None,
+            }
+        }
+        Some(HwName {
+            card: card.filter(|c| !c.is_empty())?,
+            device: device.unwrap_or(0),
+            subdevice,
+        })
+    }
+}
+
+/// The format a loopback cable's playback end runs at, from its `PCM Slave` controls.
+fn read_loopback_format(
+    rate: &Option<ElemData>,
+    channels: &Option<ElemData>,
+    format: &Option<ElemData>,
+) -> SourceFormat {
+    let read = |elem: &Option<ElemData>| elem.as_ref().and_then(|e| e.read_as_int());
+    SourceFormat {
+        samplerate: read(rate).map(|r| r as usize),
+        channels: read(channels).map(|c| c as usize),
+        format: read(format)
+            .and_then(format_from_number)
+            .map(alsa_format_name),
+    }
+}
+
+/// The source of a loopback or USB gadget capture, from the controls of its card.
+/// `None` for a device that has neither kind of control.
+fn query_source_controls(card: i32, device: u32, subdevice: u32) -> Option<SourceState> {
+    let h = HCtl::new(&format!("hw:{card}"), false).ok()?;
+    h.load().ok()?;
+    let pcm_elem = |name| find_elem(&h, ElemIface::PCM, Some(device), Some(subdevice), name);
+    // A loopback: the `PCM Slave` controls follow every start of the playback end.
+    if let Some(active) = pcm_elem("PCM Slave Active") {
+        let format = read_loopback_format(
+            &pcm_elem("PCM Slave Rate"),
+            &pcm_elem("PCM Slave Channels"),
+            &pcm_elem("PCM Slave Format"),
+        );
+        return Some(match active.read_as_bool() {
+            Some(false) => SourceState::Inactive,
+            Some(true) if format.samplerate.is_some() => SourceState::Format(format),
+            _ => SourceState::Unknown,
+        });
+    }
+    // A USB gadget: the rate the host plays at, 0 when it plays nothing.
+    if let Some(rate) = pcm_elem("Capture Rate") {
+        return Some(match rate.read_as_int() {
+            Some(0) => SourceState::Inactive,
+            Some(rate) => SourceState::Format(SourceFormat::rate(rate as usize)),
+            None => SourceState::Unknown,
+        });
+    }
+    None
+}
+
 /// Ask an ALSA capture device what its source is doing, without capturing from it.
 ///
-/// The PCM is opened and its hw params constraint read, but no params are set. That
-/// doesn't hold a loopback cable to any format, since the kernel only does that when
-/// a stream is prepared.
+/// A loopback or USB gadget reports its source in controls. When the device name says
+/// which subdevice it is, those are read without opening the PCM, which also works
+/// while something else holds the capture. Otherwise the PCM is opened to find out,
+/// and for any other device its hw params constraint is read, but no params are set.
+/// That doesn't hold a loopback cable to any format, since the kernel only does that
+/// when a stream is prepared.
 pub fn query_capture_source(device: &str) -> SourceState {
+    if let Some(name) = HwName::parse(device)
+        && let Some(subdevice) = name.subdevice
+        && let Ok(card) = CString::new(name.card)
+        && let Ok(card) = Card::from_str(&card)
+        && let Some(state) = query_source_controls(card.get_index(), name.device, subdevice)
+    {
+        return state;
+    }
     let pcm = match alsa::PCM::new(device, Direction::Capture, true) {
         Ok(pcm) => pcm,
         Err(err) => {
@@ -255,44 +350,23 @@ pub fn query_capture_source(device: &str) -> SourceState {
             return SourceState::Unknown;
         }
     };
-    let pinned = match HwParams::any(&pcm) {
-        Ok(hwp) => PinnedFormat::of(&hwp),
-        Err(err) => {
-            debug!("Unable to read the hw params of capture device {device}, error: {err}");
-            return SourceState::Unknown;
-        }
-    };
-    let Ok(info) = pcm.info() else {
-        return SourceState::Unknown;
-    };
-    let card = info.get_card();
-    if card >= 0
-        && let Ok(h) = HCtl::new(&format!("hw:{card}"), false)
-        && h.load().is_ok()
+    if let Ok(info) = pcm.info()
+        && info.get_card() >= 0
+        && let Some(state) =
+            query_source_controls(info.get_card(), info.get_device(), info.get_subdevice())
     {
-        let (device, subdevice) = (Some(info.get_device()), Some(info.get_subdevice()));
-        // A loopback: the constraint is what the playback end runs, and is reliable
-        // where the `PCM Slave` controls may be left over from an earlier stream.
-        if let Some(active) = find_elem(&h, ElemIface::PCM, device, subdevice, "PCM Slave Active") {
-            return match (active.read_as_bool(), pinned.source_format()) {
-                (Some(false), _) => SourceState::Inactive,
-                (Some(true), Some(format)) => SourceState::Format(format),
-                _ => SourceState::Unknown,
-            };
-        }
-        // A USB gadget: the rate the host plays at, 0 when it plays nothing.
-        if let Some(rate) = find_elem(&h, ElemIface::PCM, device, subdevice, "Capture Rate") {
-            return match rate.read_as_int() {
-                Some(0) => SourceState::Inactive,
-                Some(rate) => SourceState::Format(SourceFormat::rate(rate as usize)),
-                None => SourceState::Unknown,
-            };
-        }
+        return state;
     }
     // Anything else can only tell when it is locked to a single rate.
-    match pinned.source_format() {
-        Some(format) => SourceState::Format(format),
-        None => SourceState::Unknown,
+    match HwParams::any(&pcm) {
+        Ok(hwp) => match PinnedFormat::of(&hwp).source_format() {
+            Some(format) => SourceState::Format(format),
+            None => SourceState::Unknown,
+        },
+        Err(err) => {
+            debug!("Unable to read the hw params of capture device {device}, error: {err}");
+            SourceState::Unknown
+        }
     }
 }
 
@@ -806,17 +880,14 @@ impl CaptureElements<'_> {
 
     /// The format the playback end of the loopback cable switched to.
     ///
-    /// The `PCM Slave` controls only change when the format does, so they are only up
-    /// to date right after the kernel stopped the capture for a new format.
+    /// Called right after the kernel stopped the capture for a new format, which it
+    /// writes to the `PCM Slave` controls in the same step.
     pub fn loopback_format_change(&self) -> SourceFormat {
-        let read = |elem: &Option<ElemData>| elem.as_ref().and_then(|e| e.read_as_int());
-        let format = SourceFormat {
-            samplerate: read(&self.loopback_rate).map(|r| r as usize),
-            channels: read(&self.loopback_channels).map(|c| c as usize),
-            format: read(&self.loopback_format)
-                .and_then(format_from_number)
-                .map(alsa_format_name),
-        };
+        let format = read_loopback_format(
+            &self.loopback_rate,
+            &self.loopback_channels,
+            &self.loopback_format,
+        );
         info!("The kernel stopped the loopback capture, its playback end changed to {format}");
         format
     }
@@ -1036,6 +1107,49 @@ pub fn sync_linked_controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hw(card: &str, device: u32, subdevice: Option<u32>) -> Option<HwName<'_>> {
+        Some(HwName {
+            card,
+            device,
+            subdevice,
+        })
+    }
+
+    #[test]
+    fn parse_positional_hw_names() {
+        assert_eq!(HwName::parse("hw:Loopback,1,0"), hw("Loopback", 1, Some(0)));
+        assert_eq!(HwName::parse("plughw:2,0,1"), hw("2", 0, Some(1)));
+        assert_eq!(HwName::parse("hw:Loopback,1"), hw("Loopback", 1, None));
+        assert_eq!(HwName::parse("hw:Loopback"), hw("Loopback", 0, None));
+        assert_eq!(HwName::parse("hw:Loopback,0,-1"), hw("Loopback", 0, None));
+    }
+
+    #[test]
+    fn parse_keyed_hw_names() {
+        assert_eq!(
+            HwName::parse("hw:CARD=Loopback,DEV=1,SUBDEV=0"),
+            hw("Loopback", 1, Some(0))
+        );
+        assert_eq!(
+            HwName::parse("hw:Loopback,SUBDEV=1"),
+            hw("Loopback", 0, Some(1))
+        );
+        assert_eq!(
+            HwName::parse("hw:CARD=\"Loopback\",DEV=0"),
+            hw("Loopback", 0, None)
+        );
+    }
+
+    #[test]
+    fn parse_other_names() {
+        assert_eq!(HwName::parse("default"), None);
+        assert_eq!(HwName::parse("dsnoop:Loopback,1,0"), None);
+        assert_eq!(HwName::parse("hw:"), None);
+        assert_eq!(HwName::parse("hw:Loopback,x"), None);
+        assert_eq!(HwName::parse("hw:Loopback,0,0,1"), None);
+        assert_eq!(HwName::parse("hw:CARD=Loopback,RATE=44100"), None);
+    }
 
     fn pinned(rate: Option<u32>, channels: Option<u32>, format: Option<Format>) -> PinnedFormat {
         PinnedFormat {

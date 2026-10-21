@@ -181,6 +181,18 @@ def set_notify(cable, on):
     )
 
 
+def slave_rate(cable):
+    """The rate the cable's `PCM Slave Rate` control reports for its playback end."""
+    control = f"iface=PCM,name='PCM Slave Rate',device=1,subdevice={cable}"
+    out = subprocess.run(
+        ["amixer", "-c", CARD, "cget", control],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return int(re.search(r": values=(\d+)", out).group(1))
+
+
 def pcm_proc(device, stream, subdevice, name):
     """The "key: value" lines of a substream's procfs file, empty while it is closed."""
     path = f"/proc/asound/{CARD}/pcm{device}{stream}/sub{subdevice}/{name}"

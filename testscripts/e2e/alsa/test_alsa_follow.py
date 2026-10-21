@@ -4,12 +4,14 @@ While following, the capture sets `PCM Notify` on its cable. A player can then s
 any format, and when it differs from the capture's, the kernel stops the capture. The
 backend reads the new format from the `PCM Slave` controls and stops the session with a
 CaptureFormatChange, and the controller starts the config for it. While nothing runs,
-the controller asks the device instead: the capture's hw params constraint gives the
-format a running player holds the cable to, see `query_capture_source`.
+the controller asks the device instead: the `PCM Slave` controls give the format of a
+running player, see `query_capture_source`.
 
 This needs the snd-aloop notify fix (Linux 7.4, or a stable kernel with the backport).
 Without it the player is held to the capture's format, so the module skips unless the
-`notify_works` fixture sees a player escape that.
+`notify_works` fixture sees a player escape that. The controls are only kept up to date
+with the second fix, for a player that matches a running capture, and the one test that
+depends on it skips without it.
 """
 
 import subprocess
@@ -29,6 +31,7 @@ from .loopback import (
     pcm_state,
     set_notify,
     sine,
+    slave_rate,
     trigger_time,
     wait_for_pcm_state,
 )
@@ -159,6 +162,33 @@ def test_startup_follows_a_player_that_already_runs(start_cdsp, alsa_config, fee
     cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
     wait_for_rate(cdsp, 96000)
     wait_for_signal(cdsp)
+
+
+def test_a_restart_reads_the_rate_of_a_player_that_kept_playing(
+    start_cdsp, alsa_config, feeder, tmp_path
+):
+    """A player that starts at the rate of a running capture also updates the `PCM
+    Slave` controls, with the snd-aloop controls fix. So when CamillaDSP restarts while
+    that player keeps playing, the source query reads its rate, and the first session
+    opens at it, rather than at the rate of an earlier stream and then following the
+    open-time check."""
+    feeder(rate=96000).stop()
+    assert slave_rate(CAPTURE_CABLE) == 96000
+    config = alsa_config(capture_format=None)
+    cdsp = start_cdsp(config=config, extra_args=FOLLOW)
+    wait_for_rate(cdsp, 48000)
+    feeder(rate=48000)
+    wait_for_signal(cdsp)
+    if slave_rate(CAPTURE_CABLE) != 48000:
+        pytest.skip("needs a kernel with the snd-aloop PCM Slave controls fix")
+    assert cdsp.exit() == EXIT_OK
+    log = tmp_path / "restart.log"
+    cdsp = start_cdsp(config=config, extra_args=[*FOLLOW, "-o", str(log)])
+    wait_for_rate(cdsp, 48000)
+    wait_for_signal(cdsp)
+    text = log.read_text()
+    assert "The capture source reports 48000 Hz" in text
+    assert "the capture source changed" not in text
 
 
 def test_the_open_time_check_follows_a_player_that_has_not_started(start_cdsp, alsa_config):
