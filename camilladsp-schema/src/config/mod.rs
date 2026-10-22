@@ -820,67 +820,19 @@ impl PlaybackDeviceCoreAudio {
     }
 }
 
-/// The `samplerate` of the devices: one rate, or a list of the rates the hardware runs
-/// natively. The first rate is used unless Adapt picks another one, and it is the one a
-/// source at an unlisted rate is resampled to.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
-#[serde(try_from = "SampleRatesRaw")]
-pub enum SampleRates {
-    Single(NonZeroUsize),
-    List(Vec<NonZeroUsize>),
-}
-
-/// A positive integer, or a non-empty list of them. Written by hand, since the derive can't
-/// give the fields of a tuple variant another type.
-#[cfg(feature = "utoipa")]
-impl utoipa::PartialSchema for SampleRates {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        use utoipa::openapi::schema::{ArrayBuilder, ObjectBuilder, OneOfBuilder, Type};
-        let rate = || {
-            ObjectBuilder::new()
-                .schema_type(Type::Integer)
-                .minimum(Some(1))
-        };
-        OneOfBuilder::new()
-            .item(rate())
-            .item(ArrayBuilder::new().items(rate()).min_items(Some(1)))
-            .into()
-    }
-}
-
-#[cfg(feature = "utoipa")]
-impl utoipa::ToSchema for SampleRates {}
-
-/// [`SampleRates`] as parsed, before the list is checked for being empty.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum SampleRatesRaw {
-    Single(NonZeroUsize),
-    List(Vec<NonZeroUsize>),
-}
-
-impl TryFrom<SampleRatesRaw> for SampleRates {
-    type Error = String;
-
-    fn try_from(raw: SampleRatesRaw) -> Result<Self, Self::Error> {
-        match raw {
-            SampleRatesRaw::Single(rate) => Ok(SampleRates::Single(rate)),
-            SampleRatesRaw::List(rates) if rates.is_empty() => {
-                Err("the samplerate list is empty".to_string())
-            }
-            SampleRatesRaw::List(rates) => Ok(SampleRates::List(rates)),
-        }
-    }
-}
-
 /// Top-level device and pipeline timing configuration.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Devices {
-    /// Output sample rate in Hz, or a list of the rates Adapt runs natively.
-    pub samplerate: SampleRates,
+    /// Output sample rate in Hz.
+    #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
+    pub samplerate: NonZeroUsize,
+    /// More rates the devices run natively when following the capture source, besides
+    /// `samplerate`. A source at any other rate is resampled to `samplerate`.
+    #[serde(default)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<Vec<usize>>))]
+    pub alternate_samplerates: Option<Vec<NonZeroUsize>>,
     /// Number of frames per processing chunk.
     #[cfg_attr(feature = "utoipa", schema(value_type = usize, minimum = 1))]
     pub chunksize: NonZeroUsize,
@@ -939,20 +891,14 @@ impl Devices {
         self.silence_timeout_s.map_or(0.0, FiniteF64::get)
     }
 
-    /// The output sample rate in Hz, the first one for a list.
+    /// The output sample rate in Hz.
     pub fn samplerate(&self) -> usize {
-        match &self.samplerate {
-            SampleRates::Single(rate) => rate.get(),
-            SampleRates::List(rates) => rates[0].get(),
-        }
+        self.samplerate.get()
     }
 
-    /// The rates Adapt runs natively, when `samplerate` is a list.
-    pub fn samplerate_list(&self) -> Option<&[NonZeroUsize]> {
-        match &self.samplerate {
-            SampleRates::Single(_) => None,
-            SampleRates::List(rates) => Some(rates),
-        }
+    /// The rates besides `samplerate` that following runs natively, none when unset.
+    pub fn alternate_samplerates(&self) -> &[NonZeroUsize] {
+        self.alternate_samplerates.as_deref().unwrap_or_default()
     }
 
     /// The number of frames per processing chunk.

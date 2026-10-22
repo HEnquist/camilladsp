@@ -221,8 +221,8 @@ pub fn load_config(filename: &str) -> Result<Configuration, Issues> {
 }
 
 /// Apply the CLI overrides. With `skip_samplerate`, the `-r` override is left out, since the
-/// rate is about to be adapted to the source anyway. Applying it first would turn a
-/// `samplerate` list into a single rate, and the adaptation would no longer see the list.
+/// rate is about to be adapted to the source anyway. Applying it first would change
+/// `samplerate`, the rate that a source at a rate that doesn't run natively is resampled to.
 fn apply_overrides(configuration: &mut Configuration, skip_samplerate: bool) -> Res<()> {
     let mut overrides = OVERRIDES.read().clone();
     if skip_samplerate {
@@ -541,53 +541,14 @@ pub fn rate_dependent_settings(conf: &Configuration) -> Vec<String> {
 /// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk
 /// duration about the same. An explicit `target_level` is scaled the same way. With a resampler, `capture_samplerate` is changed, and the
 /// resampler is dropped if that leaves a 1:1 conversion and rate adjust is off.
-///
-/// When `samplerate` is a list, a listed rate runs natively, and any other rate is resampled
-/// to the first one in the list, adding a resampler if the config has none that can do it.
 pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsize) {
     let cfg_rate = configuration.devices.samplerate();
     let cfg_chunksize = configuration.devices.chunksize();
     let rate_value = rate.get();
 
-    if let Some(rates) = configuration.devices.samplerate_list() {
-        let first = rates[0];
-        let listed = rates.contains(&rate);
-        let rate_adjust = configuration.devices.rate_adjust();
-        configuration.devices.samplerate = SampleRates::Single(first);
-        configuration.devices.capture_samplerate = None;
-        if listed {
-            // Without the resampler, the plain path below changes samplerate and scales
-            // chunksize. Rate adjust still needs it, converting 1:1.
-            debug!("{rate_value} Hz is in the samplerate list, running at it natively");
-            let resampler = configuration.devices.resampler.take();
-            adapt_to_capture_rate(configuration, rate);
-            if rate_adjust && resampler.is_some() {
-                configuration.devices.resampler = resampler;
-                configuration.devices.capture_samplerate = Some(rate);
-            }
-        } else {
-            debug!("{rate_value} Hz is not in the samplerate list, resampling it to {first}");
-            configuration.devices.capture_samplerate = Some(rate);
-            // Slip only corrects drift, it can't convert between rates.
-            if matches!(
-                configuration.devices.resampler,
-                None | Some(Resampler::Slip)
-            ) {
-                configuration.devices.resampler = Some(if rate_adjust {
-                    Resampler::AsyncSinc(AsyncSincParameters::Profile {
-                        profile: AsyncSincProfile::Balanced,
-                    })
-                } else {
-                    Resampler::Synchronous
-                });
-            }
-        }
-        return;
-    }
-
     if configuration.devices.resampler.is_none() {
         debug!("Adapt samplerate to {rate_value}");
-        configuration.devices.samplerate = SampleRates::Single(rate);
+        configuration.devices.samplerate = rate;
         let scale = |frames: usize| {
             if rate_value > cfg_rate {
                 frames * (rate_value as f32 / cfg_rate as f32).round() as usize
@@ -641,6 +602,51 @@ pub fn adapt_to_capture_rate(configuration: &mut Configuration, rate: NonZeroUsi
         if rate_value == cfg_rate && !configuration.devices.rate_adjust() {
             debug!("Disabling unneccesary 1:1 resampling");
             configuration.devices.resampler = None;
+        }
+    }
+}
+
+/// Adapt a configuration to the rate of the capture source, for following it.
+///
+/// `samplerate` and the `alternate_samplerates` run natively, as in
+/// [`adapt_to_capture_rate`]. Any other rate is resampled to `samplerate`, adding a resampler
+/// if the config has none that can do it. Unlike the `-r` override, a rate the config doesn't
+/// give is never run natively, since the playback device may not support it.
+pub fn adapt_to_source_rate(configuration: &mut Configuration, rate: NonZeroUsize) {
+    let samplerate = configuration.devices.samplerate;
+    let rate_value = rate.get();
+    let rate_adjust = configuration.devices.rate_adjust();
+    configuration.devices.capture_samplerate = None;
+    if rate == samplerate
+        || configuration
+            .devices
+            .alternate_samplerates()
+            .contains(&rate)
+    {
+        // Without the resampler, adapt_to_capture_rate changes samplerate and scales
+        // chunksize. Rate adjust still needs it, converting 1:1.
+        debug!("{rate_value} Hz runs natively");
+        let resampler = configuration.devices.resampler.take();
+        adapt_to_capture_rate(configuration, rate);
+        if rate_adjust && resampler.is_some() {
+            configuration.devices.resampler = resampler;
+            configuration.devices.capture_samplerate = Some(rate);
+        }
+    } else {
+        debug!("{rate_value} Hz doesn't run natively, resampling it to {samplerate}");
+        configuration.devices.capture_samplerate = Some(rate);
+        // Slip only corrects drift, it can't convert between rates.
+        if matches!(
+            configuration.devices.resampler,
+            None | Some(Resampler::Slip)
+        ) {
+            configuration.devices.resampler = Some(if rate_adjust {
+                Resampler::AsyncSinc(AsyncSincParameters::Profile {
+                    profile: AsyncSincProfile::Balanced,
+                })
+            } else {
+                Resampler::Synchronous
+            });
         }
     }
 }
@@ -839,11 +845,12 @@ pub fn validate_config(
     validate_config_at_rate(conf, filename, None)
 }
 
-/// Validate a configuration like [`validate_config`], adapted to a capture sample rate.
+/// Validate a configuration like [`validate_config`], adapted to the rate of the capture
+/// source.
 ///
-/// The adaptation, see [`adapt_to_capture_rate`], takes the place of a `-r` override, and is
+/// The adaptation, see [`adapt_to_source_rate`], takes the place of a `-r` override, and is
 /// applied after the other CLI overrides, and before the tokens are expanded, so that
-/// `$samplerate$` gives the new rate.
+/// `$samplerate$` gives the rate the pipeline runs at.
 pub fn validate_config_at_rate(
     conf: &mut Configuration,
     filename: Option<&str>,
@@ -858,7 +865,7 @@ pub fn validate_config_at_rate(
         return Err(Issue::invalid(issue_path![], err.to_string()).into());
     }
     if let Some(rate) = capture_rate {
-        adapt_to_capture_rate(conf, rate);
+        adapt_to_source_rate(conf, rate);
     }
     replace_tokens_in_config(conf);
     if let Some(fname) = filename {

@@ -6,6 +6,9 @@
       "AdaptCheck": {
         "type": "object",
         "description": "The entry config that the Adapt provider starts from, and what is wrong with it, if\nanything. The format is the one the config is written for, after the command line\noverrides. Adapt changes the rate and the sample format, but not the channel count.",
+        "required": [
+          "alternate_samplerates"
+        ],
         "properties": {
           "file": {
             "type": [
@@ -22,16 +25,13 @@
             "description": "Capture sample rate, `null` when no config is loaded.",
             "minimum": 0
           },
-          "samplerates": {
-            "type": [
-              "array",
-              "null"
-            ],
+          "alternate_samplerates": {
+            "type": "array",
             "items": {
               "type": "integer",
               "minimum": 0
             },
-            "description": "The rates that run natively, when `samplerate` is a list, with the preferred one first.\nOther rates are resampled to the first one. `null` for a single `samplerate`, and then\nevery rate runs natively."
+            "description": "The `alternate_samplerates` of the config, the rates besides its `samplerate` that run\nnatively. A source at any other rate is resampled to `samplerate`."
           },
           "channels": {
             "type": [

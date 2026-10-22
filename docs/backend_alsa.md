@@ -218,6 +218,9 @@ Recommended settings when following a loopback:
 - Leave the capture `format` out of the config. A sample format change from the player then
   only reopens the capture with the new format, with the same config.
   Nothing else in a config depends on the capture format.
+- List the rates the playback device supports in `alternate_samplerates`.
+  A player at one of them then runs natively, and a player at any other rate is resampled
+  to `samplerate`.
 - See `exampleconfigs/follow_loopback.yml` for a config to start from.
   A player that also changes the channel count, for example between stereo music and 5.1 films,
   can't be followed, since then the mixers would have to change too.

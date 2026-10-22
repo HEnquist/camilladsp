@@ -6,10 +6,13 @@
 #   camilladsp --wait --follow_capture -s statefile.yml follow_loopback.yml
 #
 # The capture has no `format`, so a player that changes sample format only reopens the
-# capture. The FIR filter has a file per rate, picked with the `$samplerate$` token,
+# capture. The playback runs natively at `samplerate` and the `alternate_samplerates`, so
+# list only rates the DAC supports. A player at any other rate is resampled to 44100.
+# The FIR filter has a file per rate, picked with the `$samplerate$` token,
 # for example filter_44100.raw and filter_96000.raw.
 devices:
   samplerate: 44100
+  alternate_samplerates: [48000, 88200, 96000]
   chunksize: 1024
   capture:
     type: Alsa

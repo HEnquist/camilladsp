@@ -185,7 +185,8 @@ fn build_pipeline(chunksize: usize, multithreaded: bool, conv: Conv) -> Pipeline
         title: None,
         description: None,
         devices: config::Devices {
-            samplerate: config::SampleRates::Single(NonZeroUsize::new(48000).unwrap()),
+            samplerate: NonZeroUsize::new(48000).unwrap(),
+            alternate_samplerates: None,
             chunksize: NonZeroUsize::new(chunksize).unwrap(),
             queuelimit: None,
             silence_threshold: None,
@@ -277,7 +278,8 @@ fn build_wide_pipeline(chunksize: usize, multithreaded: bool) -> Pipeline {
         title: None,
         description: None,
         devices: config::Devices {
-            samplerate: config::SampleRates::Single(NonZeroUsize::new(48000).unwrap()),
+            samplerate: NonZeroUsize::new(48000).unwrap(),
+            alternate_samplerates: None,
             chunksize: NonZeroUsize::new(chunksize).unwrap(),
             queuelimit: None,
             silence_threshold: None,

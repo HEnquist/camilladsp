@@ -46,10 +46,12 @@ def source_cdsp(start_cdsp, config_file, source):
 
 
 def source_edits(source):
-    """dummy_control.yml with the capture asking `source`, and no capture control socket."""
+    """dummy_control.yml with the capture asking `source`, and no capture control socket.
+    The rates the tests switch to run natively, any other rate is resampled to 48 kHz."""
     return {
         CAPTURE_PORT_PLACEHOLDER: f"source_port: {source.port}",
         PLAYBACK_PORT_PLACEHOLDER: f"control_port: {free_port()}",
+        "  samplerate: 48000\n": "  samplerate: 48000\n  alternate_samplerates: [44100, 96000]\n",
     }
 
 
@@ -109,6 +111,14 @@ def test_a_source_change_is_followed(source_cdsp, source):
         wait_for_rate(cdsp, rate)
         # Adapt runs the entry file, adapted.
         assert running_from(cdsp) == ("Files", "Adapt", cdsp.config_path)
+
+
+def test_a_rate_that_is_not_native_is_resampled(source_cdsp, source):
+    source.play(88200)
+    cdsp = source_cdsp()
+    wait_for_rate(cdsp, 48000)
+    assert config_value(cdsp, "/devices/capture_samplerate") == 88200
+    assert config_value(cdsp, "/devices/resampler") == {"type": "Synchronous"}
 
 
 def test_an_inactive_source_runs_the_entry_config(source_cdsp, source):

@@ -796,13 +796,42 @@ A config sent over the websocket is not an entry config, see
 [Config sources and providers](#config-sources-and-providers).
 When the capture device reports that the source changed format, the controller _adapts_ the
 entry config to the new format, and runs the result.
-The rate is changed the same way as the `--samplerate` override does it,
-see [Overriding config values](#overriding-config-values).
 When the config sets the capture sample format explicitly, it is changed to the reported one.
 
+The rate is adapted in one of two ways:
+- A source at `samplerate`, or at one of the `alternate_samplerates`, runs natively at its own rate.
+  `samplerate` is changed, and `chunksize` is scaled to keep the chunk duration about the same.
+  A resampler in the config is dropped, unless rate adjust needs it.
+- A source at any other rate is resampled to `samplerate`.
+  The config's own resampler is used for this.
+  If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
+  or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
+
+Without `alternate_samplerates`, every source is resampled to `samplerate`,
+and the playback device always runs at the rate the config is written for.
+This is the default because CamillaDSP can't know which rates the playback device supports,
+and a device opened at a rate it doesn't support fails.
+List the rates it supports in `alternate_samplerates` to run a source at them natively:
+```yaml
+devices:
+  samplerate: 96000
+  alternate_samplerates: [48000]
+```
+In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resampled to 96 kHz.
+96 kHz is the preferred rate because resampling up loses nothing.
+Resampling 88.2 kHz down to 48 kHz would have to remove everything above 24 kHz,
+while at 96 kHz all of it is kept.
+The cost is that the processing runs at the higher rate, which takes about twice the CPU time of 48 kHz.
+If that is too much, use 48 kHz as `samplerate` instead.
+Listing `samplerate` in `alternate_samplerates` as well is allowed, and changes nothing.
+Without following, and until a source rate is known, the config runs at `samplerate`.
+
+The `--samplerate` override doesn't use `alternate_samplerates`,
+it changes the rate as described in [Overriding config values](#overriding-config-values).
+Once the controller has a source rate to run at, the override is ignored, since that sets the rate anyway.
+
 A single config covers the usual per-rate needs:
-`$samplerate$` tokens in filter file names load the right FIR filters for each rate,
-and a `samplerate` list, described below, resamples the rates the hardware can't run.
+`$samplerate$` tokens in filter file names load the right FIR filters for the rate the pipeline runs at.
 
 The channel count is not adapted, since the capture channels and the mixers would have to change
 with it.
@@ -810,30 +839,6 @@ A source that changes its channel count can't be followed.
 This is the case with ADAT S/MUX, where an interface has fewer channels at the higher rates,
 or with a player that switches between stereo and 5.1 on a loopback.
 The controller then waits until the source is back at the channel count of the entry config.
-
-Not every device runs at every rate.
-Some only support the 48 kHz family, for example.
-For these, the entry config can give `samplerate` as a list of the rates the device runs natively:
-```yaml
-devices:
-  samplerate: [96000, 48000]
-```
-A source at a listed rate then runs natively at that rate.
-A source at any other rate is resampled to the first rate in the list,
-so put the preferred rate first.
-In the example, 48 and 96 kHz run as they are, while 44.1 and 88.2 kHz are resampled to 96 kHz.
-96 kHz is first because resampling up loses nothing.
-Resampling 88.2 kHz down to 48 kHz would have to remove everything above 24 kHz,
-while at 96 kHz all of it is kept.
-The cost is that the processing runs at the higher rate, which takes about twice the CPU time of 48 kHz.
-If that is too much, put 48 kHz first instead.
-The config's own resampler is used for this.
-If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
-or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
-Without following, and until a source rate is known, the first rate is used.
-This makes a config with a list usable everywhere.
-The `--samplerate` override uses the list the same way Adapt does.
-Once the controller has a source rate to run at, the override is ignored, since that sets the rate anyway.
 
 Some settings are only right at the rate the config is written for.
 When Adapt changes `samplerate`, they would run at the wrong frequencies.
@@ -846,13 +851,13 @@ Adapt therefore refuses to change the `samplerate` of a config that uses any of 
 - `Conv` filters of type `Values`, and `Raw` or `Wav` filters without `$samplerate$` in the file name,
 - the `Dither` types made for one rate, such as `Shibata441` and `Gesemann48`.
 
-This only applies when Adapt changes `samplerate`.
-That is, when the config has no resampler, or when a source runs natively at a rate in the list other than the first.
+This only applies when Adapt changes `samplerate`,
+which is when a source runs natively at one of the `alternate_samplerates`.
 When the source is resampled to the config's own rate, every setting stays right.
 Values in samples can be given in a time unit instead, and coefficient files can get `$samplerate$`
 in their names, with one file per rate.
-For the rest, give `samplerate` as a list with only the config's own rate, like `[48000]`.
-Every other rate is then resampled to it, and Adapt works with any config.
+For the rest, leave out `alternate_samplerates`.
+Every other rate is then resampled to `samplerate`, and Adapt works with any config.
 The refusal is logged with the settings it found, and the controller then waits for the source.
 `CheckControllerFiles` reports the settings as the problem of the `adapt` section, before any rate change happens.
 
@@ -861,8 +866,8 @@ A rate measured by the backend, like 44097, is snapped to the nearest standard r
 
 The websocket command `CheckControllerFiles` checks the entry config before any format change.
 Its `adapt` section is `null` while following is off.
-It gives the entry config, the format it is written for, and its problem, if any.
-When `samplerate` is a list, it also gives the rates that run natively, with the preferred one first.
+It gives the entry config, the format it is written for, its `alternate_samplerates`,
+and its problem, if any.
 
 If the entry config can't be adapted to the new format, the controller waits for the source to change.
 It asks the backend what the source is doing once per second, and starts the adapted config
@@ -1174,6 +1179,7 @@ Example config:
 ```
 devices:
   samplerate: 96000
+  alternate_samplerates: [48000, 192000] (*)
   chunksize: 2048
   queuelimit: 4 (*)
   silence_threshold: -60 (*)
@@ -1207,10 +1213,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `samplerate` setting decides the sample rate that everything will run at.
   This rate must be supported by both the capture and  playback device.
 
-  `samplerate` can also be a list of the rates the hardware runs natively.
-  The first rate in the list is the preferred one, and the one that is used unless the built-in
-  controller adapts the config to the source, see
+* `alternate_samplerates` (optional, defaults to `null`)
+
+  More rates that the hardware runs natively, besides `samplerate`.
+  They are only used when the built-in controller adapts the config to the capture source, see
   [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
+  Leaving it out, or giving an empty list, means that the source is always resampled to
+  `samplerate`.
 
 * `chunksize`
 

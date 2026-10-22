@@ -41,6 +41,8 @@ pytestmark = pytest.mark.alsa
 EXIT_OK = 0
 LEVEL_DB = -6.0
 FOLLOW = ["--wait", "--follow_capture"]
+# The rates the tests switch to run natively, any other rate is resampled to 48 kHz.
+NATIVE = {"alternate_samplerates": [44100, 96000]}
 
 
 @pytest.fixture(scope="module")
@@ -127,7 +129,7 @@ def test_adapt_follows_back_to_back_rate_changes(start_cdsp, alsa_config, feeder
     The players replace each other with no gap, the way a player reopens the device
     between tracks, and the measured rate agrees with the config every time.
     """
-    cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)
     assert notify(CAPTURE_CABLE)
     current = None
     for rate in (44100, 96000, 48000):
@@ -142,10 +144,21 @@ def test_adapt_follows_back_to_back_rate_changes(start_cdsp, alsa_config, feeder
         assert hw_params(0, "p", CAPTURE_CABLE)["rate"] == str(rate)
 
 
+def test_a_rate_that_is_not_native_is_resampled(start_cdsp, alsa_config, feeder):
+    """The capture follows the player, and the rest of the pipeline stays at 48 kHz."""
+    feeder(rate=88200)
+    cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)
+    poll_config_value(cdsp, "/devices/capture_samplerate", 88200)
+    cdsp.poll_until("GetState", "Running")
+    assert config_value(cdsp, "/devices/samplerate") == 48000
+    assert hw_params(1, "c", CAPTURE_CABLE)["rate"] == "88200"
+    wait_for_signal(cdsp)
+
+
 def test_a_player_at_the_same_rate_does_not_restart(start_cdsp, alsa_config, feeder):
     """Rule 13: the kernel only stops the capture for a different format."""
     first = feeder(rate=44100)
-    cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)
     wait_for_rate(cdsp, 44100)
     wait_for_signal(cdsp)
     started = trigger_time(1, "c", CAPTURE_CABLE)
@@ -159,7 +172,7 @@ def test_a_player_at_the_same_rate_does_not_restart(start_cdsp, alsa_config, fee
 def test_startup_follows_a_player_that_already_runs(start_cdsp, alsa_config, feeder):
     """Rule 14: the source is asked first, so the first session opens at its rate."""
     feeder(rate=96000)
-    cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)
     wait_for_rate(cdsp, 96000)
     wait_for_signal(cdsp)
 
@@ -203,7 +216,9 @@ def test_the_open_time_check_follows_a_player_that_has_not_started(start_cdsp, a
     try:
         # With nothing written, aplay prepares the stream and waits for data.
         wait_for_pcm_state(0, "p", CAPTURE_CABLE, "PREPARED")
-        cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
+        cdsp = start_cdsp(
+            config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW
+        )
         wait_for_rate(cdsp, 44100)
     finally:
         player.kill()
@@ -264,7 +279,7 @@ def test_the_entry_config_starts_when_the_source_stops(start_cdsp, alsa_config, 
     """Rule 22: an inactive source while waiting starts the entry config, and the
     capture stays open for the next player."""
     first = feeder()
-    cdsp = start_cdsp(config=alsa_config(capture_format=None), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     first.stop()
     four = feeder(channels=4)

@@ -20,9 +20,11 @@ pytestmark = pytest.mark.coreaudio
 
 EXIT_OK = 0
 FOLLOW = ["--wait", "--follow_capture"]
+# The rates the tests switch to run natively, any other rate is resampled to 48 kHz.
+NATIVE = {"alternate_samplerates": [44100, 96000]}
 
 # A delay in samples is only right at the config's own rate, so Adapt refuses to run it
-# at another rate, and the controller waits for the source instead.
+# natively at an alternate rate, and the controller waits for the source instead.
 DELAY_IN_SAMPLES = """filters:
   delay:
     type: Delay
@@ -86,7 +88,7 @@ def with_delay_in_samples(config):
 def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
     """Adapt changes the entry config to every rate the device is switched to."""
     feeder()
-    entry = ca_config()
+    entry = ca_config(devices=NATIVE)
     cdsp = start_cdsp(config=entry, extra_args=FOLLOW)
     wait_for_signal(cdsp)
     assert status(cdsp)["following"] is True
@@ -115,6 +117,19 @@ def test_adapt_with_a_resampler_changes_only_the_capture_rate(start_cdsp, ca_con
     wait_for_signal(cdsp)
 
 
+def test_a_rate_that_is_not_native_is_resampled(start_cdsp, ca_config, feeder):
+    """Without alternate rates, a resampler is added and the playback stays at 48 kHz."""
+    feeder()
+    cdsp = start_cdsp(config=ca_config(), extra_args=FOLLOW)
+    wait_for_signal(cdsp)
+    switch_source(96000)
+    poll_config_value(cdsp, "/devices/capture_samplerate", 96000)
+    cdsp.poll_until("GetState", "Running")
+    assert config_value(cdsp, "/devices/samplerate") == 48000
+    assert config_value(cdsp, "/devices/resampler") == {"type": "Synchronous"}
+    wait_for_signal(cdsp)
+
+
 def test_without_following_a_rate_change_goes_idle(start_cdsp, ca_config, feeder):
     """Rule 3: wait mode with following off stops and stays stopped, as before."""
     feeder()
@@ -132,14 +147,14 @@ def test_startup_follows_the_rate_the_source_is_at(start_cdsp, ca_config, feeder
     """Rule 14: the source is asked first, so the first session opens at its rate."""
     switch_source(96000)
     feeder(rate=96000)
-    cdsp = start_cdsp(config=ca_config(samplerate=44100), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=ca_config(samplerate=44100, devices=NATIVE), extra_args=FOLLOW)
     wait_for_rate(cdsp, 96000)
     wait_for_signal(cdsp)
 
 
 def test_a_rate_adapt_refuses_waits_for_the_source(start_cdsp, ca_config, feeder):
     """Rules 10 and 22: no config for the rate, so wait, and follow once there is one."""
-    entry = with_delay_in_samples(ca_config())
+    entry = with_delay_in_samples(ca_config(devices=NATIVE))
     feeder()
     cdsp = start_cdsp(config=entry, extra_args=FOLLOW)
     wait_for_signal(cdsp)
@@ -162,7 +177,7 @@ def test_a_rate_adapt_refuses_waits_for_the_source(start_cdsp, ca_config, feeder
 
 def test_a_stop_ends_the_wait_for_the_source(start_cdsp, ca_config, feeder):
     feeder()
-    cdsp = start_cdsp(config=with_delay_in_samples(ca_config()), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=with_delay_in_samples(ca_config(devices=NATIVE)), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(44100)
     cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is not None)
@@ -178,11 +193,11 @@ def test_a_loaded_entry_starts_at_the_followed_rate(start_cdsp, ca_config, feede
     """A config written for 48 kHz, loaded while the source runs at 96 kHz, is adapted
     before it starts rather than starting at 48 kHz and following back."""
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=ca_config(devices=NATIVE), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)
-    cdsp.send("SetConfigFilePath", ca_config(chunksize=512))
+    cdsp.send("SetConfigFilePath", ca_config(chunksize=512, devices=NATIVE))
     cdsp.send("Reload")
     poll_config_value(cdsp, "/devices/chunksize", 1024)
     assert config_value(cdsp, "/devices/samplerate") == 96000
@@ -194,7 +209,7 @@ def test_a_patch_keeps_the_rate_and_is_not_followed(start_cdsp, ca_config, feede
     the websocket source, so the next rate change stops processing rather than adapting
     the patched config."""
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=FOLLOW)
+    cdsp = start_cdsp(config=ca_config(devices=NATIVE), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)

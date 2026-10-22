@@ -293,10 +293,9 @@ pub struct AdaptCheck {
     pub file: Option<String>,
     /// Capture sample rate, `null` when no config is loaded.
     pub samplerate: Option<usize>,
-    /// The rates that run natively, when `samplerate` is a list, with the preferred one first.
-    /// Other rates are resampled to the first one. `null` for a single `samplerate`, and then
-    /// every rate runs natively.
-    pub samplerates: Option<Vec<usize>>,
+    /// The `alternate_samplerates` of the config, the rates besides its `samplerate` that run
+    /// natively. A source at any other rate is resampled to `samplerate`.
+    pub alternate_samplerates: Vec<usize>,
     /// Capture channels, `null` when no config is loaded.
     pub channels: Option<usize>,
     /// Capture sample format, `null` when it is automatic or no config is loaded.

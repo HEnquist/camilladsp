@@ -184,11 +184,13 @@ def test_a_format_change_without_following_is_not_retried(control_cdsp):
 
 def test_adapt_follows_a_measured_rate_change(control_cdsp):
     """The dummy capture measures its rate, like ALSA without the loopback controls.
-    Following forces stop_on_rate_change on, so the config doesn't need it."""
+    Following forces stop_on_rate_change on, so the config doesn't need it. 44.1 kHz isn't
+    one of the alternate rates, so it is resampled to the 48 kHz of the config."""
     cdsp = control_cdsp(MEASURE_SETTINGS, extra_args=["--wait", "--follow_capture"])
     cdsp.capture_control.set("rate", 44100)
     deadline = time.monotonic() + 10.0
-    while cdsp.send_raw("GetConfigValue", "/devices/samplerate").get("value") != 44100:
+    pointer = "/devices/capture_samplerate"
+    while cdsp.send_raw("GetConfigValue", pointer).get("value") != 44100:
         assert time.monotonic() < deadline, "did not follow to 44100"
         time.sleep(0.05)
     cdsp.poll_until("GetState", "Running")

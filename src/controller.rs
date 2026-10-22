@@ -293,7 +293,7 @@ fn rate_change_problem(raw: &Configuration) -> Option<String> {
     }
     let rate = raw.devices.samplerate();
     Some(format!(
-        "these settings are only right at {rate} Hz: {}. Give delays, attack and release times in a time unit rather than in samples, add $samplerate$ to the coefficient file names, or set samplerate to [{rate}] to resample every other rate to {rate} Hz",
+        "these settings are only right at {rate} Hz: {}. Give delays, attack and release times in a time unit rather than in samples, add $samplerate$ to the coefficient file names, or leave out alternate_samplerates to resample every other rate to {rate} Hz",
         settings.join(", ")
     ))
 }
@@ -361,19 +361,19 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
         return AdaptCheck {
             file: None,
             samplerate: None,
-            samplerates: None,
+            alternate_samplerates: Vec::new(),
             channels: None,
             format: None,
             problem: Some("no config is loaded".to_string()),
         };
     };
     let mut conf = entry.raw.clone();
-    // Adapt changes `samplerate` for a rate in a list other than the first, and for any
-    // other rate when the config has no resampler.
-    let changes_rate = match entry.raw.devices.samplerate_list() {
-        Some(rates) => rates.len() > 1,
-        None => entry.raw.devices.resampler.is_none(),
-    };
+    // Adapt changes `samplerate` only for an alternate rate, any other rate is resampled.
+    let devices = &entry.raw.devices;
+    let changes_rate = devices
+        .alternate_samplerates()
+        .iter()
+        .any(|rate| *rate != devices.samplerate);
     let problem = match config::validate_config(&mut conf, entry.filename.as_deref()) {
         Err(err) => Some(err.to_string()),
         Ok(_) if changes_rate => rate_change_problem(&entry.raw)
@@ -383,12 +383,11 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
     AdaptCheck {
         file: entry.filename.clone(),
         samplerate: Some(capture_rate_of(&conf)),
-        // From the config as written, since a `-r` override turns the list into one rate.
-        samplerates: entry
-            .raw
-            .devices
-            .samplerate_list()
-            .map(|rates| rates.iter().map(|r| r.get()).collect()),
+        alternate_samplerates: devices
+            .alternate_samplerates()
+            .iter()
+            .map(|rate| rate.get())
+            .collect(),
         channels: Some(conf.devices.capture.channels()),
         format: conf.devices.capture.format_name(),
         problem,
@@ -434,6 +433,12 @@ mod tests {
             raw: conf,
             filename: None,
         }
+    }
+
+    fn with_alternates(mut conf: Configuration, rates: &[usize]) -> Configuration {
+        let rates = rates.iter().map(|r| NonZeroUsize::new(*r).unwrap());
+        conf.devices.alternate_samplerates = Some(rates.collect());
+        conf
     }
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -508,7 +513,7 @@ mod tests {
         // An entry adapted to 96 kHz, then patched: it stays at 96 kHz, with the chunksize
         // Adapt scaled, rather than going back to the rate of the entry.
         let adapted = run(select_config(
-            &entry(base_config(48000, 2, "")),
+            &entry(with_alternates(base_config(48000, 2, ""), &[96000])),
             Some(&format(96000, Some(2))),
             None,
         ));
@@ -521,15 +526,90 @@ mod tests {
     }
 
     #[test]
-    fn adapt_without_resampler_changes_rate_and_chunksize() {
+    fn adapt_resamples_a_rate_that_is_not_native() {
         let selected = run(select_config(
             &entry(base_config(48000, 2, "")),
             Some(&format(96000, Some(2))),
             None,
         ));
         assert_eq!(selected.provider, Provider::Adapt);
+        assert_eq!(selected.config.devices.samplerate(), 48000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
+        assert_eq!(selected.config.devices.chunksize(), 1024);
+        assert_eq!(
+            selected.config.devices.resampler,
+            Some(config::Resampler::Synchronous)
+        );
+    }
+
+    #[test]
+    fn adapt_runs_an_alternate_rate_natively() {
+        let extra = "  resampler:\n    type: Synchronous\n";
+        let conf = with_alternates(base_config(48000, 2, extra), &[44100, 96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(96000, None)),
+            None,
+        ));
         assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
         assert_eq!(selected.config.devices.chunksize(), 2048);
+        assert_eq!(selected.config.devices.resampler, None);
+    }
+
+    #[test]
+    fn an_alternate_rate_keeps_the_resampler_for_rate_adjust() {
+        let extra = "  resampler:\n    type: Slip\n  enable_rate_adjust: true\n";
+        let conf = with_alternates(base_config(48000, 2, extra), &[96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(96000, None)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 96000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
+        assert_eq!(
+            selected.config.devices.resampler,
+            Some(config::Resampler::Slip)
+        );
+    }
+
+    #[test]
+    fn a_rate_that_is_not_native_gets_a_resampler_that_converts() {
+        // Slip can't convert, so rate adjust gets an AsyncSinc.
+        let extra = "  resampler:\n    type: Slip\n  enable_rate_adjust: true\n";
+        let conf = with_alternates(base_config(48000, 2, extra), &[96000]);
+        let selected = run(select_config(
+            &entry(conf),
+            Some(&format(44100, None)),
+            None,
+        ));
+        assert_eq!(selected.config.devices.samplerate(), 48000);
+        assert_eq!(selected.config.devices.capture_samplerate(), 44100);
+        assert!(matches!(
+            selected.config.devices.resampler,
+            Some(config::Resampler::AsyncSinc(_))
+        ));
+    }
+
+    #[test]
+    fn alternate_rates_parse_and_may_be_empty() {
+        let parsed = |extra: &str| {
+            let yaml = format!(
+                "samplerate: 48000\n{extra}chunksize: 1024\ncapture: {{type: Stdin, channels: 2, format: S16_LE}}\nplayback: {{type: Stdout, channels: 2, format: S16_LE}}\n"
+            );
+            yaml_serde::from_str::<config::Devices>(&yaml)
+        };
+        assert!(parsed("").unwrap().alternate_samplerates().is_empty());
+        assert!(
+            parsed("alternate_samplerates: []\n")
+                .unwrap()
+                .alternate_samplerates()
+                .is_empty()
+        );
+        let listed = parsed("alternate_samplerates: [48000, 96000]\n").unwrap();
+        assert_eq!(listed.alternate_samplerates().len(), 2);
+        assert!(parsed("alternate_samplerates: [0]\n").is_err());
     }
 
     #[test]
@@ -559,7 +639,7 @@ mod tests {
             Some(&format(44097, None)),
             None,
         ));
-        assert_eq!(selected.config.devices.samplerate(), 44100);
+        assert_eq!(selected.config.devices.capture_samplerate(), 44100);
         assert_eq!(selected.format.unwrap().samplerate, Some(44100));
     }
 
@@ -584,20 +664,22 @@ pipeline:
 ",
             dir.to_string_lossy()
         );
-        let selected = run(select_config(
-            &entry(base_config(48000, 2, &extra)),
-            Some(&format(96000, None)),
-            None,
-        ));
-        let filters = selected.config.filters.unwrap();
-        let config::Filter::Conv {
-            parameters: config::ConvParameters::Raw(params),
-            ..
-        } = &filters["fir"]
-        else {
-            panic!("not a raw conv");
+        let filename = |rate| {
+            let conf = with_alternates(base_config(48000, 2, &extra), &[96000]);
+            let selected = run(select_config(&entry(conf), Some(&format(rate, None)), None));
+            let filters = selected.config.filters.unwrap();
+            let config::Filter::Conv {
+                parameters: config::ConvParameters::Raw(params),
+                ..
+            } = &filters["fir"]
+            else {
+                panic!("not a raw conv");
+            };
+            params.filename.clone()
         };
-        assert!(params.filename.ends_with("filter_96000.txt"));
+        assert!(filename(96000).ends_with("filter_96000.txt"));
+        // A resampled source runs at samplerate, and gets the filter for it.
+        assert!(filename(44100).ends_with("filter_48000.txt"));
     }
 
     #[test]
@@ -652,7 +734,7 @@ pipeline:
             Some(AdaptCheck {
                 file: None,
                 samplerate: Some(44100),
-                samplerates: None,
+                alternate_samplerates: Vec::new(),
                 channels: Some(2),
                 format: Some("S32_LE".to_string()),
                 problem: None,
@@ -665,88 +747,6 @@ pipeline:
 
         let off = check_files(&ControllerSettings::default(), Some(&e));
         assert_eq!(off.adapt, None);
-    }
-
-    fn with_rate_list(mut conf: Configuration, rates: &[usize]) -> Configuration {
-        conf.devices.samplerate = config::SampleRates::List(
-            rates
-                .iter()
-                .map(|r| NonZeroUsize::new(*r).unwrap())
-                .collect(),
-        );
-        conf
-    }
-
-    #[test]
-    fn a_listed_rate_runs_natively() {
-        let extra = "  resampler:\n    type: Synchronous\n";
-        let conf = with_rate_list(base_config(48000, 2, extra), &[48000, 44100, 96000]);
-        let selected = run(select_config(
-            &entry(conf),
-            Some(&format(96000, None)),
-            None,
-        ));
-        assert_eq!(selected.config.devices.samplerate(), 96000);
-        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
-        assert_eq!(selected.config.devices.chunksize(), 2048);
-        assert_eq!(selected.config.devices.resampler, None);
-    }
-
-    #[test]
-    fn a_listed_rate_keeps_the_resampler_for_rate_adjust() {
-        let extra = "  resampler:\n    type: Slip\n  enable_rate_adjust: true\n";
-        let conf = with_rate_list(base_config(48000, 2, extra), &[48000, 96000]);
-        let selected = run(select_config(
-            &entry(conf),
-            Some(&format(96000, None)),
-            None,
-        ));
-        assert_eq!(selected.config.devices.samplerate(), 96000);
-        assert_eq!(selected.config.devices.capture_samplerate(), 96000);
-        assert_eq!(
-            selected.config.devices.resampler,
-            Some(config::Resampler::Slip)
-        );
-    }
-
-    #[test]
-    fn an_unlisted_rate_is_resampled_to_the_first() {
-        let conf = with_rate_list(base_config(48000, 2, ""), &[48000, 96000]);
-        let selected = run(select_config(
-            &entry(conf),
-            Some(&format(44100, None)),
-            None,
-        ));
-        assert_eq!(selected.config.devices.samplerate(), 48000);
-        assert_eq!(selected.config.devices.capture_samplerate(), 44100);
-        assert_eq!(selected.config.devices.chunksize(), 1024);
-        assert_eq!(
-            selected.config.devices.resampler,
-            Some(config::Resampler::Synchronous)
-        );
-    }
-
-    #[test]
-    fn a_rate_list_starts_at_the_first_rate() {
-        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
-        let selected = run(select_config(&entry(conf), None, None));
-        assert_eq!(selected.config.devices.samplerate(), 96000);
-        assert_eq!(selected.config.devices.resampler, None);
-    }
-
-    #[test]
-    fn a_rate_list_parses_and_rejects_an_empty_one() {
-        let parsed = |rates: &str| {
-            let yaml = format!(
-                "samplerate: {rates}\nchunksize: 1024\ncapture: {{type: Stdin, channels: 2, format: S16_LE}}\nplayback: {{type: Stdout, channels: 2, format: S16_LE}}\n"
-            );
-            yaml_serde::from_str::<config::Devices>(&yaml)
-        };
-        assert_eq!(parsed("44100").unwrap().samplerate(), 44100);
-        let list = parsed("[96000, 44100]").unwrap();
-        assert_eq!(list.samplerate(), 96000);
-        assert_eq!(list.samplerate_list().unwrap().len(), 2);
-        assert!(parsed("[]").is_err());
     }
 
     const DELAY_IN_SAMPLES: &str = "filters:
@@ -769,22 +769,19 @@ pipeline:
 
     #[test]
     fn adapt_refuses_to_change_the_rate_of_rate_dependent_settings() {
-        let conf = base_config(48000, 2, DELAY_IN_SAMPLES);
+        // An alternate rate runs natively, at another rate.
+        let conf = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[96000]);
         assert!(!adapt_runs(conf.clone(), 96000));
         // At its own rate nothing changes.
         assert!(adapt_runs(conf, 48000));
-        // A listed rate other than the first runs natively, at another rate.
-        let listed = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000, 96000]);
-        assert!(!adapt_runs(listed, 96000));
     }
 
     #[test]
     fn rate_dependent_settings_run_when_the_source_is_resampled() {
-        let extra = format!("  resampler:\n    type: Synchronous\n{DELAY_IN_SAMPLES}");
-        assert!(adapt_runs(base_config(48000, 2, &extra), 96000));
-        let single = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
-        assert!(adapt_runs(single, 96000));
-        let listed = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000, 96000]);
+        assert!(adapt_runs(base_config(48000, 2, DELAY_IN_SAMPLES), 96000));
+        let own = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
+        assert!(adapt_runs(own, 96000));
+        let listed = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[96000]);
         assert!(adapt_runs(listed, 44100));
     }
 
@@ -796,24 +793,25 @@ pipeline:
                 .unwrap()
                 .problem
         };
-        let reported = problem(base_config(48000, 2, DELAY_IN_SAMPLES)).unwrap();
+        let listed = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[96000]);
+        let reported = problem(listed).unwrap();
         assert!(
             reported.contains("filter 'delay': delay in samples"),
             "{reported}"
         );
-        let extra = format!("  resampler:\n    type: Synchronous\n{DELAY_IN_SAMPLES}");
-        assert_eq!(problem(base_config(48000, 2, &extra)), None);
-        let single = with_rate_list(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
-        assert_eq!(problem(single), None);
+        // Every other rate is resampled.
+        assert_eq!(problem(base_config(48000, 2, DELAY_IN_SAMPLES)), None);
+        let own = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[48000]);
+        assert_eq!(problem(own), None);
     }
 
     #[test]
-    fn check_files_lists_the_native_rates() {
-        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
+    fn check_files_lists_the_alternate_rates() {
+        let conf = with_alternates(base_config(48000, 2, ""), &[96000, 44100]);
         let checks = check_files(&following(), Some(&entry(conf)));
         let adapt = checks.adapt.unwrap();
-        assert_eq!(adapt.samplerate, Some(96000));
-        assert_eq!(adapt.samplerates, Some(vec![96000, 48000]));
+        assert_eq!(adapt.samplerate, Some(48000));
+        assert_eq!(adapt.alternate_samplerates, vec![96000, 44100]);
         assert_eq!(adapt.problem, None);
     }
 }

@@ -1208,7 +1208,7 @@ Fields:
 
 - `file` (`string` or `null`, optional): Path of the entry config file, `null` for a config that was sent over the websocket.
 - `samplerate` (non-negative `integer` or `null`, optional): Capture sample rate, `null` when no config is loaded.
-- `samplerates` (array of non-negative `integer` or `null`, optional): The rates that run natively, when `samplerate` is a list, with the preferred one first. Other rates are resampled to the first one. `null` for a single `samplerate`, and then every rate runs natively.
+- `alternate_samplerates` (array of non-negative `integer`): The `alternate_samplerates` of the config, the rates besides its `samplerate` that run natively. A source at any other rate is resampled to `samplerate`.
 - `channels` (non-negative `integer` or `null`, optional): Capture channels, `null` when no config is loaded.
 - `format` (`string` or `null`, optional): Capture sample format, `null` when it is automatic or no config is loaded.
 - `problem` (`string` or `null`, optional): What is wrong with the config, `null` if it is usable. Also lists the settings that are only right at the config's own rate, when Adapt would change its samplerate.

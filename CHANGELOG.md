@@ -4,9 +4,9 @@ New features:
   source by adapting the loaded config to the new rate, and it retries after device errors.
   Set it up with `--follow_capture` and `--error_recovery`, in the `controller` section of the
   statefile, or over the websocket.
-- `samplerate` can be a list of the rates the hardware runs natively. Following with Adapt runs
-  a listed rate natively and resamples other rates to the first one, which is also the rate used
-  without Adapt.
+- `alternate_samplerates` lists more rates the hardware runs natively, besides `samplerate`.
+  Following runs a source at one of them natively, and resamples a source at any other rate
+  to `samplerate`. Without the list, every source is resampled to `samplerate`.
 - Following with Adapt refuses to change the `samplerate` of a config with settings that are only
   right at its own rate, such as delays in samples or `Free` biquads.
 - The built-in controller follows configs loaded from files. A config sent with `SetConfig` or
