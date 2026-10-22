@@ -17,13 +17,13 @@
 //! Built-in controller: source format following and error recovery.
 //!
 //! This module holds the settings and the config selection, which are plain functions
-//! of the entry config, the reported source format and the settings. The state machine
+//! of the startup config, the reported source format and the settings. The state machine
 //! that runs sessions and decides what happens when one ends is in `engine.rs`.
 //!
 //! A config comes from one of two sources. From the files source, the controller loads the
-//! entry config, the startup config file, through a provider. Single runs it as is. When the
+//! startup config file through a provider. Single runs it as is. When the
 //! capture source changes format, following runs the config through the Adapt provider,
-//! which adapts the entry config to the new format. A config from the websocket source runs
+//! which adapts the startup config to the new format. A config from the websocket source runs
 //! exactly as sent.
 
 use parking_lot::Mutex;
@@ -67,7 +67,7 @@ pub struct ConfigSource {
 /// What a loaded config is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadKind {
-    /// A new entry config, which switches to the files source.
+    /// A new startup config, which switches to the files source.
     Entry,
     /// A config sent or patched over the websocket. It switches to the websocket source,
     /// where it runs exactly as sent, until an entry is loaded from a file. The entry stays
@@ -141,7 +141,7 @@ impl LoadedConfig {
 /// Which provider supplied a config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Provider {
-    /// The entry config as is.
+    /// The startup config as is.
     Single,
     /// The Adapt provider.
     Adapt,
@@ -162,7 +162,7 @@ pub struct Selected {
 pub enum Selection {
     /// A config to run.
     Run(Box<Selected>),
-    /// The entry config doesn't validate.
+    /// The startup config doesn't validate.
     Invalid(String),
     /// Following found no config for this format.
     NoConfig(SourceFormat),
@@ -194,7 +194,7 @@ pub struct ControllerShared {
     /// The settings, `None` when the statefile has no controller section.
     pub settings: Arc<Mutex<Option<ControllerSettings>>>,
     pub status: Arc<Mutex<ControllerStatus>>,
-    /// The entry config, for `CheckControllerFiles`.
+    /// The startup config, for `CheckControllerFiles`.
     pub entry: Arc<Mutex<Option<ConfigSource>>>,
     /// Whether the process runs in wait mode, without which the controller does nothing.
     pub wait: bool,
@@ -236,7 +236,7 @@ fn capture_rate_of(conf: &Configuration) -> usize {
     }
 }
 
-/// The Adapt provider: change the rate of the entry config to the reported one.
+/// The Adapt provider: change the rate of the startup config to the reported one.
 fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selected>> {
     let Some(rate) = format.known_rate() else {
         info!("Adapt: the source rate is unknown");
@@ -247,7 +247,7 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
         && channels != entry_channels
     {
         info!(
-            "Adapt: the source has {channels} channels, the entry config captures {entry_channels}"
+            "Adapt: the source has {channels} channels, the startup config captures {entry_channels}"
         );
         return None;
     }
@@ -263,7 +263,7 @@ fn adapt_config(entry: &ConfigSource, format: &SourceFormat) -> Option<Box<Selec
         match config::validate_config_at_rate(&mut conf, entry.filename.as_deref(), Some(rate)) {
             Ok(impulses) => impulses,
             Err(err) => {
-                error!("Adapt: the entry config adapted to {format} is not valid: {err}");
+                error!("Adapt: the startup config adapted to {format} is not valid: {err}");
                 return None;
             }
         };
@@ -298,7 +298,7 @@ fn rate_change_problem(raw: &Configuration) -> Option<String> {
     ))
 }
 
-/// Select the config to run, for an entry config and the last known source format.
+/// Select the config to run, for a startup config and the last known source format.
 ///
 /// `format` is `None` when following is off or no format is known, and then the entry
 /// runs as is. `validated` is the entry already validated as is, reused if given.
@@ -342,7 +342,7 @@ pub fn select_websocket(loaded: LoadedConfig) -> Box<Selected> {
     })
 }
 
-/// Check the entry config Adapt starts from, whether following is on or not, see
+/// Check the startup config Adapt starts from, whether following is on or not, see
 /// [`ControllerFileChecks`].
 pub fn check_files(entry: Option<&ConfigSource>) -> ControllerFileChecks {
     ControllerFileChecks {
@@ -350,7 +350,7 @@ pub fn check_files(entry: Option<&ConfigSource>) -> ControllerFileChecks {
     }
 }
 
-/// Check the entry config that Adapt starts from, and read the format it is written for.
+/// Check the startup config that Adapt starts from, and read the format it is written for.
 ///
 /// The format is read after validation, so that it includes the command line overrides.
 fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {

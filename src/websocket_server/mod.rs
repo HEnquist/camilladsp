@@ -1444,7 +1444,7 @@ fn handle_command(
                     source: status.source,
                     provider: status.provider,
                     config_file: status.config_file,
-                    entry_config_file: shared_data_inst.active_config_path.lock().clone(),
+                    startup_config_file: shared_data_inst.active_config_path.lock().clone(),
                     recovering: status.recovering,
                     attempts: status.attempts,
                     next_retry_s: status
@@ -1671,7 +1671,9 @@ fn handle_command(
             } else {
                 return Some(WsReply::SetConfigValue {
                     result: WsResult::InvalidRequestError {
-                        message: "The running config does not contain the path '{}'".to_string(),
+                        message: format!(
+                            "The running config does not contain the path '{pointer}'"
+                        ),
                     },
                 });
             }

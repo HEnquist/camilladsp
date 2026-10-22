@@ -86,7 +86,7 @@ def with_delay_in_samples(config):
 
 
 def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
-    """Adapt changes the entry config to every rate the device is switched to."""
+    """Adapt changes the startup config to every rate the device is switched to."""
     feeder()
     entry = ca_config(devices=NATIVE)
     cdsp = start_cdsp(config=entry, extra_args=FOLLOW)

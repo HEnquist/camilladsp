@@ -792,11 +792,11 @@ A change takes effect at the next session start, so send a `Reload` to apply it 
 
 ### Following the capture format
 The config file that is loaded explicitly, from the command line, the statefile,
-`SetConfigFilePath` plus `Reload` and so on, is the _entry config_.
-A config sent over the websocket is not an entry config, see
+`SetConfigFilePath` plus `Reload` and so on, is the _startup config_.
+A config sent over the websocket is not a startup config, see
 [Config sources and providers](#config-sources-and-providers).
 When the capture device reports that the source changed format, the controller _adapts_ the
-entry config to the new format, and runs the result.
+startup config to the new format, and runs the result.
 When the config sets the capture sample format explicitly, it is changed to the reported one.
 
 The rate is adapted in one of two ways:
@@ -835,7 +835,7 @@ A single config covers the usual per-rate needs:
 `$samplerate$` tokens in filter file names load the right FIR filters for the rate the pipeline runs at.
 Each of the `alternate_samplerates` then needs its own file.
 The same goes for a filter, mixer or processor named with `$samplerate$`, see [Tokens in names](#tokens-in-names).
-When the entry config is loaded with following on, a variant that is missing for one of the
+When the startup config is loaded with following on, a variant that is missing for one of the
 `alternate_samplerates` is logged as a warning, since a source at that rate would get no config.
 Only the existence of the files is checked, not their contents.
 
@@ -844,7 +844,7 @@ with it.
 A source that changes its channel count can't be followed.
 This is the case with ADAT S/MUX, where an interface has fewer channels at the higher rates,
 or with a player that switches between stereo and 5.1 on a loopback.
-The controller then waits until the source is back at the channel count of the entry config.
+The controller then waits until the source is back at the channel count of the startup config.
 
 Some settings are only right at the rate the config is written for.
 When Adapt changes `samplerate`, they would run at the wrong frequencies.
@@ -867,17 +867,17 @@ Every other rate is then resampled to `samplerate`, and Adapt works with any con
 The refusal is logged with the settings it found, and the controller then waits for the source.
 `CheckControllerFiles` reports the settings as the problem of the `adapt` section, before any rate change happens.
 
-Adapting always starts from the entry config, so switching back and forth doesn't drift.
+Adapting always starts from the startup config, so switching back and forth doesn't drift.
 A rate measured by the backend, like 44097, is snapped to the nearest standard rate.
 
-The websocket command `CheckControllerFiles` checks the entry config before any format change.
+The websocket command `CheckControllerFiles` checks the startup config before any format change.
 It checks it whether following is on or not, so a config can be checked before following is turned on.
-It gives the entry config, the format it is written for, its `alternate_samplerates`,
+It gives the startup config, the format it is written for, its `alternate_samplerates`,
 and its problem, if any.
 The `warnings` list the variants that are missing for one of the `alternate_samplerates`.
 The config still runs at the other rates, so these are not a problem of the config as such.
 
-If the entry config can't be adapted to the new format, the controller waits for the source to change.
+If the startup config can't be adapted to the new format, the controller waits for the source to change.
 It asks the backend what the source is doing once per second, and starts the adapted config
 as soon as the source is at a format it can be adapted to.
 Any command, for example a new config or `Stop`, ends the wait.
@@ -886,8 +886,8 @@ While following is on, the controller decides what happens when the source chang
 so `stop_on_rate_change` is always on.
 
 `GetConfig` returns the config that runs, which may be the adapted config.
-`GetConfigFilePath` and the statefile keep the path of the entry config,
-so a restart or `Reload` starts from the entry config and selects again.
+`GetConfigFilePath` and the statefile keep the path of the startup config,
+so a restart or `Reload` starts from the startup config and selects again.
 `PatchConfig` and `SetConfigValue` patch the config that runs, and stop following it,
 see [Config sources and providers](#config-sources-and-providers).
 
@@ -906,14 +906,14 @@ The backends report format changes differently:
 The controller supervises every session, whatever config runs: it retries after errors,
 goes idle, or exits.
 Which config runs depends on where it comes from, the _source_:
-- The _files_ source: the controller loads the entry config file, through a _provider_.
+- The _files_ source: the controller loads the startup config file, through a _provider_.
 - The _websocket_ source: a config sent with `SetConfig` or `SetConfigJson`,
   or patched with `PatchConfig` or `SetConfigValue`, runs exactly as it is.
 
 The files source has two providers:
-- __Single__ runs the entry config as is.
+- __Single__ runs the startup config as is.
   It is used while following is off, and while following is on but the source format is not known.
-- __Adapt__ adapts the entry config to the source format,
+- __Adapt__ adapts the startup config to the source format,
   see [Following the capture format](#following-the-capture-format).
 
 The websocket source is meant for a config that a client wants to run as it is,
@@ -928,7 +928,7 @@ Following only exists for the files source, so a config from the websocket sourc
   When the sent config doesn't change the devices, they keep running as they were opened,
   with `stop_on_rate_change` on, until they restart.
 - Error recovery works the same as for the files source, since it restarts the same config.
-- The entry config, `GetConfigFilePath` and the statefile are not changed.
+- The startup config, `GetConfigFilePath` and the statefile are not changed.
 
 `PatchConfig` and `SetConfigValue` patch the config that runs, the one `GetConfig` returns.
 A patched config is then the client's, like a sent one, and runs from the websocket source.
@@ -940,7 +940,7 @@ stops following until the next `Reload`.
 A config loaded from a file switches back to the files source: `Reload`,
 `SetConfigFilePath` followed by `Reload`, `SIGHUP`, or a restart of the process,
 since the websocket source is not saved in the statefile.
-The controller then starts from the entry config file, and follows again if following is enabled.
+The controller then starts from the startup config file, and follows again if following is enabled.
 `SetControllerSettings` doesn't switch back by itself, the `Reload` after it does.
 A config that doesn't validate changes nothing, and the source stays as it was.
 
@@ -948,7 +948,7 @@ A config that doesn't validate changes nothing, and the source stays as it was.
 It stays until the next switch, also while nothing runs,
 so a client can see that a stopped session ran a config from the websocket.
 For the files source, `provider` gives the provider of the running config, and `config_file` the
-entry config file that runs.
+startup config file that runs.
 Both are `null` for the websocket source, and while nothing runs.
 `following` is `false` for the websocket source.
 

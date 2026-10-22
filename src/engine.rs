@@ -137,7 +137,7 @@ enum Next {
 
 /// A loaded config waiting for selection.
 enum Pending {
-    /// The entry config changed, or the format did. `validated` is the entry as is,
+    /// The startup config changed, or the format did. `validated` is the entry as is,
     /// already validated, and `query` asks the source for its format first.
     Entry {
         validated: Option<Box<(config::Configuration, ImpulseCache)>>,
@@ -455,9 +455,9 @@ impl Controller {
     /// Record a config as the one running, for the websocket getters.
     fn publish_running(&self, selected: &Selected) {
         match &selected.provider {
-            Provider::Single => debug!("Running the entry config"),
+            Provider::Single => debug!("Running the startup config"),
             Provider::Adapt => info!(
-                "Following: running the entry config adapted to {}",
+                "Following: running the startup config adapted to {}",
                 selected
                     .format
                     .as_ref()
@@ -603,7 +603,7 @@ impl Controller {
                     }
                 }
                 SourceState::Inactive => {
-                    info!("Following: the capture source is inactive, starting the entry config");
+                    info!("Following: the capture source is inactive, starting the startup config");
                     match controller::select_config(&entry, None, None) {
                         Selection::Run(selected) => break Next::Start(selected),
                         Selection::Invalid(err) => {

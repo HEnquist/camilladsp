@@ -39,7 +39,7 @@ def test_get_config_json_returns_the_same_config(cdsp):
 
 
 def test_set_config_applies_immediately(cdsp):
-    """A config uploaded as YAML should become the active one."""
+    """A config uploaded as YAML should become the running one."""
     cdsp.send("SetConfig", titled("from yaml"))
     cdsp.poll_until("GetConfigTitle", "from yaml")
     assert cdsp.send("GetState") == "Running"
@@ -66,6 +66,13 @@ def test_set_config_value_by_pointer(cdsp):
     cdsp.send("SetConfigValue", "set by pointer", pointer="/description")
     cdsp.poll_until("GetConfigDescription", "set by pointer")
     assert cdsp.send("GetConfigValue", "/description") == "set by pointer"
+
+
+def test_set_config_value_names_a_missing_pointer(cdsp):
+    """A pointer to nothing is refused, with the pointer in the message."""
+    reply = cdsp.send_raw("SetConfigValue", 1, pointer="/no/such/path")
+    assert reply["result"] == "InvalidRequestError"
+    assert "'/no/such/path'" in reply["message"]
 
 
 def test_get_config_value_reads_nested_fields(cdsp):

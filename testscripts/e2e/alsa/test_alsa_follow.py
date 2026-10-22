@@ -206,7 +206,7 @@ def test_a_restart_reads_the_rate_of_a_player_that_kept_playing(
 
 def test_the_open_time_check_follows_a_player_that_has_not_started(start_cdsp, alsa_config):
     """A player that has set up its stream but not started holds the cable to its
-    format, while the source reports inactive. So the entry config opens at its own
+    format, while the source reports inactive. So the startup config opens at its own
     rate, and the open has to see that the device only offers the player's."""
     player = subprocess.Popen(
         ["aplay", "-q", "-D", FEED, "-t", "raw", "-f", "S16_LE", "-r", "44100", "-c", "2"],
@@ -275,8 +275,8 @@ def test_a_channel_change_waits_for_the_source(
     assert status(cdsp)["waiting_for_source"] is None
 
 
-def test_the_entry_config_starts_when_the_source_stops(start_cdsp, alsa_config, feeder):
-    """Rule 22: an inactive source while waiting starts the entry config, and the
+def test_the_startup_config_starts_when_the_source_stops(start_cdsp, alsa_config, feeder):
+    """Rule 22: an inactive source while waiting starts the startup config, and the
     capture stays open for the next player."""
     first = feeder()
     cdsp = start_cdsp(config=alsa_config(capture_format=None, devices=NATIVE), extra_args=FOLLOW)

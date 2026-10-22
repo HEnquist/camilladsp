@@ -8,7 +8,7 @@ controller plan). While following, the capture stops for a source at another rat
 channel count, like a loopback capture the kernel stops, so this runs the whole following
 loop on any machine.
 
-The entry config is 2 channels at 48 kHz, and Adapt doesn't change the channel count, so
+The startup config is 2 channels at 48 kHz, and Adapt doesn't change the channel count, so
 a source at 4 channels has no config and the controller waits.
 """
 
@@ -121,7 +121,7 @@ def test_a_rate_that_is_not_native_is_resampled(source_cdsp, source):
     assert config_value(cdsp, "/devices/resampler") == {"type": "Synchronous"}
 
 
-def test_an_inactive_source_runs_the_entry_config(source_cdsp, source):
+def test_an_inactive_source_runs_the_startup_config(source_cdsp, source):
     """Nothing plays at startup, so the entry runs as is from Single, and captures
     silence."""
     cdsp = source_cdsp()
@@ -153,7 +153,7 @@ def test_a_supported_format_ends_the_wait(source_cdsp, source):
     assert cdsp.send("GetControllerStatus")["waiting_for_source"] is None
 
 
-def test_an_inactive_source_ends_the_wait_with_the_entry_config(source_cdsp, source):
+def test_an_inactive_source_ends_the_wait_with_the_startup_config(source_cdsp, source):
     """The capture is then open and ready for the next player."""
     cdsp = start_waiting(source_cdsp, source)
     source.stop_playing()
@@ -223,7 +223,7 @@ def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source):
     send_config(cdsp, cdsp.config_path, "sent")
     state = cdsp.send("GetControllerStatus")
     assert (state["source"], state["following"]) == ("Websocket", False)
-    assert state["entry_config_file"] == cdsp.config_path
+    assert state["startup_config_file"] == cdsp.config_path
     assert (state["provider"], state["config_file"]) == (None, None)
 
     source.play(96000)

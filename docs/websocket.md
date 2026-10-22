@@ -744,7 +744,7 @@ from device errors. Its settings are the `controller` section of the statefile,
 and both features only work in wait mode.
 
 The config comes from one of two sources. From the files source, the controller
-loads the entry config file through a provider: `Single` runs it as is, and `Adapt`
+loads the startup config file through a provider: `Single` runs it as is, and `Adapt`
 adapts it to the source format.
 A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
 or `SetConfigValue`, switches to the websocket source. It then runs exactly as
@@ -781,7 +781,7 @@ Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller st
 
 #### `CheckControllerFiles`
 
-Check the entry config that Adapt starts from, whether following is on or not.
+Check the startup config that Adapt starts from, whether following is on or not.
 Loads the config and its coefficient files, so it is meant to be run on demand
 rather than polled.
 
@@ -1085,7 +1085,7 @@ The `controller` section of the statefile.
 
 Fields:
 
-- `follow_capture` (`boolean` or `null`, optional): Follow the capture source format, adapting the entry config to it.
+- `follow_capture` (`boolean` or `null`, optional): Follow the capture source format, adapting the startup config to it.
 - `error_recovery` (`boolean` or `null`, optional): Retry after a device error.
 
 ### `ControllerStatusReport`
@@ -1096,8 +1096,8 @@ Fields:
 
 - `source` ([`ControllerSource`](#controllersource)): Where the config comes from. It stays until the next switch, also while nothing runs.
 - `provider` ([`ConfigProvider`](#configprovider) or `null`, optional): The provider of the running config. `null` for the websocket source, and while nothing runs.
-- `config_file` (`string` or `null`, optional): The entry config file that runs, `null` when `provider` is.
-- `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives, and the one `Reload` loads.
+- `config_file` (`string` or `null`, optional): The startup config file that runs, `null` when `provider` is.
+- `startup_config_file` (`string` or `null`, optional): The startup config file, the one `GetConfigFilePath` gives, and the one `Reload` loads.
 - `recovering` (`boolean`): Waiting to retry after a device error.
 - `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
 - `next_retry_s` (`number` or `null`, optional): Seconds until the next retry, while waiting for one.
@@ -1112,7 +1112,7 @@ Value of the `CheckControllerFiles` reply.
 
 Fields:
 
-- `adapt` ([`AdaptCheck`](#adaptcheck)): The entry config Adapt starts from. It is checked whether following is on or not, so that it can be checked before following is turned on.
+- `adapt` ([`AdaptCheck`](#adaptcheck)): The startup config Adapt starts from. It is checked whether following is on or not, so that it can be checked before following is turned on.
 
 ### `AudioDeviceDescriptor`
 
@@ -1186,7 +1186,7 @@ One of `"playback"`, `"capture"`.
 
 Where the config the controller runs comes from.
 
-- `Files`: the controller loads it from the entry config file, through a provider.
+- `Files`: the controller loads it from the startup config file, through a provider.
 - `Websocket`: it was sent over the websocket, and runs exactly as sent.
 
 One of `"Files"`, `"Websocket"`.
@@ -1195,20 +1195,20 @@ One of `"Files"`, `"Websocket"`.
 
 The provider that supplied a config of the files source.
 
-- `Single`: the entry config file as is.
-- `Adapt`: the entry config file adapted to the source format.
+- `Single`: the startup config file as is.
+- `Adapt`: the startup config file adapted to the source format.
 
 One of `"Single"`, `"Adapt"`.
 
 ### `AdaptCheck`
 
-The entry config that the Adapt provider starts from, and what is wrong with it, if
+The startup config that the Adapt provider starts from, and what is wrong with it, if
 anything. The format is the one the config is written for, after the command line
 overrides. Adapt changes the rate and the sample format, but not the channel count.
 
 Fields:
 
-- `file` (`string` or `null`, optional): Path of the entry config file, `null` for a config that was sent over the websocket.
+- `file` (`string` or `null`, optional): Path of the startup config file, `null` for a config that was sent over the websocket.
 - `samplerate` (non-negative `integer` or `null`, optional): Capture sample rate, `null` when no config is loaded.
 - `alternate_samplerates` (array of non-negative `integer`): The `alternate_samplerates` of the config, the rates besides its `samplerate` that run natively. A source at any other rate is resampled to `samplerate`.
 - `channels` (non-negative `integer` or `null`, optional): Capture channels, `null` when no config is loaded.

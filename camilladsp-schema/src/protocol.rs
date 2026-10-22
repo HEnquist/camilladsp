@@ -258,7 +258,7 @@ pub struct SpectrumData {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerSettings {
-    /// Follow the capture source format, adapting the entry config to it.
+    /// Follow the capture source format, adapting the startup config to it.
     #[serde(default)]
     pub follow_capture: Option<bool>,
     /// Retry after a device error.
@@ -283,13 +283,13 @@ impl ControllerSettings {
     }
 }
 
-/// The entry config that the Adapt provider starts from, and what is wrong with it, if
+/// The startup config that the Adapt provider starts from, and what is wrong with it, if
 /// anything. The format is the one the config is written for, after the command line
 /// overrides. Adapt changes the rate and the sample format, but not the channel count.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AdaptCheck {
-    /// Path of the entry config file, `null` for a config that was sent over the websocket.
+    /// Path of the startup config file, `null` for a config that was sent over the websocket.
     pub file: Option<String>,
     /// Capture sample rate, `null` when no config is loaded.
     pub samplerate: Option<usize>,
@@ -313,14 +313,14 @@ pub struct AdaptCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerFileChecks {
-    /// The entry config Adapt starts from. It is checked whether following is on or not, so
+    /// The startup config Adapt starts from. It is checked whether following is on or not, so
     /// that it can be checked before following is turned on.
     pub adapt: AdaptCheck,
 }
 
 /// Where the config the controller runs comes from.
 ///
-/// - `Files`: the controller loads it from the entry config file, through a provider.
+/// - `Files`: the controller loads it from the startup config file, through a provider.
 /// - `Websocket`: it was sent over the websocket, and runs exactly as sent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -332,8 +332,8 @@ pub enum ControllerSource {
 
 /// The provider that supplied a config of the files source.
 ///
-/// - `Single`: the entry config file as is.
-/// - `Adapt`: the entry config file adapted to the source format.
+/// - `Single`: the startup config file as is.
+/// - `Adapt`: the startup config file adapted to the source format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ConfigProvider {
@@ -350,11 +350,11 @@ pub struct ControllerStatusReport {
     /// The provider of the running config. `null` for the websocket source, and while
     /// nothing runs.
     pub provider: Option<ConfigProvider>,
-    /// The entry config file that runs, `null` when `provider` is.
+    /// The startup config file that runs, `null` when `provider` is.
     pub config_file: Option<String>,
-    /// The entry config file, the one `GetConfigFilePath` gives, and the one `Reload`
+    /// The startup config file, the one `GetConfigFilePath` gives, and the one `Reload`
     /// loads.
-    pub entry_config_file: Option<String>,
+    pub startup_config_file: Option<String>,
     /// Waiting to retry after a device error.
     pub recovering: bool,
     /// Retries since the last session that ran long enough.
@@ -1172,7 +1172,7 @@ ws_protocol! {
     /// and both features only work in wait mode.
     ///
     /// The config comes from one of two sources. From the files source, the controller
-    /// loads the entry config file through a provider: `Single` runs it as is, and `Adapt`
+    /// loads the startup config file through a provider: `Single` runs it as is, and `Adapt`
     /// adapts it to the source format.
     /// A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
     /// or `SetConfigValue`, switches to the websocket source. It then runs exactly as
@@ -1205,7 +1205,7 @@ ws_protocol! {
             value: ControllerStatusReport,
         },
 
-        /// Check the entry config that Adapt starts from, whether following is on or not.
+        /// Check the startup config that Adapt starts from, whether following is on or not.
         /// Loads the config and its coefficient files, so it is meant to be run on demand
         /// rather than polled.
         CheckControllerFiles -> {
