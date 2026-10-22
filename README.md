@@ -832,6 +832,11 @@ Once the controller has a source rate to run at, the override is ignored, since 
 
 A single config covers the usual per-rate needs:
 `$samplerate$` tokens in filter file names load the right FIR filters for the rate the pipeline runs at.
+Each of the `alternate_samplerates` then needs its own file.
+The same goes for a filter, mixer or processor named with `$samplerate$`, see [Tokens in names](#tokens-in-names).
+When the entry config is loaded with following on, a variant that is missing for one of the
+`alternate_samplerates` is logged as a warning, since a source at that rate would get no config.
+Only the existence of the files is checked, not their contents.
 
 The channel count is not adapted, since the capture channels and the mixers would have to change
 with it.
@@ -868,6 +873,8 @@ The websocket command `CheckControllerFiles` checks the entry config before any 
 Its `adapt` section is `null` while following is off.
 It gives the entry config, the format it is written for, its `alternate_samplerates`,
 and its problem, if any.
+The `warnings` list the variants that are missing for one of the `alternate_samplerates`.
+The config still runs at the other rates, so these are not a problem of the config as such.
 
 If the entry config can't be adapted to the new format, the controller waits for the source to change.
 It asks the backend what the source is doing once per second, and starts the adapted config

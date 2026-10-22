@@ -6,7 +6,9 @@ New features:
   statefile, or over the websocket.
 - `alternate_samplerates` lists more rates the hardware runs natively, besides `samplerate`.
   Following runs a source at one of them natively, and resamples a source at any other rate
-  to `samplerate`. Without the list, every source is resampled to `samplerate`.
+  to `samplerate`. Without the list, every source is resampled to `samplerate`. A coefficient
+  file or a step named with `$samplerate$` that is missing for one of the rates is logged as a
+  warning when the config loads, and reported by `CheckControllerFiles`.
 - Following with Adapt refuses to change the `samplerate` of a config with settings that are only
   right at its own rate, such as delays in samples or `Free` biquads.
 - The built-in controller follows configs loaded from files. A config sent with `SetConfig` or

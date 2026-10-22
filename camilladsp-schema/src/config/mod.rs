@@ -1978,6 +1978,7 @@ pub use self::utils::deserialize_config;
 pub use self::utils::load_config;
 pub use self::utils::load_validate_config;
 pub use self::utils::max_channels;
+pub use self::utils::missing_rate_variants;
 pub use self::utils::parse_config;
 pub use self::utils::playback_channel_labels;
 pub use self::utils::rate_dependent_settings;

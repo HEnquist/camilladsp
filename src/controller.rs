@@ -365,6 +365,7 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
             channels: None,
             format: None,
             problem: Some("no config is loaded".to_string()),
+            warnings: Vec::new(),
         };
     };
     let mut conf = entry.raw.clone();
@@ -391,6 +392,15 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
         channels: Some(conf.devices.capture.channels()),
         format: conf.devices.capture.format_name(),
         problem,
+        warnings: config::missing_rate_variants(&entry.raw, entry.filename.as_deref()),
+    }
+}
+
+/// Log the per-rate variants the entry is missing for its alternate rates, as warnings, see
+/// [`config::missing_rate_variants`].
+pub fn log_missing_rate_variants(entry: &ConfigSource) {
+    for missing in config::missing_rate_variants(&entry.raw, entry.filename.as_deref()) {
+        warn!("Following: {missing}, a source at that rate gets no config");
     }
 }
 
@@ -738,6 +748,7 @@ pipeline:
                 channels: Some(2),
                 format: Some("S32_LE".to_string()),
                 problem: None,
+                warnings: Vec::new(),
             })
         );
 

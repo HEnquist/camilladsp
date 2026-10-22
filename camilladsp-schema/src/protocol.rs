@@ -303,6 +303,10 @@ pub struct AdaptCheck {
     /// What is wrong with the config, `null` if it is usable. Also lists the settings that
     /// are only right at the config's own rate, when Adapt would change its samplerate.
     pub problem: Option<String>,
+    /// The per-rate variants the config is missing for an alternate rate: a coefficient file
+    /// or a filter, mixer or processor named with `$samplerate$`. The config still runs at
+    /// the other rates, but a source at that rate gets no config.
+    pub warnings: Vec<String>,
 }
 
 /// Value of the `CheckControllerFiles` reply.

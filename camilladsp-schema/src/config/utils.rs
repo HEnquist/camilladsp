@@ -536,6 +536,91 @@ pub fn rate_dependent_settings(conf: &Configuration) -> Vec<String> {
     found
 }
 
+/// The per-rate variants the pipeline is missing for one of the `alternate_samplerates`,
+/// each as "filter 'name': no file for 96000 Hz, filter_96000.raw" or "no mixer 'mix_96000'
+/// for 96000 Hz". Following runs a source at an alternate rate natively, where the tokens
+/// expand to that rate, and a missing variant then stops the config from validating. This
+/// tells about it before the source changes rate.
+///
+/// A variant is a step name with `$samplerate$`, which has to name a filter, mixer or
+/// processor at each rate, and a Raw or Wav coefficient file with `$samplerate$` in its name.
+/// Only the existence is checked. Takes the config as written, before its tokens are
+/// expanded, and the file it was read from, which a relative coefficient path is resolved
+/// against as in validation.
+pub fn missing_rate_variants(conf: &Configuration, filename: Option<&str>) -> Vec<String> {
+    let config_dir = filename
+        .and_then(|f| PathBuf::from(f).canonicalize().ok())
+        .and_then(|f| f.parent().map(Path::to_path_buf));
+    let file_exists = |name: &str| {
+        let path = Path::new(name);
+        path.exists()
+            || (path.is_relative() && config_dir.as_ref().is_some_and(|d| d.join(path).exists()))
+    };
+    let channels = conf.devices.capture.channels();
+    let mut missing = Vec::new();
+    let mut add = |problem: String| {
+        // A filter used on several channels is listed once.
+        if !missing.contains(&problem) {
+            missing.push(problem);
+        }
+    };
+    let rates = conf.devices.alternate_samplerates().iter().map(|r| r.get());
+    for rate in rates.filter(|r| *r != conf.devices.samplerate()) {
+        let expand = |name: &str| replace_tokens(name, rate, channels);
+        // A name without the token is the same at every rate, and validation at the config's
+        // own rate already reports it if it is missing.
+        let has_token = |name: &str| name.contains("$samplerate$");
+        for step in conf.pipeline.iter().flatten() {
+            match step {
+                PipelineStep::Filter(step) if !step.is_bypassed() => {
+                    for name in &step.names {
+                        let expanded = expand(name);
+                        match conf.filters.as_ref().and_then(|f| f.get(&expanded)) {
+                            None if has_token(name) => {
+                                add(format!("no filter '{expanded}' for {rate} Hz"));
+                            }
+                            Some(Filter::Conv {
+                                parameters:
+                                    ConvParameters::Raw(ConvParametersRaw { filename, .. })
+                                    | ConvParameters::Wav(ConvParametersWav { filename, .. }),
+                                ..
+                            }) if has_token(filename) && !file_exists(&expand(filename)) => {
+                                add(format!(
+                                    "filter '{expanded}': no file for {rate} Hz, {}",
+                                    expand(filename)
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                PipelineStep::Mixer(step) if !step.is_bypassed() && has_token(&step.name) => {
+                    let expanded = expand(&step.name);
+                    if !conf
+                        .mixers
+                        .as_ref()
+                        .is_some_and(|m| m.contains_key(&expanded))
+                    {
+                        add(format!("no mixer '{expanded}' for {rate} Hz"));
+                    }
+                }
+                PipelineStep::Processor(step) if !step.is_bypassed() && has_token(&step.name) => {
+                    let expanded = expand(&step.name);
+                    if !conf
+                        .processors
+                        .as_ref()
+                        .is_some_and(|p| p.contains_key(&expanded))
+                    {
+                        add(format!("no processor '{expanded}' for {rate} Hz"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    missing
+}
+
 /// Adapt a configuration to a new capture sample rate, the way the `-r` override does.
 ///
 /// Without a resampler, `samplerate` is changed and `chunksize` scaled to keep the chunk
@@ -1449,9 +1534,9 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        adapt_to_capture_rate, check_all_finite, deserialize_config, max_channels, parse_config,
-        rate_dependent_settings, used_capture_channels, validate_config, validate_resampler,
-        validate_unused,
+        adapt_to_capture_rate, check_all_finite, deserialize_config, max_channels,
+        missing_rate_variants, parse_config, rate_dependent_settings, used_capture_channels,
+        validate_config, validate_resampler, validate_unused,
     };
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
     use crate::config::{IssueKind, Issues, format_path};
@@ -2080,6 +2165,45 @@ pipeline:
             with_filter(filter)
         );
         assert_eq!(rate_dependent(&twice), ["filter 'f': delay in samples"]);
+    }
+
+    #[test]
+    fn missing_variants_for_the_alternate_rates_are_found() {
+        let dir = std::env::temp_dir().join("cdsp_schema_rate_variants");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for rate in [44100, 96000] {
+            std::fs::write(dir.join(format!("fir_{rate}.txt")), "1.0\n").unwrap();
+        }
+        let yaml = format!(
+            "{BASE}  alternate_samplerates: [44100, 48000, 96000]
+mixers:
+  mix_44100: {{channels: {{in: 2, out: 2}}, mapping: []}}
+  mix_96000: {{channels: {{in: 2, out: 2}}, mapping: []}}
+filters:
+  fir:
+    type: Conv
+    parameters: {{type: Raw, format: TEXT, filename: fir_$samplerate$.txt}}
+pipeline:
+  - {{type: Mixer, name: mix_$samplerate$}}
+  - {{type: Filter, channels: [0, 1], names: [fir]}}
+  - {{type: Mixer, name: unused_$samplerate$, bypassed: true}}
+"
+        );
+        let conf_file = dir.join("conf.yml");
+        std::fs::write(&conf_file, &yaml).unwrap();
+        let conf = parse(&yaml).unwrap();
+        // The relative file name resolves against the config file, and 44100 is the
+        // config's own rate, which validation covers.
+        assert_eq!(
+            missing_rate_variants(&conf, Some(&conf_file.to_string_lossy())),
+            [
+                "no mixer 'mix_48000' for 48000 Hz",
+                "filter 'fir': no file for 48000 Hz, fir_48000.txt",
+            ]
+        );
+        let without = yaml.replace("  alternate_samplerates: [44100, 48000, 96000]\n", "");
+        assert!(missing_rate_variants(&parse(&without).unwrap(), None).is_empty());
     }
 
     #[test]

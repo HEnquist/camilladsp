@@ -246,6 +246,9 @@ impl Controller {
                     debug!("The capture device changed, forgetting the last source format");
                     self.last_format = None;
                 }
+                if self.wait && self.shared.settings().following_enabled() {
+                    controller::log_missing_rate_variants(&loaded.source);
+                }
                 *self.shared.entry.lock() = Some(loaded.source.clone());
                 self.entry = Some(loaded.source);
                 self.set_source(ControllerSource::Files);

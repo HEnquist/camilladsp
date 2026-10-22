@@ -7,7 +7,8 @@
         "type": "object",
         "description": "The entry config that the Adapt provider starts from, and what is wrong with it, if\nanything. The format is the one the config is written for, after the command line\noverrides. Adapt changes the rate and the sample format, but not the channel count.",
         "required": [
-          "alternate_samplerates"
+          "alternate_samplerates",
+          "warnings"
         ],
         "properties": {
           "file": {
@@ -54,6 +55,13 @@
               "null"
             ],
             "description": "What is wrong with the config, `null` if it is usable. Also lists the settings that\nare only right at the config's own rate, when Adapt would change its samplerate."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The per-rate variants the config is missing for an alternate rate: a coefficient file\nor a filter, mixer or processor named with `$samplerate$`. The config still runs at\nthe other rates, but a source at that rate gets no config."
           }
         },
         "unevaluatedProperties": false
