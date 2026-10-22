@@ -168,7 +168,7 @@ def test_no_spectrum_without_a_running_pipeline(start_cdsp):
     cdsp = start_cdsp(extra_args=["--wait"])
     cdsp.send("Stop")
     cdsp.poll_until("GetState", "Inactive")
-    # Both spectrum commands decide this from the active config's sample rate, not from
+    # Both spectrum commands decide this from the running config's sample rate, not from
     # the state, and Stop clears the config only after the pipeline is down,
     # `src/engine.rs:159`. So the state reaches Inactive first, and a request made in
     # between still finds a rate and fails on the empty buffer instead. Gate on the

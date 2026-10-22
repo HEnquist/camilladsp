@@ -218,17 +218,13 @@
       "ControllerFileChecks": {
         "type": "object",
         "description": "Value of the `CheckControllerFiles` reply.",
+        "required": [
+          "adapt"
+        ],
         "properties": {
           "adapt": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AdaptCheck",
-                "description": "The entry config Adapt starts from. `null` when following is off."
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/AdaptCheck",
+            "description": "The entry config Adapt starts from. It is checked whether following is on or not, so\nthat it can be checked before following is turned on."
           }
         },
         "unevaluatedProperties": false
@@ -1890,7 +1886,7 @@
           },
           {
             "type": "object",
-            "description": "Read the active configuration.",
+            "description": "Read the running configuration.",
             "required": [
               "command"
             ],
@@ -1906,7 +1902,7 @@
           },
           {
             "type": "object",
-            "description": "Read the active configuration as JSON.",
+            "description": "Read the running configuration as JSON.",
             "required": [
               "command"
             ],
@@ -1922,7 +1918,7 @@
           },
           {
             "type": "object",
-            "description": "Read the `title` field from the active configuration.",
+            "description": "Read the `title` field from the running configuration.",
             "required": [
               "command"
             ],
@@ -1938,7 +1934,7 @@
           },
           {
             "type": "object",
-            "description": "Read the `description` field from the active configuration.",
+            "description": "Read the `description` field from the running configuration.",
             "required": [
               "command"
             ],
@@ -1954,7 +1950,7 @@
           },
           {
             "type": "object",
-            "description": "Get the path of the currently loaded config file.",
+            "description": "Get the path of the startup config file, the one CamillaDSP loads when it starts\nand at a [`Reload`](Self::Reload).",
             "required": [
               "command"
             ],
@@ -1970,7 +1966,7 @@
           },
           {
             "type": "object",
-            "description": "Read the previously active configuration (before the last reload or upload).",
+            "description": "Read the previously running configuration (before the last reload or upload).",
             "required": [
               "command"
             ],
@@ -1986,7 +1982,7 @@
           },
           {
             "type": "object",
-            "description": "Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.",
+            "description": "Change the path of the startup config file. Not applied until [`Reload`](Self::Reload) is called.",
             "required": [
               "value",
               "command"
@@ -2049,7 +2045,7 @@
           },
           {
             "type": "object",
-            "description": "Apply a partial patch to the active configuration.\n\nIf the resulting config is valid it is applied immediately, and the built-in\ncontroller switches to the websocket source, see the group description.",
+            "description": "Apply a partial patch to the running configuration.\n\nIf the resulting config is valid it is applied immediately, and the built-in\ncontroller switches to the websocket source, see the group description.",
             "required": [
               "value",
               "command"
@@ -2069,7 +2065,7 @@
           },
           {
             "type": "object",
-            "description": "Read a single value from the active configuration using a JSON Pointer (RFC 6901).",
+            "description": "Read a single value from the running configuration using a JSON Pointer (RFC 6901).",
             "required": [
               "value",
               "command"
@@ -2090,7 +2086,7 @@
           },
           {
             "type": "object",
-            "description": "Set a single value in the active configuration using a JSON Pointer (RFC 6901).\nSwitches the built-in controller to the websocket source, like `PatchConfig`.",
+            "description": "Set a single value in the running configuration using a JSON Pointer (RFC 6901).\nSwitches the built-in controller to the websocket source, like `PatchConfig`.",
             "required": [
               "pointer",
               "value",
@@ -2115,7 +2111,7 @@
           },
           {
             "type": "object",
-            "description": "Reload the current config file from disk. Equivalent to sending `SIGHUP`.\nSwitches the built-in controller back to the files source, and following\nresumes if it is enabled.",
+            "description": "Load the startup config file from disk again. Equivalent to sending `SIGHUP`.\nSwitches the built-in controller back to the files source, and following\nresumes if it is enabled.",
             "required": [
               "command"
             ],
@@ -2190,7 +2186,7 @@
           },
           {
             "type": "object",
-            "description": "Check the entry config that Adapt starts from. Loads the config and its\ncoefficient files, so it is meant to be run on demand rather than polled.",
+            "description": "Check the entry config that Adapt starts from, whether following is on or not.\nLoads the config and its coefficient files, so it is meant to be run on demand\nrather than polled.",
             "required": [
               "command"
             ],
@@ -2206,7 +2202,7 @@
           },
           {
             "type": "object",
-            "description": "Parse and fill defaults for a YAML config string without changing the active config.",
+            "description": "Parse and fill defaults for a YAML config string without changing the running config.",
             "required": [
               "value",
               "command"
@@ -2227,7 +2223,7 @@
           },
           {
             "type": "object",
-            "description": "Parse and fill defaults for a JSON config string without changing the active config.",
+            "description": "Parse and fill defaults for a JSON config string without changing the running config.",
             "required": [
               "value",
               "command"
@@ -2248,7 +2244,7 @@
           },
           {
             "type": "object",
-            "description": "Parse and fill defaults for a config file without changing the active config.",
+            "description": "Parse and fill defaults for a config file without changing the running config.",
             "required": [
               "value",
               "command"
@@ -4267,7 +4263,7 @@
                 "properties": {
                   "value": {
                     "type": "string",
-                    "description": "Active config in YAML format."
+                    "description": "Running config in YAML format."
                   }
                 }
               },
@@ -4301,7 +4297,7 @@
                 "properties": {
                   "value": {
                     "type": "string",
-                    "description": "Active config in JSON format."
+                    "description": "Running config in JSON format."
                   }
                 }
               },
@@ -4335,7 +4331,7 @@
                 "properties": {
                   "value": {
                     "type": "string",
-                    "description": "Title string from the active config."
+                    "description": "Title string from the running config."
                   }
                 }
               },
@@ -4369,7 +4365,7 @@
                 "properties": {
                   "value": {
                     "type": "string",
-                    "description": "Description string from the active config."
+                    "description": "Description string from the running config."
                   }
                 }
               },
@@ -4403,7 +4399,7 @@
                       "string",
                       "null"
                     ],
-                    "description": "File path of the active config, or `null` if no file is loaded."
+                    "description": "Path of the startup config file, or `null` if there is none."
                   }
                 }
               },
@@ -4437,7 +4433,7 @@
                 "properties": {
                   "value": {
                     "type": "string",
-                    "description": "Previously active config in YAML format."
+                    "description": "Previously running config in YAML format."
                   }
                 }
               },
@@ -4730,7 +4726,7 @@
                 "properties": {
                   "value": {
                     "$ref": "#/components/schemas/ControllerFileChecks",
-                    "description": "The check, with `adapt` `null` when following is off."
+                    "description": "The check."
                   }
                 }
               },

@@ -154,7 +154,7 @@ This is the same request that `pw-cat` and the PulseAudio and ALSA compatibility
 It is only a request.
 PipeWire only switches the graph to it if the rate is listed in `default.clock.allowed-rates`,
 and that list contains just 48000 by default.
-To let a DAC run at the rate of the active config, add the rates it supports, for example with a
+To let a DAC run at the rate of the running config, add the rates it supports, for example with a
 drop-in file `~/.config/pipewire/pipewire.conf.d/10-rates.conf`:
 ```
 context.properties = {
@@ -163,7 +163,7 @@ context.properties = {
 ```
 PipeWire does not switch the rate of a driver that is already running other streams.
 Loading a config with a new rate recreates the CamillaDSP nodes,
-so the request follows the active config.
+so the request follows the running config.
 
 With PipeWire capture there is no need to resample in CamillaDSP,
 since PipeWire delivers audio at whatever rate is requested.

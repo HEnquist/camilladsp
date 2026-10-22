@@ -623,7 +623,7 @@ Returns (array \[non-negative `integer`, `boolean`\]): `[fader_index, new_mute_s
 
 ### Config management
 
-Read and modify the active configuration.
+Read and modify the running configuration.
 Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
 effect immediately. Changes via `SetConfigFilePath` require a subsequent
 `Reload` to be applied.
@@ -637,43 +637,44 @@ nothing is followed, until a config is loaded from a file again with `Reload`.
 
 #### `GetConfig`
 
-Read the active configuration.
+Read the running configuration.
 
-Returns (`string`): Active config in YAML format.
+Returns (`string`): Running config in YAML format.
 
 #### `GetConfigJson`
 
-Read the active configuration as JSON.
+Read the running configuration as JSON.
 
-Returns (`string`): Active config in JSON format.
+Returns (`string`): Running config in JSON format.
 
 #### `GetConfigTitle`
 
-Read the `title` field from the active configuration.
+Read the `title` field from the running configuration.
 
-Returns (`string`): Title string from the active config.
+Returns (`string`): Title string from the running config.
 
 #### `GetConfigDescription`
 
-Read the `description` field from the active configuration.
+Read the `description` field from the running configuration.
 
-Returns (`string`): Description string from the active config.
+Returns (`string`): Description string from the running config.
 
 #### `GetConfigFilePath`
 
-Get the path of the currently loaded config file.
+Get the path of the startup config file, the one CamillaDSP loads when it starts
+and at a `Reload`.
 
-Returns (`string` or `null`): File path of the active config, or `null` if no file is loaded.
+Returns (`string` or `null`): Path of the startup config file, or `null` if there is none.
 
 #### `GetPreviousConfig`
 
-Read the previously active configuration (before the last reload or upload).
+Read the previously running configuration (before the last reload or upload).
 
-Returns (`string`): Previously active config in YAML format.
+Returns (`string`): Previously running config in YAML format.
 
 #### `SetConfigFilePath`
 
-Change the active config file path. Not applied until `Reload` is called.
+Change the path of the startup config file. Not applied until `Reload` is called.
 
 Arguments:
 
@@ -701,7 +702,7 @@ Arguments:
 
 #### `PatchConfig`
 
-Apply a partial patch to the active configuration.
+Apply a partial patch to the running configuration.
 
 If the resulting config is valid it is applied immediately, and the built-in
 controller switches to the websocket source, see the group description.
@@ -712,7 +713,7 @@ Arguments:
 
 #### `GetConfigValue`
 
-Read a single value from the active configuration using a JSON Pointer (RFC 6901).
+Read a single value from the running configuration using a JSON Pointer (RFC 6901).
 
 Arguments:
 
@@ -722,7 +723,7 @@ Returns (any JSON value): Value at the specified JSON Pointer path.
 
 #### `SetConfigValue`
 
-Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+Set a single value in the running configuration using a JSON Pointer (RFC 6901).
 Switches the built-in controller to the websocket source, like `PatchConfig`.
 
 Arguments:
@@ -732,7 +733,7 @@ Arguments:
 
 #### `Reload`
 
-Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+Load the startup config file from disk again. Equivalent to sending `SIGHUP`.
 Switches the built-in controller back to the files source, and following
 resumes if it is enabled.
 
@@ -780,10 +781,11 @@ Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller st
 
 #### `CheckControllerFiles`
 
-Check the entry config that Adapt starts from. Loads the config and its
-coefficient files, so it is meant to be run on demand rather than polled.
+Check the entry config that Adapt starts from, whether following is on or not.
+Loads the config and its coefficient files, so it is meant to be run on demand
+rather than polled.
 
-Returns ([`ControllerFileChecks`](#controllerfilechecks)): The check, with `adapt` `null` when following is off.
+Returns ([`ControllerFileChecks`](#controllerfilechecks)): The check.
 
 ### Config reading and checking
 
@@ -794,7 +796,7 @@ the `Read` variants.
 
 #### `ReadConfig`
 
-Parse and fill defaults for a YAML config string without changing the active config.
+Parse and fill defaults for a YAML config string without changing the running config.
 
 Arguments:
 
@@ -804,7 +806,7 @@ Returns (`string`): Config with all optional fields filled with defaults, or an 
 
 #### `ReadConfigJson`
 
-Parse and fill defaults for a JSON config string without changing the active config.
+Parse and fill defaults for a JSON config string without changing the running config.
 
 Arguments:
 
@@ -814,7 +816,7 @@ Returns (`string`): Config with all optional fields filled with defaults, or an 
 
 #### `ReadConfigFile`
 
-Parse and fill defaults for a config file without changing the active config.
+Parse and fill defaults for a config file without changing the running config.
 
 Arguments:
 
@@ -1110,7 +1112,7 @@ Value of the `CheckControllerFiles` reply.
 
 Fields:
 
-- `adapt` ([`AdaptCheck`](#adaptcheck) or `null`, optional): The entry config Adapt starts from. `null` when following is off.
+- `adapt` ([`AdaptCheck`](#adaptcheck)): The entry config Adapt starts from. It is checked whether following is on or not, so that it can be checked before following is turned on.
 
 ### `AudioDeviceDescriptor`
 

@@ -23,7 +23,7 @@ def titled(title):
 
 
 def test_get_config_returns_yaml(cdsp):
-    """GetConfig should hand back the active config with its defaults filled in."""
+    """GetConfig should hand back the running config with its defaults filled in."""
     text = cdsp.send("GetConfig")
     assert "type: Dummy" in text
     # A field that is not in the file on disk, so this is the parsed config and not a
@@ -104,7 +104,7 @@ def test_read_config_json(cdsp):
 
 
 def test_read_config_file(cdsp, config_file):
-    """ReadConfigFile should read from disk without touching the active config."""
+    """ReadConfigFile should read from disk without touching the running config."""
     parsed = cdsp.send("ReadConfigFile", config_file({"gain: -6.0": "gain: -3.0"}))
     assert "-3.0" in parsed
     assert cdsp.send("GetConfigValue", "/filters/testgain/parameters/gain") == -6.0

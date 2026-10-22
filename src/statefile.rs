@@ -30,7 +30,7 @@ use crate::controller::ControllerSettings;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct State {
-    /// Path to the last active configuration file, if any.
+    /// Path to the startup config file, if any.
     pub config_path: Option<String>,
     /// Mute status for each of the [`ProcessingParameters::NUM_FADERS`] faders.
     pub mute: [bool; 5],

@@ -313,8 +313,9 @@ pub struct AdaptCheck {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerFileChecks {
-    /// The entry config Adapt starts from. `null` when following is off.
-    pub adapt: Option<AdaptCheck>,
+    /// The entry config Adapt starts from. It is checked whether following is on or not, so
+    /// that it can be checked before following is turned on.
+    pub adapt: AdaptCheck,
 }
 
 /// Where the config the controller runs comes from.
@@ -1062,7 +1063,7 @@ ws_protocol! {
         },
     }
 
-    /// Read and modify the active configuration.
+    /// Read and modify the running configuration.
     /// Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
     /// effect immediately. Changes via `SetConfigFilePath` require a subsequent
     /// `Reload` to be applied.
@@ -1074,43 +1075,44 @@ ws_protocol! {
     /// `PatchConfig` and `SetConfigValue` patch the config that runs, the one
     /// `GetConfig` returns.
     group "Config management" {
-        /// Read the active configuration.
+        /// Read the running configuration.
         GetConfig -> {
-            /// Active config in YAML format.
+            /// Running config in YAML format.
             value: String,
         },
 
-        /// Read the active configuration as JSON.
+        /// Read the running configuration as JSON.
         GetConfigJson -> {
-            /// Active config in JSON format.
+            /// Running config in JSON format.
             value: String,
         },
 
-        /// Read the `title` field from the active configuration.
+        /// Read the `title` field from the running configuration.
         GetConfigTitle -> {
-            /// Title string from the active config.
+            /// Title string from the running config.
             value: String,
         },
 
-        /// Read the `description` field from the active configuration.
+        /// Read the `description` field from the running configuration.
         GetConfigDescription -> {
-            /// Description string from the active config.
+            /// Description string from the running config.
             value: String,
         },
 
-        /// Get the path of the currently loaded config file.
+        /// Get the path of the startup config file, the one CamillaDSP loads when it starts
+        /// and at a [`Reload`](Self::Reload).
         GetConfigFilePath -> {
-            /// File path of the active config, or `null` if no file is loaded.
+            /// Path of the startup config file, or `null` if there is none.
             value: Option<String>,
         },
 
-        /// Read the previously active configuration (before the last reload or upload).
+        /// Read the previously running configuration (before the last reload or upload).
         GetPreviousConfig -> {
-            /// Previously active config in YAML format.
+            /// Previously running config in YAML format.
             value: String,
         },
 
-        /// Change the active config file path. Not applied until [`Reload`](Self::Reload) is called.
+        /// Change the path of the startup config file. Not applied until [`Reload`](Self::Reload) is called.
         SetConfigFilePath {
             /// Path of the config file.
             value: String,
@@ -1132,7 +1134,7 @@ ws_protocol! {
             value: String,
         },
 
-        /// Apply a partial patch to the active configuration.
+        /// Apply a partial patch to the running configuration.
         ///
         /// If the resulting config is valid it is applied immediately, and the built-in
         /// controller switches to the websocket source, see the group description.
@@ -1141,7 +1143,7 @@ ws_protocol! {
             value: serde_json::Value,
         },
 
-        /// Read a single value from the active configuration using a JSON Pointer (RFC 6901).
+        /// Read a single value from the running configuration using a JSON Pointer (RFC 6901).
         GetConfigValue {
             /// JSON Pointer to the value, such as `"/devices/samplerate"`.
             value: String,
@@ -1150,7 +1152,7 @@ ws_protocol! {
             value: serde_json::Value,
         },
 
-        /// Set a single value in the active configuration using a JSON Pointer (RFC 6901).
+        /// Set a single value in the running configuration using a JSON Pointer (RFC 6901).
         /// Switches the built-in controller to the websocket source, like `PatchConfig`.
         SetConfigValue {
             /// JSON Pointer to the value, such as `"/devices/samplerate"`.
@@ -1159,7 +1161,7 @@ ws_protocol! {
             value: serde_json::Value,
         },
 
-        /// Reload the current config file from disk. Equivalent to sending `SIGHUP`.
+        /// Load the startup config file from disk again. Equivalent to sending `SIGHUP`.
         /// Switches the built-in controller back to the files source, and following
         /// resumes if it is enabled.
         Reload,
@@ -1203,10 +1205,11 @@ ws_protocol! {
             value: ControllerStatusReport,
         },
 
-        /// Check the entry config that Adapt starts from. Loads the config and its
-        /// coefficient files, so it is meant to be run on demand rather than polled.
+        /// Check the entry config that Adapt starts from, whether following is on or not.
+        /// Loads the config and its coefficient files, so it is meant to be run on demand
+        /// rather than polled.
         CheckControllerFiles -> {
-            /// The check, with `adapt` `null` when following is off.
+            /// The check.
             value: ControllerFileChecks,
         },
     }
@@ -1216,7 +1219,7 @@ ws_protocol! {
     /// The `Validate` variants perform more thorough cross-field checks than
     /// the `Read` variants.
     group "Config reading and checking" {
-        /// Parse and fill defaults for a YAML config string without changing the active config.
+        /// Parse and fill defaults for a YAML config string without changing the running config.
         ReadConfig {
             /// Config in YAML format.
             value: String,
@@ -1225,7 +1228,7 @@ ws_protocol! {
             value: String,
         },
 
-        /// Parse and fill defaults for a JSON config string without changing the active config.
+        /// Parse and fill defaults for a JSON config string without changing the running config.
         ReadConfigJson {
             /// Config in JSON format.
             value: String,
@@ -1234,7 +1237,7 @@ ws_protocol! {
             value: String,
         },
 
-        /// Parse and fill defaults for a config file without changing the active config.
+        /// Parse and fill defaults for a config file without changing the running config.
         ReadConfigFile {
             /// Path of the config file.
             value: String,

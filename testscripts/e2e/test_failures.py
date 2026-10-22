@@ -18,7 +18,7 @@ reachable. Each one stands for a different thing a real device does:
 - `eof` is a stream that ends, the way a file capture reaches the end of its file.
 
 The shape shared by all of them is worth knowing before reading the tests. A fatal device
-event clears the active config, `src/engine.rs:84`, so the engine does not come back on
+event clears the running config, `src/engine.rs:84`, so the engine does not come back on
 its own: under `--wait` it drops to `Inactive` and stands by, and without `--wait` the
 supervisor finds no config and no queued command and exits. That is what makes the stop
 reason observable at all. Were the session restarted automatically, the reason would be

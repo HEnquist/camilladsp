@@ -42,7 +42,7 @@ def test_wait_starts_inactive_and_runs_on_set_config(start_cdsp):
 def test_stop_returns_to_inactive(start_cdsp):
     """With --wait, Stop should close the devices but leave the process alive.
 
-    Without --wait the supervisor exits once Stop clears the active config, so the
+    Without --wait the supervisor exits once Stop clears the running config, so the
     waiting behaviour only exists in this mode.
     """
     cdsp = start_cdsp(extra_args=["--wait"])

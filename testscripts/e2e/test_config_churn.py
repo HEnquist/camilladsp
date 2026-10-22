@@ -62,7 +62,7 @@ def variants(config_file):
 
 
 def settle(cdsp, n):
-    """Wait until variant `n` is the active config and the engine is running again.
+    """Wait until variant `n` is the running config and the engine is running again.
 
     This is what replaces the fixed 0.5 s sleep. Two polls, because a device change
     publishes the new config as soon as the old pipeline has stopped and before the new

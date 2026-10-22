@@ -21,7 +21,7 @@
 //! that runs sessions and decides what happens when one ends is in `engine.rs`.
 //!
 //! A config comes from one of two sources. From the files source, the controller loads the
-//! entry config, the active config file, through a provider. Single runs it as is. When the
+//! entry config, the startup config file, through a provider. Single runs it as is. When the
 //! capture source changes format, following runs the config through the Adapt provider,
 //! which adapts the entry config to the new format. A config from the websocket source runs
 //! exactly as sent.
@@ -342,14 +342,11 @@ pub fn select_websocket(loaded: LoadedConfig) -> Box<Selected> {
     })
 }
 
-/// Check the entry config Adapt starts from, when following is on, see
+/// Check the entry config Adapt starts from, whether following is on or not, see
 /// [`ControllerFileChecks`].
-pub fn check_files(
-    settings: &ControllerSettings,
-    entry: Option<&ConfigSource>,
-) -> ControllerFileChecks {
+pub fn check_files(entry: Option<&ConfigSource>) -> ControllerFileChecks {
     ControllerFileChecks {
-        adapt: settings.following_enabled().then(|| check_adapt(entry)),
+        adapt: check_adapt(entry),
     }
 }
 
@@ -408,13 +405,6 @@ pub fn log_missing_rate_variants(entry: &ConfigSource) {
 mod tests {
     use super::*;
     use crate::config::CaptureDevice;
-
-    fn following() -> ControllerSettings {
-        ControllerSettings {
-            follow_capture: Some(true),
-            error_recovery: None,
-        }
-    }
 
     fn base_config(samplerate: usize, channels: usize, extra: &str) -> Configuration {
         // Validation opens the capture file, so it has to exist on every platform.
@@ -737,11 +727,11 @@ pipeline:
     }
 
     #[test]
-    fn check_files_checks_the_entry_while_following() {
+    fn check_files_checks_the_entry() {
         let e = entry(base_config(44100, 2, ""));
         assert_eq!(
-            check_files(&following(), Some(&e)).adapt,
-            Some(AdaptCheck {
+            check_files(Some(&e)).adapt,
+            AdaptCheck {
                 file: None,
                 samplerate: Some(44100),
                 alternate_samplerates: Vec::new(),
@@ -749,15 +739,12 @@ pipeline:
                 format: Some("S32_LE".to_string()),
                 problem: None,
                 warnings: Vec::new(),
-            })
+            }
         );
 
-        let no_entry = check_files(&following(), None).adapt.unwrap();
+        let no_entry = check_files(None).adapt;
         assert_eq!(no_entry.samplerate, None);
         assert!(no_entry.problem.is_some());
-
-        let off = check_files(&ControllerSettings::default(), Some(&e));
-        assert_eq!(off.adapt, None);
     }
 
     const DELAY_IN_SAMPLES: &str = "filters:
@@ -798,12 +785,7 @@ pipeline:
 
     #[test]
     fn check_files_reports_rate_dependent_settings() {
-        let problem = |conf| {
-            check_files(&following(), Some(&entry(conf)))
-                .adapt
-                .unwrap()
-                .problem
-        };
+        let problem = |conf| check_files(Some(&entry(conf))).adapt.problem;
         let listed = with_alternates(base_config(48000, 2, DELAY_IN_SAMPLES), &[96000]);
         let reported = problem(listed).unwrap();
         assert!(
@@ -819,8 +801,7 @@ pipeline:
     #[test]
     fn check_files_lists_the_alternate_rates() {
         let conf = with_alternates(base_config(48000, 2, ""), &[96000, 44100]);
-        let checks = check_files(&following(), Some(&entry(conf)));
-        let adapt = checks.adapt.unwrap();
+        let adapt = check_files(Some(&entry(conf))).adapt;
         assert_eq!(adapt.samplerate, Some(48000));
         assert_eq!(adapt.alternate_samplerates, vec![96000, 44100]);
         assert_eq!(adapt.problem, None);

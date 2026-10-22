@@ -1460,9 +1460,8 @@ fn handle_command(
             })
         }
         WsCommand::CheckControllerFiles {} => {
-            let shared = &shared_data_inst.controller;
-            let entry = shared.entry.lock().clone();
-            let value = controller::check_files(&shared.settings(), entry.as_ref());
+            let entry = shared_data_inst.controller.entry.lock().clone();
+            let value = controller::check_files(entry.as_ref());
             Some(WsReply::CheckControllerFiles {
                 result: WsResult::Ok,
                 value,
@@ -1604,10 +1603,10 @@ fn handle_command(
         WsCommand::PatchConfig { value } => {
             let mut conf_as_value = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
-                debug!("No active config to patch");
+                debug!("No running config to patch");
                 return Some(WsReply::PatchConfig {
                     result: WsResult::InvalidRequestError {
-                        message: "No active config to patch".to_string(),
+                        message: "No running config to patch".to_string(),
                     },
                 });
             }
@@ -1659,10 +1658,10 @@ fn handle_command(
         WsCommand::SetConfigValue { pointer, value } => {
             let mut conf_as_value = patch_base(shared_data_inst);
             if conf_as_value.is_null() {
-                debug!("No active config to patch");
+                debug!("No running config to patch");
                 return Some(WsReply::SetConfigValue {
                     result: WsResult::InvalidRequestError {
-                        message: "No active config to modify".to_string(),
+                        message: "No running config to modify".to_string(),
                     },
                 });
             }
@@ -1672,7 +1671,7 @@ fn handle_command(
             } else {
                 return Some(WsReply::SetConfigValue {
                     result: WsResult::InvalidRequestError {
-                        message: "The active config does not contain the path '{}'".to_string(),
+                        message: "The running config does not contain the path '{}'".to_string(),
                     },
                 });
             }

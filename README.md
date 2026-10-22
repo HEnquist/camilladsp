@@ -664,7 +664,8 @@ In systems that have a gain structure such that a too high volume setting can da
 it is recommended to always use the `--gain` and `--gain1..4` options to set the volume to start at a safe value.
 
 #### Example statefile
-The statefile is a small YAML file that holds the path to the active config file,
+The statefile is a small YAML file that holds the path to the *startup config* file,
+the one CamillaDSP loads when it starts and when it reloads,
 as well as mute and volume settings for the five faders (`Main` and `Aux1` to `Aux4`)
 ```
 ---
@@ -870,7 +871,7 @@ Adapting always starts from the entry config, so switching back and forth doesn'
 A rate measured by the backend, like 44097, is snapped to the nearest standard rate.
 
 The websocket command `CheckControllerFiles` checks the entry config before any format change.
-Its `adapt` section is `null` while following is off.
+It checks it whether following is on or not, so a config can be checked before following is turned on.
 It gives the entry config, the format it is written for, its `alternate_samplerates`,
 and its problem, if any.
 The `warnings` list the variants that are missing for one of the `alternate_samplerates`.
