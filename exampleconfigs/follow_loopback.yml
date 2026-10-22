@@ -2,8 +2,8 @@
 # Following a player on an ALSA Loopback, see "Following the player's sample rate and format"
 # in backend_alsa.md. Needs a kernel where the Loopback's PCM Notify works.
 #
-# Run with the Adapt provider, which changes this config to every rate the player uses:
-#   camilladsp --wait --follow_adapt -s statefile.yml follow_loopback.yml
+# Run with following, which adapts this config to every rate the player uses:
+#   camilladsp --wait --follow_capture -s statefile.yml follow_loopback.yml
 #
 # The capture has no `format`, so a player that changes sample format only reopens the
 # capture. The FIR filter has a file per rate, picked with the `$samplerate$` token,

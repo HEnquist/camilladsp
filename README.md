@@ -35,7 +35,7 @@ while a larger number is more efficient.
 The full configuration is given in a YAML file.
 
 A built-in controller can follow the capture source when it changes sample rate,
-by switching to a matching config or adapting the loaded one,
+by adapting the loaded config to it,
 and can retry after device errors.
 See [Following the capture source and error recovery](#following-the-capture-source-and-error-recovery).
 
@@ -602,8 +602,7 @@ Options:
   -n, --channels <CHANNELS>            Override number of channels of capture device in config
   -r, --samplerate <SAMPLERATE>        Override samplerate in config
   -f, --format <FORMAT>                Override sample format of capture device in config [possible values: S16_LE, S24_3_LE, S24_4_LJ_LE, S24_4_RJ_LE, S32_LE, F32_LE, F64_LE]
-      --follow_specific <TEMPLATE>     Follow the capture format with per-format config files, from a template with $samplerate$, $channels$ or $format$ tokens
-      --follow_adapt                   Follow the capture rate by adapting the config to it
+      --follow_capture                 Follow the capture format by adapting the config to it
       --error_recovery                 Retry with increasing intervals after a device error
   -h, --help                           Print help
   -V, --version                        Print version
@@ -762,8 +761,8 @@ Note that for this to update the coefficients for a FIR filter, the filename of 
 
 ## Following the capture source and error recovery
 CamillaDSP has a built-in controller that can do two things on its own:
-- follow the format of the capture source, by switching to a config that matches the new
-  sample rate (and channel count or sample format, where the backend reports them),
+- follow the format of the capture source, by adapting the config to the new sample rate
+  (and sample format, where the backend reports it),
 - recover from device errors, by retrying the config that was running.
 
 Both only work in wait mode, `--wait`. Without it, CamillaDSP exits when processing stops,
@@ -772,20 +771,18 @@ whatever the reason, as before.
 ### Settings
 The settings are kept in a `controller` section of the statefile:
 ```yaml
-config_path: /home/user/configs/conf_48000.yml
+config_path: /home/user/configs/conf.yml
 controller:
-  follow_capture:
-    specific: null
-    adapt: true
+  follow_capture: true
   error_recovery: true
 mute: [false, false, false, false, false]
 volume: [0.0, 0.0, 0.0, 0.0, 0.0]
 ```
 
-Leave out `follow_capture` to disable following, and `error_recovery` (or set it to false) to
-disable error recovery.
-The same settings can be switched on from the command line with `--follow_specific <TEMPLATE>`,
-`--follow_adapt` and `--error_recovery`.
+Leave out `follow_capture` and `error_recovery`, or set them to false, to disable following and
+error recovery.
+The same settings can be switched on from the command line with `--follow_capture` and
+`--error_recovery`.
 These only switch things on. Each one overrides its own field of the statefile, and the result
 is written back to the statefile at startup.
 Over the websocket, the settings are read and changed with `GetControllerSettings` and
@@ -797,33 +794,22 @@ The config file that is loaded explicitly, from the command line, the statefile,
 `SetConfigFilePath` plus `Reload` and so on, is the _entry config_.
 A config sent over the websocket is not an entry config, see
 [Config sources and providers](#config-sources-and-providers).
-When the capture device reports that the source changed format, the controller asks two
-config providers for a config to run for the new format:
+When the capture device reports that the source changed format, the controller _adapts_ the
+entry config to the new format, and runs the result.
+The rate is changed the same way as the `--samplerate` override does it,
+see [Overriding config values](#overriding-config-values).
+When the config sets the capture sample format explicitly, it is changed to the reported one.
 
-- __Adapt__ (`adapt: true`): the entry config is changed to the new rate, the same way as the
-  `--samplerate` override does it, see [Overriding config values](#overriding-config-values).
-- __Specific__ (`specific`): a file name template with one or more of the tokens
-  `$samplerate$`, `$channels$` and `$format$`.
-  The tokens are replaced by the values the backend reported, and that file is loaded.
-  A relative template is resolved from the directory of the entry config file,
-  but absolute paths are recommended.
-  The entry config should be one of these files, the one for the format it is written for.
-  It is then selected like any other file. If it isn't, there is a warning, and with Specific
-  alone, the controller waits for the source to change until a file matches.
-
-Adapt is by far the easier one to set up, and should be used whenever it can be.
-It needs a single config, and the usual per-rate needs are already covered:
+A single config covers the usual per-rate needs:
 `$samplerate$` tokens in filter file names load the right FIR filters for each rate,
 and a `samplerate` list, described below, resamples the rates the hardware can't run.
 
-Specific is much more involved. It needs a complete config file for every format,
-and every one of them has to be kept in sync when something changes.
-It is only needed when Adapt can't work, which is when the channel count changes.
+The channel count is not adapted, since the capture channels and the mixers would have to change
+with it.
+A source that changes its channel count can't be followed.
 This is the case with ADAT S/MUX, where an interface has fewer channels at the higher rates,
 or with a player that switches between stereo and 5.1 on a loopback.
-The capture channels and the mixers then have to change as well.
-Use both together for this: Specific files for the formats where the channel count is different,
-and Adapt for everything else.
+The controller then waits until the source is back at the channel count of the entry config.
 
 Not every device runs at every rate.
 Some only support the 48 kHz family, for example.
@@ -844,8 +830,8 @@ If that is too much, put 48 kHz first instead.
 The config's own resampler is used for this.
 If it has none, or only `Slip`, which can't convert between rates, a `Synchronous` resampler is added,
 or an `AsyncSinc` with the `Balanced` profile when rate adjust is enabled.
-Without Adapt, and until a source rate is known, the first rate is used.
-This makes a config with a list usable everywhere, also as a Specific file.
+Without following, and until a source rate is known, the first rate is used.
+This makes a config with a list usable everywhere.
 The `--samplerate` override uses the list the same way Adapt does.
 Once the controller has a source rate to run at, the override is ignored, since that sets the rate anyway.
 
@@ -867,33 +853,26 @@ Values in samples can be given in a time unit instead, and coefficient files can
 in their names, with one file per rate.
 For the rest, give `samplerate` as a list with only the config's own rate, like `[48000]`.
 Every other rate is then resampled to it, and Adapt works with any config.
-The refusal is logged with the settings it found, and with Adapt alone the controller then waits for the source.
-`CheckControllerFiles` reports the settings as the problem of the Adapt section, before any rate change happens.
+The refusal is logged with the settings it found, and the controller then waits for the source.
+`CheckControllerFiles` reports the settings as the problem of the `adapt` section, before any rate change happens.
 
-The Specific provider is asked first, then Adapt. Either one can be used alone.
-Adapt always starts from the entry config, so switching back and forth doesn't drift.
+Adapting always starts from the entry config, so switching back and forth doesn't drift.
 A rate measured by the backend, like 44097, is snapped to the nearest standard rate.
 
-A Specific file is only used if it captures from the same device as the entry config,
-and if its capture rate, channels and format match what the source reported.
-A file that doesn't match is logged as an error and skipped.
-
-The websocket command `CheckControllerFiles` checks the configs the providers can use.
-It has one section per provider, and the section of a provider that is off is `null`.
-The Specific section lists every file the template can match,
-with the format read from its name and the problem found, if any.
-The Adapt section gives the entry config, the format it is written for, and its problem, if any.
+The websocket command `CheckControllerFiles` checks the entry config before any format change.
+Its `adapt` section is `null` while following is off.
+It gives the entry config, the format it is written for, and its problem, if any.
 When `samplerate` is a list, it also gives the rates that run natively, with the preferred one first.
 
-If no provider has a config for the new format, the controller waits for the source to change.
-It asks the backend what the source is doing once per second, and starts the matching config
-as soon as there is one.
+If the entry config can't be adapted to the new format, the controller waits for the source to change.
+It asks the backend what the source is doing once per second, and starts the adapted config
+as soon as the source is at a format it can be adapted to.
 Any command, for example a new config or `Stop`, ends the wait.
 
 While following is on, the controller decides what happens when the source changes,
 so `stop_on_rate_change` is always on.
 
-`GetConfig` returns the config that runs, which may be an adapted config or a Specific file.
+`GetConfig` returns the config that runs, which may be the adapted config.
 `GetConfigFilePath` and the statefile keep the path of the entry config,
 so a restart or `Reload` starts from the entry config and selects again.
 `PatchConfig` and `SetConfigValue` patch the config that runs, and stop following it,
@@ -918,18 +897,16 @@ Which config runs depends on where it comes from, the _source_:
 - The _websocket_ source: a config sent with `SetConfig` or `SetConfigJson`,
   or patched with `PatchConfig` or `SetConfigValue`, runs exactly as it is.
 
-The files source has three providers:
+The files source has two providers:
 - __Single__ runs the entry config as is.
   It is used while following is off, and while following is on but the source format is not known.
-- __Adapt__ adapts the entry config to the source format.
-- __Specific__ loads the file the template gives for the source format.
-
-Adapt and Specific are described in [Following the capture format](#following-the-capture-format).
+- __Adapt__ adapts the entry config to the source format,
+  see [Following the capture format](#following-the-capture-format).
 
 The websocket source is meant for a config that a client wants to run as it is,
 for example the unsaved changes in a GUI editor.
 Following only exists for the files source, so a config from the websocket source is left alone:
-- It is not adapted to the source rate, and no Specific file replaces it.
+- It is not adapted to the source format.
   If the controller kept following, the next format change would silently replace
   what the client sent, while the client still shows it as running.
 - A format change of the source stops processing, the same as without following, and nothing
@@ -946,8 +923,6 @@ It keeps the rate following selected it for, also with `--samplerate`,
 since the running config already has the command line overrides applied.
 The cost is that a client that adjusts a filter gain with `SetConfigValue`
 stops following until the next `Reload`.
-Patching the entry config and selecting again would keep a patch through Adapt,
-but lose it as soon as Specific switches to another file, with nothing telling the client.
 
 A config loaded from a file switches back to the files source: `Reload`,
 `SetConfigFilePath` followed by `Reload`, `SIGHUP`, or a restart of the process,
@@ -959,8 +934,8 @@ A config that doesn't validate changes nothing, and the source stays as it was.
 `GetControllerStatus` reports the source as `source`, either `Files` or `Websocket`.
 It stays until the next switch, also while nothing runs,
 so a client can see that a stopped session ran a config from the websocket.
-For the files source, `provider` gives the provider of the running config, and `config_file` the file that runs:
-the entry config file for Single and Adapt, and the Specific file for Specific.
+For the files source, `provider` gives the provider of the running config, and `config_file` the
+entry config file that runs.
 Both are `null` for the websocket source, and while nothing runs.
 `following` is `false` for the websocket source.
 

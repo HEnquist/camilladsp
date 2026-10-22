@@ -292,7 +292,7 @@ impl Controller {
                 } else {
                     None
                 };
-                controller::select_config(&entry, format.as_ref(), &settings, validated)
+                controller::select_config(&entry, format.as_ref(), validated)
             }
         }
     }
@@ -453,14 +453,6 @@ impl Controller {
     fn publish_running(&self, selected: &Selected) {
         match &selected.provider {
             Provider::Single => debug!("Running the entry config"),
-            Provider::Specific(file) => info!(
-                "Following: running '{file}' for {}",
-                selected
-                    .format
-                    .as_ref()
-                    .map(|f| f.to_string())
-                    .unwrap_or_default()
-            ),
             Provider::Adapt => info!(
                 "Following: running the entry config adapted to {}",
                 selected
@@ -476,7 +468,6 @@ impl Controller {
         let (provider, config_file) = match &selected.provider {
             Provider::Single => (Some(ConfigProvider::Single), entry_file()),
             Provider::Adapt => (Some(ConfigProvider::Adapt), entry_file()),
-            Provider::Specific(file) => (Some(ConfigProvider::Specific), Some(file.clone())),
             Provider::Websocket => (None, None),
         };
         let mut status = self.shared.status.lock();
@@ -610,8 +601,7 @@ impl Controller {
                 }
                 SourceState::Inactive => {
                     info!("Following: the capture source is inactive, starting the entry config");
-                    let settings = self.shared.settings();
-                    match controller::select_config(&entry, None, &settings, None) {
+                    match controller::select_config(&entry, None, None) {
                         Selection::Run(selected) => break Next::Start(selected),
                         Selection::Invalid(err) => {
                             error!("Config is not valid, not starting: {err}");
@@ -916,9 +906,6 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
         match LoadedConfig::from_file(path) {
             Ok(loaded) => {
                 debug!("Config is valid");
-                if wait && let Some(template) = settings.specific_template() {
-                    controller::log_preflight(template, Some(&loaded.source));
-                }
                 tx_command
                     .send(ControllerMessage::ConfigChanged(Box::new(loaded)))
                     .unwrap();

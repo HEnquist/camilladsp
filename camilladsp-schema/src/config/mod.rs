@@ -491,19 +491,6 @@ impl CaptureDevice {
     pub fn format_matches(&self, format: &str) -> Option<bool> {
         self.format_name().map(|name| name == format)
     }
-
-    /// Whether `name` is a sample format this backend's configs know.
-    pub fn is_format_name(&self, name: &str) -> bool {
-        match self {
-            CaptureDevice::Alsa { .. } => format_from_name::<AlsaSampleFormat>(name).is_some(),
-            CaptureDevice::CoreAudio(_) => {
-                format_from_name::<CoreAudioSampleFormat>(name).is_some()
-            }
-            CaptureDevice::Wasapi(_) => format_from_name::<WasapiSampleFormat>(name).is_some(),
-            CaptureDevice::Asio(_) => format_from_name::<AsioSampleFormat>(name).is_some(),
-            _ => BinarySampleFormat::from_name(name).is_some(),
-        }
-    }
 }
 
 /// The config name of a backend sample format, like "S24_3_LE" or "S24".

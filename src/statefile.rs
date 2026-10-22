@@ -98,10 +98,7 @@ pub fn load_state(filename: &str) -> Option<State> {
             return None;
         }
     };
-    Some(State {
-        controller: state.controller.map(ControllerSettings::sanitized),
-        ..state
-    })
+    Some(state)
 }
 
 /// Build a [`State`] from the current parameters and save it to `filename`,
@@ -182,46 +179,18 @@ mod tests {
     fn roundtrip_controller_settings() {
         let yaml = "config_path: conf.yml
 controller:
-  follow_capture:
-    specific: /configs/conf_$samplerate$.yml
-    adapt: true
+  follow_capture: true
   error_recovery: true
 mute: [false, false, false, false, false]
 volume: [0.0, 0.0, 0.0, 0.0, 0.0]
 ";
         let state: State = yaml_serde::from_str(yaml).unwrap();
         let controller = state.controller.clone().unwrap();
-        assert_eq!(
-            controller.specific_template(),
-            Some("/configs/conf_$samplerate$.yml")
-        );
-        assert!(controller.adapt_enabled());
+        assert!(controller.following_enabled());
         assert!(controller.recovery_enabled());
         let saved = yaml_serde::to_string(&state).unwrap();
         let loaded: State = yaml_serde::from_str(&saved).unwrap();
         assert_eq!(loaded, state);
-    }
-
-    #[test]
-    fn invalid_follow_settings_are_dropped_on_load() {
-        let dir = std::env::temp_dir().join("cdsp_statefile_invalid_follow.yml");
-        std::fs::write(
-            &dir,
-            "config_path: null
-controller:
-  follow_capture:
-    specific: conf.yml
-  error_recovery: true
-mute: [true, false, false, false, false]
-volume: [0.0, 0.0, 0.0, 0.0, 0.0]
-",
-        )
-        .unwrap();
-        let state = super::load_state(&dir.to_string_lossy()).unwrap();
-        let controller = state.controller.unwrap();
-        assert_eq!(controller.follow_capture, None);
-        assert!(controller.recovery_enabled());
-        assert!(state.mute[0]);
     }
 
     #[test]

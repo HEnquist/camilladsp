@@ -53,7 +53,6 @@
 //!
 //! Unrecognised commands get a `{"reply": "Invalid", "error": "..."}` response.
 
-use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroUsize;
@@ -254,74 +253,23 @@ pub struct SpectrumData {
 
 // ── Built-in controller ────────────────────────────────────────────────────
 
-/// The tokens a Specific template can contain.
-pub const TOKEN_SAMPLERATE: &str = "$samplerate$";
-pub const TOKEN_CHANNELS: &str = "$channels$";
-pub const TOKEN_FORMAT: &str = "$format$";
-pub const TOKENS: [&str; 3] = [TOKEN_SAMPLERATE, TOKEN_CHANNELS, TOKEN_FORMAT];
-
-/// Settings for following the capture source format.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct FollowCapture {
-    /// Template for the Specific provider, absent to disable it.
-    #[serde(default)]
-    pub specific: Option<String>,
-    /// Enable the Adapt provider.
-    #[serde(default)]
-    pub adapt: Option<bool>,
-}
-
 /// The `controller` section of the statefile.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerSettings {
-    /// Follow the capture source format, absent to disable following.
+    /// Follow the capture source format, adapting the entry config to it.
     #[serde(default)]
-    pub follow_capture: Option<FollowCapture>,
+    pub follow_capture: Option<bool>,
     /// Retry after a device error.
     #[serde(default)]
     pub error_recovery: Option<bool>,
 }
 
 impl ControllerSettings {
-    /// Check the settings, returning a description of the first problem found.
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(follow) = &self.follow_capture {
-            if follow.specific.is_none() && !follow.adapt.unwrap_or_default() {
-                return Err(
-                    "follow_capture needs at least one provider, set 'specific' or 'adapt'"
-                        .to_string(),
-                );
-            }
-            if let Some(template) = &follow.specific
-                && !TOKENS.iter().any(|token| template.contains(token))
-            {
-                return Err(format!(
-                    "The specific template '{template}' contains no token, use at least one of {}",
-                    TOKENS.join(", ")
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    /// Return the settings with an invalid `follow_capture` removed, logging why.
-    ///
-    /// Used for a statefile, where refusing the whole file would lose the rest of the state.
-    pub fn sanitized(mut self) -> Self {
-        if let Err(err) = self.validate() {
-            warn!("Ignoring the follow_capture settings in the statefile: {err}");
-            self.follow_capture = None;
-        }
-        self
-    }
-
-    /// Whether at least one follow provider is enabled.
+    /// Whether following is enabled.
     pub fn following_enabled(&self) -> bool {
-        self.specific_template().is_some() || self.adapt_enabled()
+        self.follow_capture.unwrap_or_default()
     }
 
     /// Whether error recovery is enabled.
@@ -329,41 +277,10 @@ impl ControllerSettings {
         self.error_recovery.unwrap_or_default()
     }
 
-    /// The template of the Specific provider, if it is enabled.
-    pub fn specific_template(&self) -> Option<&str> {
-        self.follow_capture
-            .as_ref()
-            .and_then(|f| f.specific.as_deref())
-    }
-
-    /// Whether the Adapt provider is enabled.
-    pub fn adapt_enabled(&self) -> bool {
-        self.follow_capture
-            .as_ref()
-            .and_then(|f| f.adapt)
-            .unwrap_or_default()
-    }
-
     /// Whether any controller feature is enabled.
     pub fn any_enabled(&self) -> bool {
         self.following_enabled() || self.recovery_enabled()
     }
-}
-
-/// One file the Specific template matches, and what is wrong with it, if anything.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct FileCheck {
-    /// Path of the file.
-    pub file: String,
-    /// Sample rate read from the file name, if the template has the token.
-    pub samplerate: Option<usize>,
-    /// Channels read from the file name, if the template has the token.
-    pub channels: Option<usize>,
-    /// Sample format read from the file name, if the template has the token.
-    pub format: Option<String>,
-    /// What is wrong with the file, `null` if it is usable.
-    pub problem: Option<String>,
 }
 
 /// The entry config that the Adapt provider starts from, and what is wrong with it, if
@@ -389,14 +306,11 @@ pub struct AdaptCheck {
     pub problem: Option<String>,
 }
 
-/// Value of the `CheckControllerFiles` reply, one section per follow provider.
+/// Value of the `CheckControllerFiles` reply.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ControllerFileChecks {
-    /// Each file the Specific template matches, with the format read from its name and the
-    /// problem found, if any. `null` when Specific is off.
-    pub specific: Option<Vec<FileCheck>>,
-    /// The entry config Adapt starts from. `null` when Adapt is off.
+    /// The entry config Adapt starts from. `null` when following is off.
     pub adapt: Option<AdaptCheck>,
 }
 
@@ -416,13 +330,11 @@ pub enum ControllerSource {
 ///
 /// - `Single`: the entry config file as is.
 /// - `Adapt`: the entry config file adapted to the source format.
-/// - `Specific`: the per-format file the template gives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ConfigProvider {
     Single,
     Adapt,
-    Specific,
 }
 
 /// The state of the built-in controller, returned by the `GetControllerStatus` command.
@@ -434,8 +346,7 @@ pub struct ControllerStatusReport {
     /// The provider of the running config. `null` for the websocket source, and while
     /// nothing runs.
     pub provider: Option<ConfigProvider>,
-    /// The file that runs: the entry config file for `Single` and `Adapt`, the per-format
-    /// file for `Specific`. `null` when `provider` is.
+    /// The entry config file that runs, `null` when `provider` is.
     pub config_file: Option<String>,
     /// The entry config file, the one `GetConfigFilePath` gives, and the one `Reload`
     /// loads.
@@ -1153,8 +1064,7 @@ ws_protocol! {
     /// effect immediately. Changes via `SetConfigFilePath` require a subsequent
     /// `Reload` to be applied.
     /// While the built-in controller follows the capture source, `GetConfig` returns
-    /// the config that runs, which is the loaded config adapted to the source rate or
-    /// a per-format config file.
+    /// the config that runs, which is the loaded config adapted to the source format.
     /// `SetConfig`, `SetConfigJson`, `PatchConfig` and `SetConfigValue` switch the
     /// controller to the websocket source, where the config runs exactly as sent and
     /// nothing is followed, until a config is loaded from a file again with `Reload`.
@@ -1257,11 +1167,11 @@ ws_protocol! {
     /// and both features only work in wait mode.
     ///
     /// The config comes from one of two sources. From the files source, the controller
-    /// loads the entry config file through a provider: `Single` runs it as is, `Adapt`
-    /// adapts it to the source format, and `Specific` loads a per-format file instead.
+    /// loads the entry config file through a provider: `Single` runs it as is, and `Adapt`
+    /// adapts it to the source format.
     /// A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
     /// or `SetConfigValue`, switches to the websocket source. It then runs exactly as
-    /// sent: it is not adapted, no other file is selected, and a source format change
+    /// sent: it is not adapted, and a source format change
     /// stops processing as it does without following. Error recovery works the same for
     /// both sources, it restarts the config that ran. A config loaded from a file switches
     /// back to the files source, with `Reload`, `SetConfigFilePath` followed by `Reload`,
@@ -1290,11 +1200,10 @@ ws_protocol! {
             value: ControllerStatusReport,
         },
 
-        /// Check the configs the follow providers can use: every file the Specific template
-        /// can match, and the entry config that Adapt starts from. Loads every file, so it is
-        /// meant to be run on demand rather than polled.
+        /// Check the entry config that Adapt starts from. Loads the config and its
+        /// coefficient files, so it is meant to be run on demand rather than polled.
         CheckControllerFiles -> {
-            /// One section per provider, `null` for a provider that is off.
+            /// The check, with `adapt` `null` when following is off.
             value: ControllerFileChecks,
         },
     }

@@ -1417,17 +1417,6 @@ fn handle_command(
             value: shared_data_inst.controller.settings.lock().clone(),
         }),
         WsCommand::SetControllerSettings { value } => {
-            if let Some(settings) = &value
-                && let Err(message) = settings.validate()
-            {
-                return Some(WsReply::SetControllerSettings {
-                    result: WsResult::InvalidValueError { message },
-                });
-            }
-            if let Some(template) = value.as_ref().and_then(|s| s.specific_template()) {
-                let entry = shared_data_inst.controller.entry.lock().clone();
-                controller::log_preflight(template, entry.as_ref());
-            }
             *shared_data_inst.controller.settings.lock() = value;
             shared_data_inst
                 .unsaved_state_change

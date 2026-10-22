@@ -1,9 +1,9 @@
 # 6.0.0
 New features:
 - Built-in controller, replacing camilladsp-controller. It follows the format of the capture
-  source, either with a config file per format or by adapting the loaded config to the new rate,
-  and it retries after device errors. Set it up with `--follow_specific`, `--follow_adapt` and
-  `--error_recovery`, in the `controller` section of the statefile, or over the websocket.
+  source by adapting the loaded config to the new rate, and it retries after device errors.
+  Set it up with `--follow_capture` and `--error_recovery`, in the `controller` section of the
+  statefile, or over the websocket.
 - `samplerate` can be a list of the rates the hardware runs natively. Following with Adapt runs
   a listed rate natively and resamples other rates to the first one, which is also the rate used
   without Adapt.

@@ -2,7 +2,7 @@
 
 The controller decides what runs after a session ends. With its features off it goes
 idle, which `test_failures.py` covers. These tests turn them on: error recovery retries
-the config that was running with a growing backoff, and following picks the config for
+the config that was running with a growing backoff, and following adapts the config to
 the rate a capture reports.
 
 The dummy control socket makes the device events reachable, see `test_failures.py`. A
@@ -20,7 +20,6 @@ import yaml
 
 EXIT_OK = 0
 CLAP_USAGE_ERROR = 2
-EXIT_BAD_CONFIG = 101
 
 # A short measurement window, so a rate change is noticed in about a second, see
 # test_failures.py.
@@ -147,7 +146,7 @@ def test_a_new_config_cancels_the_recovery(start_cdsp, config_file):
 def test_recovery_restarts_a_sent_config(control_cdsp, config_file):
     """The websocket source isn't followed, but recovery restarts the same config, so it
     keeps working on the config that was sent."""
-    cdsp = control_cdsp(extra_args=["--wait", "--error_recovery", "--follow_adapt"])
+    cdsp = control_cdsp(extra_args=["--wait", "--error_recovery", "--follow_capture"])
     edits = {**cdsp.control_edits, "\ndevices:\n": "\ntitle: sent\ndevices:\n"}
     with open(config_file(edits, base="dummy_control.yml")) as conf:
         cdsp.send("SetConfig", conf.read())
@@ -186,7 +185,7 @@ def test_a_format_change_without_following_is_not_retried(control_cdsp):
 def test_adapt_follows_a_measured_rate_change(control_cdsp):
     """The dummy capture measures its rate, like ALSA without the loopback controls.
     Following forces stop_on_rate_change on, so the config doesn't need it."""
-    cdsp = control_cdsp(MEASURE_SETTINGS, extra_args=["--wait", "--follow_adapt"])
+    cdsp = control_cdsp(MEASURE_SETTINGS, extra_args=["--wait", "--follow_capture"])
     cdsp.capture_control.set("rate", 44100)
     deadline = time.monotonic() + 10.0
     while cdsp.send_raw("GetConfigValue", "/devices/samplerate").get("value") != 44100:
@@ -200,10 +199,7 @@ def test_settings_round_trip_and_persist(start_cdsp, statefile):
     cdsp = start_cdsp(extra_args=["--statefile", statefile])
     assert cdsp.send("GetControllerSettings") is None
     assert "controller" not in read_state(statefile)
-    settings = {
-        "follow_capture": {"specific": "/configs/conf_$samplerate$.yml", "adapt": True},
-        "error_recovery": True,
-    }
+    settings = {"follow_capture": True, "error_recovery": True}
     cdsp.send("SetControllerSettings", settings)
     assert cdsp.send("GetControllerSettings") == settings
     cdsp.poll_until("GetStateFileUpdated", True)
@@ -218,24 +214,10 @@ def test_settings_round_trip_and_persist(start_cdsp, statefile):
     assert current["error_recovery"] is False
 
 
-@pytest.mark.parametrize(
-    "settings",
-    [
-        {"follow_capture": {"specific": "/configs/conf.yml"}},
-        {"follow_capture": {"adapt": False}},
-        {"follow_capture": {}},
-    ],
-)
-def test_invalid_settings_are_rejected(cdsp, settings):
-    reply = cdsp.send_raw("SetControllerSettings", settings)
-    assert "InvalidValueError" in reply["result"]
-    assert cdsp.send("GetControllerSettings") is None
-
-
 def test_settings_can_be_removed(start_cdsp, statefile):
-    cdsp = start_cdsp(extra_args=["--statefile", statefile, "--wait", "--follow_adapt"])
+    cdsp = start_cdsp(extra_args=["--statefile", statefile, "--wait", "--follow_capture"])
     assert cdsp.send("GetControllerSettings") == {
-        "follow_capture": {"specific": None, "adapt": True},
+        "follow_capture": True,
         "error_recovery": None,
     }
     # The client leaves a None value out, so send the null explicitly.
@@ -244,23 +226,12 @@ def test_settings_can_be_removed(start_cdsp, statefile):
     assert cdsp.send("GetControllerSettings") is None
 
 
-@pytest.mark.parametrize(
-    "args", [["--follow_adapt"], ["--follow_specific", "c_$samplerate$.yml"], ["--error_recovery"]]
-)
+@pytest.mark.parametrize("args", [["--follow_capture"], ["--error_recovery"]])
 def test_the_cli_args_need_wait_mode(camilladsp_bin, args):
     result = subprocess.run(
         [camilladsp_bin, "-p", "1234", *args, "dummy_sine.yml"], capture_output=True
     )
     assert result.returncode == CLAP_USAGE_ERROR
-
-
-def test_a_template_without_tokens_is_refused_at_startup(camilladsp_bin, statefile):
-    result = subprocess.run(
-        [camilladsp_bin, "-p", "1234", "-w", "--follow_specific", "conf.yml"],
-        capture_output=True,
-        timeout=10,
-    )
-    assert result.returncode == EXIT_BAD_CONFIG
 
 
 def test_the_cli_args_are_written_to_the_statefile(start_cdsp, statefile):
@@ -272,10 +243,10 @@ def test_the_cli_args_are_written_to_the_statefile(start_cdsp, statefile):
         "error_recovery": True,
     }
     second = start_cdsp(
-        config=None, extra_args=["--statefile", statefile, "--wait", "--follow_adapt"]
+        config=None, extra_args=["--statefile", statefile, "--wait", "--follow_capture"]
     )
     assert second.send("GetControllerSettings") == {
-        "follow_capture": {"specific": None, "adapt": True},
+        "follow_capture": True,
         "error_recovery": True,
     }
     assert second.exit() == EXIT_OK

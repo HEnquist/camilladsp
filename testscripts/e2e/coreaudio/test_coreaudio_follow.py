@@ -2,8 +2,8 @@
 
 BlackHole is the macOS stand-in for a loopback: a player sets the device's nominal rate,
 and the capture has to follow. A rate change on the device fires the backend's rate
-listener, which stops the session with a CaptureFormatChange, and the controller picks
-the config for the new rate and starts it again. While nothing runs, the controller asks
+listener, which stops the session with a CaptureFormatChange, and the controller adapts
+the config to the new rate and starts it again. While nothing runs, the controller asks
 the device for its nominal rate instead, see `query_capture_source`.
 
 The feeder stays at the rate it was opened at and the HAL converts, so the tone keeps
@@ -19,6 +19,19 @@ from .blackhole import FEED_DEVICE, set_nominal_rate, wait_for_nominal_rate
 pytestmark = pytest.mark.coreaudio
 
 EXIT_OK = 0
+FOLLOW = ["--wait", "--follow_capture"]
+
+# A delay in samples is only right at the config's own rate, so Adapt refuses to run it
+# at another rate, and the controller waits for the source instead.
+DELAY_IN_SAMPLES = """filters:
+  delay:
+    type: Delay
+    parameters: {delay: 10, delay_unit: samples}
+pipeline:
+  - type: Filter
+    channels: [0]
+    names: [delay]
+"""
 
 
 def config_value(cdsp, pointer):
@@ -60,32 +73,21 @@ def status(cdsp):
     return cdsp.send("GetControllerStatus")
 
 
-@pytest.fixture
-def variants(tmp_path, ca_config):
-    """Factory for Specific variant files named by rate, returning the template.
-
-    With Specific, the entry config is one of the variants, the one for the rate it
-    starts at. Get its path with `variant(template, rate)`.
-    """
-
-    def _write(*rates, **kwargs):
-        for rate in rates:
-            with open(ca_config(samplerate=rate, **kwargs)) as conf:
-                (tmp_path / f"variant_{rate}.yml").write_text(conf.read())
-        return str(tmp_path / "variant_$samplerate$.yml")
-
-    return _write
-
-
-def variant(template, rate):
-    return template.replace("$samplerate$", str(rate))
+def with_delay_in_samples(config):
+    """The config at `config`, with its empty pipeline replaced by a delay in samples."""
+    with open(config) as conf:
+        text = conf.read()
+    assert "pipeline: []" in text
+    with open(config, "w") as conf:
+        conf.write(text.replace("pipeline: []", DELAY_IN_SAMPLES))
+    return config
 
 
 def test_adapt_follows_each_rate_change(start_cdsp, ca_config, feeder):
     """Adapt changes the entry config to every rate the device is switched to."""
     feeder()
     entry = ca_config()
-    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_adapt"])
+    cdsp = start_cdsp(config=entry, extra_args=FOLLOW)
     wait_for_signal(cdsp)
     assert status(cdsp)["following"] is True
     for rate in (44100, 96000, 48000):
@@ -104,7 +106,7 @@ def test_adapt_with_a_resampler_changes_only_the_capture_rate(start_cdsp, ca_con
     config = ca_config(
         devices={"resampler": "{type: AsyncSinc, profile: Fast}", "capture_samplerate": 48000}
     )
-    cdsp = start_cdsp(config=config, extra_args=["--wait", "--follow_adapt"])
+    cdsp = start_cdsp(config=config, extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(96000)
     poll_config_value(cdsp, "/devices/capture_samplerate", 96000)
@@ -130,49 +132,20 @@ def test_startup_follows_the_rate_the_source_is_at(start_cdsp, ca_config, feeder
     """Rule 14: the source is asked first, so the first session opens at its rate."""
     switch_source(96000)
     feeder(rate=96000)
-    cdsp = start_cdsp(
-        config=ca_config(samplerate=44100), extra_args=["--wait", "--follow_adapt"]
-    )
+    cdsp = start_cdsp(config=ca_config(samplerate=44100), extra_args=FOLLOW)
     wait_for_rate(cdsp, 96000)
     wait_for_signal(cdsp)
 
 
-def test_specific_switches_between_files(start_cdsp, feeder, variants):
-    template = variants(44100, 48000, 96000)
-    entry = variant(template, 48000)
-    feeder()
-    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
-    wait_for_signal(cdsp)
-    # The entry is selected for its own rate like any other variant.
-    assert status(cdsp)["provider"] == "Specific"
-    assert status(cdsp)["config_file"].endswith("variant_48000.yml")
-    assert cdsp.send("CheckControllerFiles") == {
-        "specific": [
-            {"file": variant(template, rate), "samplerate": rate, "channels": None,
-             "format": None, "problem": None}
-            for rate in (44100, 48000, 96000)
-        ],
-        "adapt": None,
-    }
-    for rate in (44100, 96000, 48000):
-        switch_source(rate)
-        wait_for_rate(cdsp, rate)
-        wait_for_signal(cdsp)
-        assert status(cdsp)["config_file"].endswith(f"variant_{rate}.yml")
-        # The entry stays the config file, so a restart starts from it again.
-        assert cdsp.send("GetConfigFilePath") == entry
-
-
-def test_specific_with_a_missing_file_waits_for_the_source(
-    start_cdsp, ca_config, feeder, variants
-):
+def test_a_rate_adapt_refuses_waits_for_the_source(start_cdsp, ca_config, feeder):
     """Rules 10 and 22: no config for the rate, so wait, and follow once there is one."""
-    template = variants(48000, 96000)
+    entry = with_delay_in_samples(ca_config())
     feeder()
-    cdsp = start_cdsp(
-        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
-    )
+    cdsp = start_cdsp(config=entry, extra_args=FOLLOW)
     wait_for_signal(cdsp)
+    adapt = cdsp.send("CheckControllerFiles")["adapt"]
+    assert adapt["file"] == entry
+    assert "filter 'delay': delay in samples" in adapt["problem"]
     switch_source(44100)
     waiting = cdsp.poll_until_true(
         "GetControllerStatus", lambda s: s["waiting_for_source"] is not None
@@ -181,78 +154,31 @@ def test_specific_with_a_missing_file_waits_for_the_source(
     cdsp.poll_until("GetState", "Inactive")
     # The query keeps reporting the same rate, so it keeps waiting.
     assert status(cdsp)["waiting_for_source"]["samplerate"] == 44100
-    switch_source(96000)
-    wait_for_rate(cdsp, 96000, timeout=5.0)
+    switch_source(48000)
+    wait_for_rate(cdsp, 48000, timeout=5.0)
     assert status(cdsp)["waiting_for_source"] is None
-    assert status(cdsp)["config_file"].endswith("variant_96000.yml")
+    assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == ("Adapt", entry)
 
 
-def test_a_stop_ends_the_wait_for_the_source(start_cdsp, feeder, variants):
-    template = variants(48000, 96000)
+def test_a_stop_ends_the_wait_for_the_source(start_cdsp, ca_config, feeder):
     feeder()
-    cdsp = start_cdsp(
-        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
-    )
+    cdsp = start_cdsp(config=with_delay_in_samples(ca_config()), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(44100)
     cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is not None)
     cdsp.send("Stop")
     cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is None)
-    # Switching to a rate with a file no longer starts anything.
-    switch_source(96000)
+    # Switching to a rate the config runs at no longer starts anything.
+    switch_source(48000)
     time.sleep(2.0)
     assert cdsp.send("GetState") == "Inactive"
-
-
-def test_specific_falls_back_to_adapt(start_cdsp, ca_config, feeder, variants):
-    """With both providers, a rate with no file adapts the entry, which then doesn't
-    have to follow the naming scheme. The preflight still points it out."""
-    template = variants(96000)
-    entry = ca_config()
-    feeder()
-    cdsp = start_cdsp(
-        config=entry,
-        extra_args=["--wait", "--follow_specific", template, "--follow_adapt"],
-    )
-    wait_for_signal(cdsp)
-    checks = cdsp.send("CheckControllerFiles")
-    misnamed = [c for c in checks["specific"] if c["file"] == entry]
-    assert "template" in misnamed[0]["problem"]
-    # Adapt starts from the same entry, which is fine as it is.
-    assert checks["adapt"]["file"] == entry
-    assert checks["adapt"]["problem"] is None
-    switch_source(44100)
-    wait_for_rate(cdsp, 44100)
-    assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == ("Adapt", entry)
-    switch_source(96000)
-    wait_for_rate(cdsp, 96000)
-    assert status(cdsp)["provider"] == "Specific"
-    assert status(cdsp)["config_file"].endswith("variant_96000.yml")
-
-
-def test_a_variant_at_the_wrong_rate_is_rejected(start_cdsp, ca_config, feeder, variants):
-    """Rule 18: a file whose rate doesn't match its name would select itself forever."""
-    template = variants(48000)
-    with open(ca_config(samplerate=48000)) as conf:
-        open(variant(template, 44100), "w").write(conf.read())
-    feeder()
-    cdsp = start_cdsp(
-        config=variant(template, 48000), extra_args=["--wait", "--follow_specific", template]
-    )
-    wait_for_signal(cdsp)
-    checks = cdsp.send("CheckControllerFiles")["specific"]
-    problems = {c["samplerate"]: c["problem"] for c in checks}
-    assert problems[48000] is None
-    assert "rate" in problems[44100]
-    switch_source(44100)
-    cdsp.poll_until_true("GetControllerStatus", lambda s: s["waiting_for_source"] is not None)
 
 
 def test_a_loaded_entry_starts_at_the_followed_rate(start_cdsp, ca_config, feeder):
     """A config written for 48 kHz, loaded while the source runs at 96 kHz, is adapted
     before it starts rather than starting at 48 kHz and following back."""
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_adapt"])
+    cdsp = start_cdsp(config=ca_config(), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)
@@ -268,7 +194,7 @@ def test_a_patch_keeps_the_rate_and_is_not_followed(start_cdsp, ca_config, feede
     the websocket source, so the next rate change stops processing rather than adapting
     the patched config."""
     feeder()
-    cdsp = start_cdsp(config=ca_config(), extra_args=["--wait", "--follow_adapt"])
+    cdsp = start_cdsp(config=ca_config(), extra_args=FOLLOW)
     wait_for_signal(cdsp)
     switch_source(96000)
     wait_for_rate(cdsp, 96000)

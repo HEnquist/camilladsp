@@ -3,13 +3,13 @@
 The dummy capture asks a `SimulatedSource` run by the test what its source is doing,
 the way the ALSA backend asks a loopback. That covers the parts of following that need
 the source to be asked rather than to report a change: the query at startup, and waiting
-for the source when no provider has a config for its format (rules 14, 21 and 22 of the
+for the source when the config can't be adapted to its format (rules 14, 21 and 22 of the
 controller plan). While following, the capture stops for a source at another rate or
 channel count, like a loopback capture the kernel stops, so this runs the whole following
 loop on any machine.
 
-The entry config is 2 channels at 48 kHz, and Adapt is the only provider, so a source at
-4 channels has no config and the controller waits.
+The entry config is 2 channels at 48 kHz, and Adapt doesn't change the channel count, so
+a source at 4 channels has no config and the controller waits.
 """
 
 import json
@@ -21,7 +21,7 @@ import yaml
 from conftest import CAPTURE_PORT_PLACEHOLDER, PLAYBACK_PORT_PLACEHOLDER, free_port
 from dummyctl import SimulatedSource
 
-FOLLOW = ["--wait", "--follow_adapt"]
+FOLLOW = ["--wait", "--follow_capture"]
 
 
 @pytest.fixture
@@ -204,29 +204,11 @@ def send_config(cdsp, path, title):
     cdsp.poll_until("GetConfigTitle", title)
 
 
-@pytest.fixture
-def specific(tmp_path, config_file, source):
-    """A Specific template with files for 48 and 96 kHz, and the args to follow it."""
-    template = str(tmp_path / "conf_$samplerate$.yml")
-    for rate in (48000, 96000):
-        edits = source_edits(source)
-        edits["samplerate: 48000"] = f"samplerate: {rate}"
-        path = template.replace("$samplerate$", str(rate))
-        config_file(edits, base="dummy_control.yml", path=path)
-    return template, ["--wait", "--follow_specific", template]
-
-
-@pytest.mark.parametrize("provider", ["adapt", "specific"])
-def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specific, provider):
+def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source):
     """The websocket source: a source change stops the sent config rather than following
     it, and nothing restarts it. `Reload` goes back to the entry file and follows again."""
-    template, specific_args = specific
     source.play(48000)
-    if provider == "adapt":
-        cdsp = source_cdsp()
-    else:
-        entry = template.replace("$samplerate$", "48000")
-        cdsp = source_cdsp(extra_args=specific_args, config=entry)
+    cdsp = source_cdsp()
     wait_for_rate(cdsp, 48000)
     send_config(cdsp, cdsp.config_path, "sent")
     state = cdsp.send("GetControllerStatus")
@@ -251,12 +233,7 @@ def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source, specifi
     wait_for_rate(cdsp, 96000)
     state = cdsp.send("GetControllerStatus")
     assert (state["source"], state["following"]) == ("Files", True)
-    if provider == "specific":
-        # Specific runs the variant, not the entry.
-        variant = template.replace("$samplerate$", "96000")
-        assert (state["provider"], state["config_file"]) == ("Specific", variant)
-    else:
-        assert (state["provider"], state["config_file"]) == ("Adapt", cdsp.config_path)
+    assert (state["provider"], state["config_file"]) == ("Adapt", cdsp.config_path)
 
 
 def test_a_patch_runs_from_the_websocket_source(source_cdsp, source):

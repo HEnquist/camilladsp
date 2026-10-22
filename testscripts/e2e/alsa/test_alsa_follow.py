@@ -3,7 +3,7 @@
 While following, the capture sets `PCM Notify` on its cable. A player can then start at
 any format, and when it differs from the capture's, the kernel stops the capture. The
 backend reads the new format from the `PCM Slave` controls and stops the session with a
-CaptureFormatChange, and the controller starts the config for it. While nothing runs,
+CaptureFormatChange, and the controller adapts the config to it. While nothing runs,
 the controller asks the device instead: the `PCM Slave` controls give the format of a
 running player, see `query_capture_source`.
 
@@ -40,7 +40,7 @@ pytestmark = pytest.mark.alsa
 
 EXIT_OK = 0
 LEVEL_DB = -6.0
-FOLLOW = ["--wait", "--follow_adapt"]
+FOLLOW = ["--wait", "--follow_capture"]
 
 
 @pytest.fixture(scope="module")
@@ -236,7 +236,7 @@ def test_adapt_rewrites_an_explicit_format(start_cdsp, alsa_config, feeder):
     wait_for_signal(cdsp)
 
 
-def test_a_channel_change_without_a_variant_waits_for_the_source(
+def test_a_channel_change_waits_for_the_source(
     start_cdsp, alsa_config, feeder
 ):
     """Adapt can't change the channel count, so it waits, and follows the next player."""
@@ -311,112 +311,3 @@ def test_without_following_notify_is_left_alone(start_cdsp, alsa_config, feeder)
         assert cdsp.send("GetStopReason") == "None"
     finally:
         player.stop()
-
-
-@pytest.fixture
-def variants(tmp_path, alsa_config):
-    """Factory for Specific variant files named by rate and channels.
-
-    Returns the template. The entry config is one of the variants, see `variant`.
-    """
-
-    def _write(*formats):
-        for rate, channels in formats:
-            config = alsa_config(capture_format=None, samplerate=rate, channels=channels)
-            with open(config) as conf:
-                (tmp_path / f"conf_{rate}_{channels}.yml").write_text(conf.read())
-        return str(tmp_path / "conf_$samplerate$_$channels$.yml")
-
-    return _write
-
-
-def variant(template, rate, channels):
-    return template.replace("$samplerate$", str(rate)).replace("$channels$", str(channels))
-
-
-def test_specific_switches_files_on_a_channel_change(start_cdsp, feeder, variants):
-    """A player going from 2 to 4 channels at the same rate selects the 4 channel file,
-    while the entry stays the config file path. A Reload starts from the entry and
-    selects the 4 channel file again."""
-    template = variants((48000, 2), (48000, 4))
-    entry = variant(template, 48000, 2)
-    first = feeder()
-    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
-    wait_for_signal(cdsp)
-    assert status(cdsp)["config_file"] == entry
-    first.stop()
-    feeder(channels=4)
-    cdsp.poll_until_true(
-        "GetControllerStatus",
-        lambda s: s["config_file"] == variant(template, 48000, 4),
-    )
-    cdsp.poll_until("GetState", "Running")
-    wait_for_capture("channels", "4")
-    assert cdsp.send("GetConfigFilePath") == entry
-    cdsp.send("Reload")
-    cdsp.poll_until("GetState", "Running")
-    assert status(cdsp)["config_file"] == variant(template, 48000, 4)
-    wait_for_capture("channels", "4")
-
-
-def test_specific_and_adapt_chain_through_rates(start_cdsp, alsa_config, feeder, variants):
-    """A rate with its own file uses it, any other rate adapts the entry."""
-    template = variants((96000, 2))
-    entry = alsa_config(capture_format=None)
-    current = feeder()
-    cdsp = start_cdsp(
-        config=entry, extra_args=["--wait", "--follow_specific", template, "--follow_adapt"]
-    )
-    wait_for_signal(cdsp)
-    for rate in (96000, 44100, 96000):
-        current.stop()
-        current = feeder(rate=rate)
-        wait_for_rate(cdsp, rate)
-        wait_for_signal(cdsp)
-        if rate == 96000:
-            expected = ("Specific", variant(template, 96000, 2))
-        else:
-            expected = ("Adapt", entry)
-        assert (status(cdsp)["provider"], status(cdsp)["config_file"]) == expected
-
-
-def test_specific_follows_rate_and_channels_changing_together(start_cdsp, feeder, variants):
-    """Like an interface whose channel count follows the rate: one player switch changes
-    both, and the file for that pair is selected, there and back."""
-    template = variants((48000, 2), (96000, 4))
-    entry = variant(template, 48000, 2)
-    current = feeder()
-    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
-    wait_for_signal(cdsp)
-    for rate, channels in ((96000, 4), (48000, 2)):
-        current.stop()
-        current = feeder(rate=rate, channels=channels)
-        cdsp.poll_until_true(
-            "GetControllerStatus",
-            lambda s: s["config_file"] == variant(template, rate, channels),
-        )
-        wait_for_rate(cdsp, rate)
-        wait_for_capture("channels", str(channels))
-    wait_for_signal(cdsp)
-
-
-def test_specific_selects_a_file_by_sample_format(start_cdsp, alsa_config, feeder, tmp_path):
-    """A `$format$` template, with an explicit capture format in each file."""
-    for fmt in ("S16_LE", "S32_LE"):
-        with open(alsa_config(capture_format=fmt)) as conf:
-            (tmp_path / f"conf_{fmt}.yml").write_text(conf.read())
-    template = str(tmp_path / "conf_$format$.yml")
-    entry = template.replace("$format$", "S16_LE")
-    first = feeder(fmt="S16_LE")
-    cdsp = start_cdsp(config=entry, extra_args=["--wait", "--follow_specific", template])
-    wait_for_signal(cdsp)
-    assert status(cdsp)["config_file"] == entry
-    first.stop()
-    feeder(fmt="S32_LE")
-    cdsp.poll_until_true(
-        "GetControllerStatus",
-        lambda s: s["config_file"] == template.replace("$format$", "S32_LE"),
-    )
-    cdsp.poll_until("GetState", "Running")
-    wait_for_capture("format", "S32_LE")
-    wait_for_signal(cdsp)

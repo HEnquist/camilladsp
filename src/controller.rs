@@ -22,14 +22,12 @@
 //!
 //! A config comes from one of two sources. From the files source, the controller loads the
 //! entry config, the active config file, through a provider. Single runs it as is. When the
-//! capture source changes format, following picks the config to run for the new format
-//! from two more providers. Specific expands a file name template with the reported format
-//! and loads that file. Adapt changes the rate of the entry config, the way the `-r`
-//! override does. A config from the websocket source runs exactly as sent.
+//! capture source changes format, following runs the config through the Adapt provider,
+//! which adapts the entry config to the new format. A config from the websocket source runs
+//! exactly as sent.
 
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,7 +35,7 @@ use crate::config::{self, Configuration};
 use crate::filters::fftconv::ImpulseCache;
 pub use camilladsp_schema::protocol::{
     AdaptCheck, ConfigProvider, ControllerFileChecks, ControllerSettings, ControllerSource,
-    FileCheck, FollowCapture, SourceFormat, TOKEN_CHANNELS, TOKEN_FORMAT, TOKEN_SAMPLERATE, TOKENS,
+    SourceFormat,
 };
 
 /// How close a reported rate has to be to a standard rate to be snapped to it, relative.
@@ -145,8 +143,6 @@ impl LoadedConfig {
 pub enum Provider {
     /// The entry config as is.
     Single,
-    /// The Specific provider, with the file it loaded.
-    Specific(String),
     /// The Adapt provider.
     Adapt,
     /// A config from the websocket source, run as sent.
@@ -188,7 +184,7 @@ pub struct ControllerStatus {
     pub attempts: usize,
     /// When the next retry is due, while waiting for it.
     pub next_retry: Option<Instant>,
-    /// The format no provider had a config for, while waiting for the source to change.
+    /// The format Adapt had no config for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
 }
 
@@ -198,7 +194,7 @@ pub struct ControllerShared {
     /// The settings, `None` when the statefile has no controller section.
     pub settings: Arc<Mutex<Option<ControllerSettings>>>,
     pub status: Arc<Mutex<ControllerStatus>>,
-    /// The entry config, for checking the Specific files against.
+    /// The entry config, for `CheckControllerFiles`.
     pub entry: Arc<Mutex<Option<ConfigSource>>>,
     /// Whether the process runs in wait mode, without which the controller does nothing.
     pub wait: bool,
@@ -238,127 +234,6 @@ fn capture_rate_of(conf: &Configuration) -> usize {
     } else {
         conf.devices.samplerate()
     }
-}
-
-/// Resolve a template against the directory of the entry config file, if it is relative.
-fn resolve_template(template: &str, entry_filename: Option<&str>) -> PathBuf {
-    let path = PathBuf::from(template);
-    if path.is_absolute() {
-        return path;
-    }
-    let base = entry_filename
-        .map(PathBuf::from)
-        .and_then(|f| f.canonicalize().ok())
-        .and_then(|f| f.parent().map(Path::to_path_buf));
-    match base {
-        Some(dir) => dir.join(path),
-        None => path,
-    }
-}
-
-/// Expand the tokens of a template with a reported format.
-///
-/// Returns `None` if the template has a token the format gives no value for. A previous
-/// value is never filled in, since that would pick a file for a format the source isn't at.
-pub fn expand_template(template: &str, format: &SourceFormat) -> Option<String> {
-    let mut expanded = template.to_string();
-    if expanded.contains(TOKEN_SAMPLERATE) {
-        expanded = expanded.replace(TOKEN_SAMPLERATE, &format.samplerate?.to_string());
-    }
-    if expanded.contains(TOKEN_CHANNELS) {
-        expanded = expanded.replace(TOKEN_CHANNELS, &format.channels?.to_string());
-    }
-    if expanded.contains(TOKEN_FORMAT) {
-        expanded = expanded.replace(TOKEN_FORMAT, format.format.as_deref()?);
-    }
-    Some(expanded)
-}
-
-/// Check a Specific variant against the entry config and the format it was selected for.
-///
-/// Fields of `format` that are not known are not checked.
-pub fn check_variant(
-    entry: Option<&Configuration>,
-    variant: &Configuration,
-    format: &SourceFormat,
-) -> Result<(), String> {
-    if let Some(entry) = entry {
-        let entry_key = entry.devices.capture.device_key();
-        let variant_key = variant.devices.capture.device_key();
-        if entry_key != variant_key {
-            return Err(format!(
-                "it captures from {} {:?}, but the entry config captures from {} {:?}",
-                variant_key.0,
-                variant_key.1.unwrap_or_default(),
-                entry_key.0,
-                entry_key.1.unwrap_or_default()
-            ));
-        }
-    }
-    if let Some(expected) = format.samplerate {
-        let rate = capture_rate_of(variant);
-        if rate != expected {
-            return Err(format!("its capture rate is {rate}, expected {expected}"));
-        }
-    }
-    if let Some(channels) = format.channels {
-        let capture_channels = variant.devices.capture.channels();
-        if capture_channels != channels {
-            return Err(format!(
-                "it has {capture_channels} capture channels, expected {channels}"
-            ));
-        }
-    }
-    if let Some(fmt) = &format.format
-        && variant.devices.capture.format_matches(fmt) == Some(false)
-    {
-        return Err(format!("its capture format is not {fmt}"));
-    }
-    Ok(())
-}
-
-/// The Specific provider: load the file the template gives for this format.
-fn specific_config(
-    entry: &ConfigSource,
-    template: &str,
-    format: &SourceFormat,
-) -> Option<Box<Selected>> {
-    let Some(expanded) = expand_template(template, format) else {
-        info!("Specific: the template '{template}' has a token with no reported value");
-        return None;
-    };
-    let path = resolve_template(&expanded, entry.filename.as_deref());
-    let path_str = path.to_string_lossy().to_string();
-    if !path.exists() {
-        info!("Specific: no config file '{path_str}' for {format}");
-        return None;
-    }
-    let raw = match config::load_config(&path_str) {
-        Ok(raw) => raw,
-        Err(err) => {
-            error!("Specific: could not load '{path_str}': {err}");
-            return None;
-        }
-    };
-    if let Err(err) = check_variant(Some(&entry.raw), &raw, format) {
-        error!("Specific: not using '{path_str}', {err}");
-        return None;
-    }
-    let mut conf = raw;
-    let impulses =
-        match config::validate_config_at_rate(&mut conf, Some(&path_str), format.known_rate()) {
-            Ok(impulses) => impulses,
-            Err(err) => {
-                error!("Specific: '{path_str}' is not valid: {err}");
-                return None;
-            }
-        };
-    Some(Box::new(Selected {
-        config: conf,
-        impulses,
-        provider: Provider::Specific(path_str),
-        format: Some(format.clone()),
-    }))
 }
 
 /// The Adapt provider: change the rate of the entry config to the reported one.
@@ -430,7 +305,6 @@ fn rate_change_problem(raw: &Configuration) -> Option<String> {
 pub fn select_config(
     entry: &ConfigSource,
     format: Option<&SourceFormat>,
-    settings: &ControllerSettings,
     validated: Option<(Configuration, ImpulseCache)>,
 ) -> Selection {
     let Some(format) = format else {
@@ -452,17 +326,10 @@ pub fn select_config(
         }));
     };
     let format = snap_format(format);
-    if let Some(template) = settings.specific_template()
-        && let Some(selected) = specific_config(entry, template, &format)
-    {
-        return Selection::Run(selected);
+    match adapt_config(entry, &format) {
+        Some(selected) => Selection::Run(selected),
+        None => Selection::NoConfig(format),
     }
-    if settings.adapt_enabled()
-        && let Some(selected) = adapt_config(entry, &format)
-    {
-        return Selection::Run(selected);
-    }
-    Selection::NoConfig(format)
 }
 
 /// Run a config from the websocket source exactly as sent, validated as it is.
@@ -475,129 +342,14 @@ pub fn select_websocket(loaded: LoadedConfig) -> Box<Selected> {
     })
 }
 
-/// Token values captured while matching a file name against a template.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct TokenValues {
-    samplerate: Option<String>,
-    channels: Option<String>,
-    format: Option<String>,
-}
-
-impl TokenValues {
-    fn get_mut(&mut self, token: &str) -> &mut Option<String> {
-        match token {
-            TOKEN_SAMPLERATE => &mut self.samplerate,
-            TOKEN_CHANNELS => &mut self.channels,
-            _ => &mut self.format,
-        }
-    }
-}
-
-/// The leading token in `pattern`, if it starts with one.
-fn leading_token(pattern: &str) -> Option<&'static str> {
-    TOKENS.into_iter().find(|t| pattern.starts_with(t))
-}
-
-/// Whether `c` can be part of the value of `token`.
-fn token_char(token: &str, c: char) -> bool {
-    match token {
-        TOKEN_FORMAT => c.is_ascii_alphanumeric() || c == '_',
-        _ => c.is_ascii_digit(),
-    }
-}
-
-/// Match a file name against one component of a template, capturing the token values.
-/// A token that appears twice has to have the same value both times.
-fn match_component(pattern: &str, name: &str, values: &TokenValues) -> Option<TokenValues> {
-    if pattern.is_empty() {
-        return name.is_empty().then(|| values.clone());
-    }
-    if let Some(token) = leading_token(pattern) {
-        let rest = &pattern[token.len()..];
-        let max_len = name.chars().take_while(|c| token_char(token, *c)).count();
-        // Try the longest value first, backing off until the rest matches.
-        for len in (1..=max_len).rev() {
-            let value = &name[..len];
-            let mut candidate = values.clone();
-            let slot = candidate.get_mut(token);
-            match slot {
-                Some(existing) if existing != value => continue,
-                _ => *slot = Some(value.to_string()),
-            }
-            if let Some(found) = match_component(rest, &name[len..], &candidate) {
-                return Some(found);
-            }
-        }
-        return None;
-    }
-    let mut chars = pattern.chars();
-    let first = chars.next()?;
-    if name.starts_with(first) {
-        match_component(chars.as_str(), &name[first.len_utf8()..], values)
-    } else {
-        None
-    }
-}
-
-/// Find every file a template can match, with the token values each one gives.
-fn find_template_files(template: &Path) -> Vec<(PathBuf, TokenValues)> {
-    let mut found = vec![(PathBuf::new(), TokenValues::default())];
-    for component in template.components() {
-        let part = component.as_os_str().to_string_lossy();
-        let has_token = TOKENS.iter().any(|t| part.contains(t));
-        let mut next = Vec::new();
-        for (base, values) in found {
-            if !has_token {
-                next.push((base.join(component.as_os_str()), values));
-                continue;
-            }
-            let dir = if base.as_os_str().is_empty() {
-                PathBuf::from(".")
-            } else {
-                base.clone()
-            };
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if let Some(matched) = match_component(&part, &name, &values) {
-                    next.push((base.join(&name), matched));
-                }
-            }
-        }
-        found = next;
-    }
-    found.sort_by(|a, b| a.0.cmp(&b.0));
-    found
-        .into_iter()
-        .filter(|(path, _)| path.is_file())
-        .collect()
-}
-
-/// Check every file a Specific template can match against the entry config.
-///
-/// Each token is a wildcard, and the values read back from a file name give the format
-/// the file is checked against, as in [`check_variant`].
-///
-/// The entry config file should be one of the files, the one for the format it is written
-/// for, so that Specific selects it like any other. If it isn't, that is reported too.
-pub fn preflight(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck> {
-    let mut checks = check_template_files(template, entry);
-    checks.extend(check_entry_name(template, entry, &checks));
-    checks
-}
-
-/// Check the configs each enabled follow provider can use, see [`ControllerFileChecks`].
+/// Check the entry config Adapt starts from, when following is on, see
+/// [`ControllerFileChecks`].
 pub fn check_files(
     settings: &ControllerSettings,
     entry: Option<&ConfigSource>,
 ) -> ControllerFileChecks {
     ControllerFileChecks {
-        specific: settings
-            .specific_template()
-            .map(|template| preflight(template, entry)),
-        adapt: settings.adapt_enabled().then(|| check_adapt(entry)),
+        adapt: settings.following_enabled().then(|| check_adapt(entry)),
     }
 }
 
@@ -643,125 +395,14 @@ fn check_adapt(entry: Option<&ConfigSource>) -> AdaptCheck {
     }
 }
 
-/// Report an entry config file that isn't one of the files the template matches.
-fn check_entry_name(
-    template: &str,
-    entry: Option<&ConfigSource>,
-    checks: &[FileCheck],
-) -> Option<FileCheck> {
-    let entry_file = entry?.filename.as_ref()?;
-    let canonical = |f: &str| PathBuf::from(f).canonicalize().ok();
-    let entry_path = canonical(entry_file)?;
-    if checks
-        .iter()
-        .any(|c| canonical(&c.file).as_ref() == Some(&entry_path))
-    {
-        return None;
-    }
-    Some(FileCheck {
-        file: entry_file.clone(),
-        samplerate: None,
-        channels: None,
-        format: None,
-        problem: Some(format!(
-            "the entry config is not named by the template '{template}', so Specific can't select it"
-        )),
-    })
-}
-
-fn check_template_files(template: &str, entry: Option<&ConfigSource>) -> Vec<FileCheck> {
-    let path = resolve_template(template, entry.and_then(|e| e.filename.as_deref()));
-    find_template_files(&path)
-        .into_iter()
-        .map(|(file, values)| {
-            let file_str = file.to_string_lossy().to_string();
-            let samplerate = values.samplerate.as_ref().and_then(|v| v.parse().ok());
-            let channels = values.channels.as_ref().and_then(|v| v.parse().ok());
-            let problem = check_file(
-                &file_str,
-                entry,
-                samplerate,
-                channels,
-                values.format.as_deref(),
-            );
-            FileCheck {
-                file: file_str,
-                samplerate,
-                channels,
-                format: values.format,
-                problem,
-            }
-        })
-        .collect()
-}
-
-fn check_file(
-    file: &str,
-    entry: Option<&ConfigSource>,
-    samplerate: Option<usize>,
-    channels: Option<usize>,
-    format: Option<&str>,
-) -> Option<String> {
-    let raw = match config::load_config(file) {
-        Ok(raw) => raw,
-        Err(err) => return Some(err.to_string()),
-    };
-    if let Some(name) = format
-        && !raw.devices.capture.is_format_name(name)
-    {
-        return Some(format!("'{name}' is not a known sample format"));
-    }
-    let source_format = SourceFormat {
-        samplerate,
-        channels,
-        format: format.map(str::to_string),
-    };
-    if let Err(err) = check_variant(entry.map(|e| &e.raw), &raw, &source_format) {
-        return Some(err);
-    }
-    let mut conf = raw;
-    if let Err(err) = config::validate_config_at_rate(
-        &mut conf,
-        Some(file),
-        samplerate.and_then(NonZeroUsize::new),
-    ) {
-        return Some(err.to_string());
-    }
-    None
-}
-
-/// Log the problems [`preflight`] finds, as warnings.
-pub fn log_preflight(template: &str, entry: Option<&ConfigSource>) {
-    let checks = check_template_files(template, entry);
-    if checks.is_empty() {
-        warn!("Specific: no files match the template '{template}'");
-    }
-    if let Some(check) = check_entry_name(template, entry, &checks) {
-        warn!(
-            "Specific: '{}': {}",
-            check.file,
-            check.problem.unwrap_or_default()
-        );
-    }
-    for check in checks {
-        match &check.problem {
-            Some(problem) => warn!("Specific: '{}' can't be used, {problem}", check.file),
-            None => debug!("Specific: '{}' is ok", check.file),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::CaptureDevice;
 
-    fn settings(specific: Option<&str>, adapt: Option<bool>) -> ControllerSettings {
+    fn following() -> ControllerSettings {
         ControllerSettings {
-            follow_capture: Some(FollowCapture {
-                specific: specific.map(str::to_string),
-                adapt,
-            }),
+            follow_capture: Some(true),
             error_recovery: None,
         }
     }
@@ -795,13 +436,7 @@ mod tests {
         }
     }
 
-    fn write_config(dir: &Path, name: &str, conf: &Configuration) -> String {
-        let path = dir.join(name);
-        std::fs::write(&path, yaml_serde::to_string(conf).unwrap()).unwrap();
-        path.to_string_lossy().to_string()
-    }
-
-    fn temp_dir(name: &str) -> PathBuf {
+    fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("cdsp_controller_{name}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -832,25 +467,6 @@ mod tests {
     }
 
     #[test]
-    fn settings_validation() {
-        assert!(ControllerSettings::default().validate().is_ok());
-        assert!(settings(None, Some(true)).validate().is_ok());
-        assert!(
-            settings(Some("conf_$samplerate$.yml"), None)
-                .validate()
-                .is_ok()
-        );
-        // No provider.
-        assert!(settings(None, None).validate().is_err());
-        assert!(settings(None, Some(false)).validate().is_err());
-        // A template without a token.
-        assert!(settings(Some("conf.yml"), Some(true)).validate().is_err());
-        let sanitized = settings(Some("conf.yml"), None).sanitized();
-        assert_eq!(sanitized.follow_capture, None);
-        assert!(!sanitized.following_enabled());
-    }
-
-    #[test]
     fn rates_snap_to_standard_rates() {
         assert_eq!(snap_rate(44097), 44100);
         assert_eq!(snap_rate(47900), 48000);
@@ -861,54 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn template_expansion() {
-        let full = SourceFormat {
-            samplerate: Some(96000),
-            channels: Some(4),
-            format: Some("S24_3_LE".to_string()),
-        };
-        assert_eq!(
-            expand_template("c_$samplerate$_$channels$_$format$.yml", &full),
-            Some("c_96000_4_S24_3_LE.yml".to_string())
-        );
-        // A token without a value gives nothing.
-        assert_eq!(
-            expand_template("c_$channels$.yml", &format(96000, None)),
-            None
-        );
-        assert_eq!(
-            expand_template("c_$samplerate$.yml", &unknown_rate(Some(2))),
-            None
-        );
-        assert_eq!(
-            expand_template("c_$samplerate$.yml", &format(44100, None)),
-            Some("c_44100.yml".to_string())
-        );
-    }
-
-    #[test]
-    fn relative_templates_resolve_against_the_entry_file() {
-        let dir = temp_dir("relative");
-        let entry_file = write_config(&dir, "entry.yml", &base_config(48000, 2, ""));
-        let resolved = resolve_template("conf_$samplerate$.yml", Some(&entry_file));
-        assert_eq!(
-            resolved,
-            dir.canonicalize().unwrap().join("conf_$samplerate$.yml")
-        );
-        // An absolute path needs a drive letter on Windows, so build one from the temp dir.
-        let absolute = std::env::temp_dir().join("abs").join("conf.yml");
-        let resolved = resolve_template(&absolute.to_string_lossy(), Some(&entry_file));
-        assert_eq!(resolved, absolute);
-    }
-
-    #[test]
     fn without_a_format_the_entry_runs_as_is() {
-        let selected = run(select_config(
-            &entry(base_config(48000, 2, "")),
-            None,
-            &settings(None, Some(true)),
-            None,
-        ));
+        let selected = run(select_config(&entry(base_config(48000, 2, "")), None, None));
         assert_eq!(selected.provider, Provider::Single);
         assert_eq!(selected.config.devices.samplerate(), 48000);
     }
@@ -917,7 +487,7 @@ mod tests {
     fn an_invalid_entry_is_reported() {
         let conf = base_config(48000, 2, "  target_level: 100000\n");
         assert!(matches!(
-            select_config(&entry(conf), None, &settings(None, Some(true)), None),
+            select_config(&entry(conf), None, None),
             Selection::Invalid(_)
         ));
     }
@@ -940,7 +510,6 @@ mod tests {
         let adapted = run(select_config(
             &entry(base_config(48000, 2, "")),
             Some(&format(96000, Some(2))),
-            &settings(None, Some(true)),
             None,
         ));
         let loaded = LoadedConfig::patched(adapted.config).unwrap();
@@ -956,7 +525,6 @@ mod tests {
         let selected = run(select_config(
             &entry(base_config(48000, 2, "")),
             Some(&format(96000, Some(2))),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.provider, Provider::Adapt);
@@ -970,7 +538,6 @@ mod tests {
         let selected = run(select_config(
             &entry(base_config(48000, 2, extra)),
             Some(&format(96000, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 48000);
@@ -980,7 +547,6 @@ mod tests {
         let selected = run(select_config(
             &entry(base_config(48000, 2, extra)),
             Some(&format(48000, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert!(selected.config.devices.resampler.is_none());
@@ -991,7 +557,6 @@ mod tests {
         let selected = run(select_config(
             &entry(base_config(48000, 2, "")),
             Some(&format(44097, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 44100);
@@ -1022,7 +587,6 @@ pipeline:
         let selected = run(select_config(
             &entry(base_config(48000, 2, &extra)),
             Some(&format(96000, None)),
-            &settings(None, Some(true)),
             None,
         ));
         let filters = selected.config.filters.unwrap();
@@ -1039,13 +603,12 @@ pipeline:
     #[test]
     fn adapt_gives_nothing_for_unknown_rate_or_changed_channels() {
         let e = entry(base_config(48000, 2, ""));
-        let s = settings(None, Some(true));
         assert!(matches!(
-            select_config(&e, Some(&unknown_rate(None)), &s, None),
+            select_config(&e, Some(&unknown_rate(None)), None),
             Selection::NoConfig(_)
         ));
         assert!(matches!(
-            select_config(&e, Some(&format(96000, Some(4))), &s, None),
+            select_config(&e, Some(&format(96000, Some(4))), None),
             Selection::NoConfig(_)
         ));
     }
@@ -1059,7 +622,6 @@ pipeline:
                 channels: None,
                 format: Some("S16_LE".to_string()),
             }),
-            &settings(None, Some(true)),
             None,
         ));
         let CaptureDevice::RawFile(dev) = &selected.config.devices.capture else {
@@ -1077,243 +639,16 @@ pipeline:
                 channels: None,
                 format: Some("S24".to_string()),
             }),
-            &settings(None, Some(true)),
             None,
         );
         assert!(matches!(selected, Selection::NoConfig(_)));
     }
 
     #[test]
-    fn specific_only_and_both_providers() {
-        let dir = temp_dir("specific");
-        write_config(&dir, "conf_96000_2.yml", &base_config(96000, 2, ""));
-        let template = format!("{}/conf_$samplerate$_$channels$.yml", dir.to_string_lossy());
-        let e = entry(base_config(48000, 2, ""));
-
-        // Specific finds the file.
-        let selected = run(select_config(
-            &e,
-            Some(&format(96000, Some(2))),
-            &settings(Some(&template), None),
-            None,
-        ));
-        assert!(
-            matches!(selected.provider, Provider::Specific(ref f) if f.ends_with("conf_96000_2.yml"))
-        );
-
-        // A missing file with Specific only gives no config.
-        assert!(matches!(
-            select_config(
-                &e,
-                Some(&format(44100, Some(2))),
-                &settings(Some(&template), None),
-                None
-            ),
-            Selection::NoConfig(_)
-        ));
-        // An unknown token value gives no config.
-        assert!(matches!(
-            select_config(
-                &e,
-                Some(&format(96000, None)),
-                &settings(Some(&template), None),
-                None
-            ),
-            Selection::NoConfig(_)
-        ));
-        // With both, a missing file falls back to Adapt.
-        let selected = run(select_config(
-            &e,
-            Some(&format(44100, Some(2))),
-            &settings(Some(&template), Some(true)),
-            None,
-        ));
-        assert_eq!(selected.provider, Provider::Adapt);
-        assert_eq!(selected.config.devices.samplerate(), 44100);
-    }
-
-    #[test]
-    fn the_entry_is_one_of_the_specific_files() {
-        let dir = temp_dir("entry_format");
-        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
-        let s = settings(Some(&template), None);
-        let fmt = format(48000, Some(2));
-
-        // An entry outside the template gets no special treatment: Specific alone has
-        // no file for its rate, and the preflight says why.
-        let outside = write_config(&dir, "entry.yml", &base_config(48000, 2, ""));
-        let e = ConfigSource {
-            raw: base_config(48000, 2, ""),
-            filename: Some(outside.clone()),
-        };
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::NoConfig(_)
-        ));
-        let checks = preflight(&template, Some(&e));
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].file, outside);
-        assert!(checks[0].problem.as_ref().unwrap().contains("template"));
-
-        // Named by the template, it is selected for its own rate like any other file.
-        let inside = write_config(&dir, "conf_48000.yml", &base_config(48000, 2, ""));
-        let e = ConfigSource {
-            raw: base_config(48000, 2, ""),
-            filename: Some(inside),
-        };
-        let selected = run(select_config(&e, Some(&fmt), &s, None));
-        assert!(
-            matches!(selected.provider, Provider::Specific(ref f) if f.ends_with("conf_48000.yml"))
-        );
-        let checks = preflight(&template, Some(&e));
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].problem, None);
-    }
-
-    #[test]
-    fn specific_rejects_files_that_fail_the_checks() {
-        let dir = temp_dir("specific_checks");
-        let template = format!("{}/conf_$samplerate$_$channels$.yml", dir.to_string_lossy());
-        let e = entry(base_config(48000, 2, ""));
-        let s = settings(Some(&template), None);
-        let fmt = format(96000, Some(2));
-        let path = dir.join("conf_96000_2.yml");
-
-        // Invalid.
-        std::fs::write(&path, "not: a config").unwrap();
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::NoConfig(_)
-        ));
-        // Wrong rate.
-        write_config(&dir, "conf_96000_2.yml", &base_config(44100, 2, ""));
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::NoConfig(_)
-        ));
-        // Wrong channels.
-        write_config(&dir, "conf_96000_2.yml", &base_config(96000, 4, ""));
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::NoConfig(_)
-        ));
-        // Another capture device.
-        let mut other = base_config(96000, 2, "");
-        if let CaptureDevice::RawFile(dev) = &mut other.devices.capture {
-            dev.filename = "/dev/urandom".to_string();
-        }
-        write_config(&dir, "conf_96000_2.yml", &other);
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::NoConfig(_)
-        ));
-        // Different labels are fine.
-        let mut labelled = base_config(96000, 2, "");
-        if let CaptureDevice::RawFile(dev) = &mut labelled.devices.capture {
-            dev.labels = Some(vec![Some("L".to_string()), Some("R".to_string())]);
-        }
-        write_config(&dir, "conf_96000_2.yml", &labelled);
-        assert!(matches!(
-            select_config(&e, Some(&fmt), &s, None),
-            Selection::Run(_)
-        ));
-    }
-
-    #[test]
-    fn variant_check_on_format() {
-        let variant = base_config(48000, 2, "");
-        let mut fmt = format(48000, Some(2));
-        fmt.format = Some("S16_LE".to_string());
-        // The raw file capture has an explicit S32_LE format.
-        assert!(check_variant(None, &variant, &fmt).is_err());
-        fmt.format = Some("S32_LE".to_string());
-        assert!(check_variant(None, &variant, &fmt).is_ok());
-    }
-
-    #[test]
-    fn components_match_with_token_values() {
-        let empty = TokenValues::default();
-        let m = match_component(
-            "conf_$samplerate$_$channels$.yml",
-            "conf_96000_4.yml",
-            &empty,
-        )
-        .unwrap();
-        assert_eq!(m.samplerate.as_deref(), Some("96000"));
-        assert_eq!(m.channels.as_deref(), Some("4"));
-        assert!(match_component("conf_$samplerate$.yml", "conf_.yml", &empty).is_none());
-        assert!(match_component("conf_$samplerate$.yml", "conf_abc.yml", &empty).is_none());
-        assert!(match_component("conf_$samplerate$.yml", "other.yml", &empty).is_none());
-        // Adjacent tokens backtrack until the rest matches. The split is ambiguous, so
-        // only check that one was found.
-        let m = match_component("c$channels$$samplerate$.yml", "c244100.yml", &empty).unwrap();
-        assert!(m.channels.is_some() && m.samplerate.is_some());
-        let m = match_component("c$channels$x$samplerate$", "c2x44100", &empty).unwrap();
-        assert_eq!(m.channels.as_deref(), Some("2"));
-        // A repeated token must have the same value.
-        assert!(match_component("$channels$_$channels$", "2_2", &empty).is_some());
-        assert!(match_component("$channels$_$channels$", "2_4", &empty).is_none());
-        let m = match_component("c_$format$.yml", "c_S24_3_LE.yml", &empty).unwrap();
-        assert_eq!(m.format.as_deref(), Some("S24_3_LE"));
-    }
-
-    #[test]
-    fn preflight_reports_each_file() {
-        let dir = temp_dir("preflight");
-        write_config(&dir, "conf_96000_2.yml", &base_config(96000, 2, ""));
-        write_config(&dir, "conf_44100_2.yml", &base_config(48000, 2, ""));
-        write_config(&dir, "conf_48000_4.yml", &base_config(48000, 4, ""));
-        std::fs::write(dir.join("conf_88200_2.yml"), "broken").unwrap();
-        std::fs::write(dir.join("unrelated.yml"), "broken").unwrap();
-        let template = format!("{}/conf_$samplerate$_$channels$.yml", dir.to_string_lossy());
-        let e = entry(base_config(48000, 2, ""));
-        let checks = preflight(&template, Some(&e));
-        assert_eq!(checks.len(), 4);
-        let by_name = |name: &str| {
-            checks
-                .iter()
-                .find(|c| c.file.ends_with(name))
-                .unwrap()
-                .clone()
-        };
-        assert_eq!(by_name("conf_96000_2.yml").problem, None);
-        assert_eq!(by_name("conf_96000_2.yml").samplerate, Some(96000));
-        assert_eq!(by_name("conf_48000_4.yml").problem, None);
-        assert_eq!(by_name("conf_48000_4.yml").channels, Some(4));
-        assert!(
-            by_name("conf_44100_2.yml")
-                .problem
-                .unwrap()
-                .contains("rate")
-        );
-        assert!(by_name("conf_88200_2.yml").problem.is_some());
-    }
-
-    #[test]
-    fn preflight_handles_tokens_in_directories() {
-        let dir = temp_dir("preflight_dirs");
-        for rate in [44100, 96000] {
-            let sub = dir.join(rate.to_string());
-            std::fs::create_dir_all(&sub).unwrap();
-            write_config(&sub, "conf.yml", &base_config(rate, 2, ""));
-        }
-        let template = format!("{}/$samplerate$/conf.yml", dir.to_string_lossy());
-        let checks = preflight(&template, None);
-        assert_eq!(checks.len(), 2);
-        assert!(checks.iter().all(|c| c.problem.is_none()));
-    }
-
-    #[test]
-    fn check_files_has_a_section_per_enabled_provider() {
-        let dir = temp_dir("check_files");
-        write_config(&dir, "conf_44100.yml", &base_config(44100, 2, ""));
-        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
+    fn check_files_checks_the_entry_while_following() {
         let e = entry(base_config(44100, 2, ""));
-
-        let adapt_only = check_files(&settings(None, Some(true)), Some(&e));
-        assert_eq!(adapt_only.specific, None);
         assert_eq!(
-            adapt_only.adapt,
+            check_files(&following(), Some(&e)).adapt,
             Some(AdaptCheck {
                 file: None,
                 samplerate: Some(44100),
@@ -1324,20 +659,12 @@ pipeline:
             })
         );
 
-        let specific_only = check_files(&settings(Some(&template), None), Some(&e));
-        assert_eq!(specific_only.adapt, None);
-        assert_eq!(specific_only.specific.unwrap().len(), 1);
-
-        let both = check_files(&settings(Some(&template), Some(true)), Some(&e));
-        assert!(both.specific.is_some() && both.adapt.is_some());
-
-        let no_entry = check_files(&settings(None, Some(true)), None);
-        let adapt = no_entry.adapt.unwrap();
-        assert_eq!(adapt.samplerate, None);
-        assert!(adapt.problem.is_some());
+        let no_entry = check_files(&following(), None).adapt.unwrap();
+        assert_eq!(no_entry.samplerate, None);
+        assert!(no_entry.problem.is_some());
 
         let off = check_files(&ControllerSettings::default(), Some(&e));
-        assert_eq!((off.specific, off.adapt), (None, None));
+        assert_eq!(off.adapt, None);
     }
 
     fn with_rate_list(mut conf: Configuration, rates: &[usize]) -> Configuration {
@@ -1357,7 +684,6 @@ pipeline:
         let selected = run(select_config(
             &entry(conf),
             Some(&format(96000, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 96000);
@@ -1373,7 +699,6 @@ pipeline:
         let selected = run(select_config(
             &entry(conf),
             Some(&format(96000, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 96000);
@@ -1390,7 +715,6 @@ pipeline:
         let selected = run(select_config(
             &entry(conf),
             Some(&format(44100, None)),
-            &settings(None, Some(true)),
             None,
         ));
         assert_eq!(selected.config.devices.samplerate(), 48000);
@@ -1405,38 +729,7 @@ pipeline:
     #[test]
     fn a_rate_list_starts_at_the_first_rate() {
         let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
-        let selected = run(select_config(
-            &entry(conf),
-            None,
-            &settings(None, Some(true)),
-            None,
-        ));
-        assert_eq!(selected.config.devices.samplerate(), 96000);
-        assert_eq!(selected.config.devices.resampler, None);
-    }
-
-    #[test]
-    fn without_adapt_a_rate_list_runs_at_the_first_rate() {
-        let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
-        let selected = run(select_config(
-            &entry(conf.clone()),
-            None,
-            &ControllerSettings::default(),
-            None,
-        ));
-        assert_eq!(selected.config.devices.samplerate(), 96000);
-
-        // A Specific file with a list is selected for its first rate.
-        let dir = temp_dir("rate_list");
-        write_config(&dir, "conf_96000.yml", &conf);
-        let template = format!("{}/conf_$samplerate$.yml", dir.to_string_lossy());
-        let selected = run(select_config(
-            &entry(base_config(48000, 2, "")),
-            Some(&format(96000, None)),
-            &settings(Some(&template), None),
-            None,
-        ));
-        assert!(matches!(selected.provider, Provider::Specific(_)));
+        let selected = run(select_config(&entry(conf), None, None));
         assert_eq!(selected.config.devices.samplerate(), 96000);
         assert_eq!(selected.config.devices.resampler, None);
     }
@@ -1467,12 +760,7 @@ pipeline:
 ";
 
     fn adapt_runs(conf: Configuration, rate: usize) -> bool {
-        match select_config(
-            &entry(conf),
-            Some(&format(rate, None)),
-            &settings(None, Some(true)),
-            None,
-        ) {
+        match select_config(&entry(conf), Some(&format(rate, None)), None) {
             Selection::Run(_) => true,
             Selection::NoConfig(_) => false,
             Selection::Invalid(err) => panic!("invalid: {err}"),
@@ -1503,7 +791,7 @@ pipeline:
     #[test]
     fn check_files_reports_rate_dependent_settings() {
         let problem = |conf| {
-            check_files(&settings(None, Some(true)), Some(&entry(conf)))
+            check_files(&following(), Some(&entry(conf)))
                 .adapt
                 .unwrap()
                 .problem
@@ -1522,7 +810,7 @@ pipeline:
     #[test]
     fn check_files_lists_the_native_rates() {
         let conf = with_rate_list(base_config(48000, 2, ""), &[96000, 48000]);
-        let checks = check_files(&settings(None, Some(true)), Some(&entry(conf)));
+        let checks = check_files(&following(), Some(&entry(conf)));
         let adapt = checks.adapt.unwrap();
         assert_eq!(adapt.samplerate, Some(96000));
         assert_eq!(adapt.samplerates, Some(vec![96000, 48000]));

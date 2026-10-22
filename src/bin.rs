@@ -387,20 +387,10 @@ fn main_process() -> i32 {
                 .action(ArgAction::SetTrue),
         )
         .arg(
-            Arg::new("follow_specific")
-                .long("follow_specific")
-                .value_name("TEMPLATE")
-                .display_order(500)
-                .help("Follow the capture format with per-format config files, from a template with $samplerate$, $channels$ or $format$ tokens")
-                .requires("wait")
-                .action(ArgAction::Set)
-                .value_parser(clap::builder::NonEmptyStringValueParser::new()),
-        )
-        .arg(
-            Arg::new("follow_adapt")
-                .long("follow_adapt")
+            Arg::new("follow_capture")
+                .long("follow_capture")
                 .display_order(501)
-                .help("Follow the capture rate by adapting the config to it")
+                .help("Follow the capture format by adapting the config to it")
                 .requires("wait")
                 .action(ArgAction::SetTrue),
         )
@@ -584,31 +574,17 @@ fn main_process() -> i32 {
 
     // The CLI args only switch things on, each one overriding its own field.
     let mut controller_settings = state.as_ref().and_then(|s| s.controller.clone());
-    let follow_specific = matches.get_one::<String>("follow_specific");
-    let follow_adapt = matches.get_flag("follow_adapt");
-    if follow_specific.is_some() || follow_adapt {
-        let settings = controller_settings.get_or_insert_with(Default::default);
-        let follow = settings.follow_capture.get_or_insert_with(Default::default);
-        if let Some(template) = follow_specific {
-            debug!("Using command line argument for the Specific template");
-            follow.specific = Some(template.clone());
-        }
-        if follow_adapt {
-            debug!("Using command line argument to enable Adapt");
-            follow.adapt = Some(true);
-        }
+    if matches.get_flag("follow_capture") {
+        debug!("Using command line argument to enable following");
+        controller_settings
+            .get_or_insert_with(Default::default)
+            .follow_capture = Some(true);
     }
     if matches.get_flag("error_recovery") {
         debug!("Using command line argument to enable error recovery");
         controller_settings
             .get_or_insert_with(Default::default)
             .error_recovery = Some(true);
-    }
-    if let Some(settings) = &controller_settings
-        && let Err(err) = settings.validate()
-    {
-        error!("Invalid controller settings: {err}");
-        return EXIT_BAD_CONFIG;
     }
     debug!("Controller settings: {controller_settings:?}");
 

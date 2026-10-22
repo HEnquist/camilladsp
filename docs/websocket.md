@@ -628,8 +628,7 @@ Changes applied via `SetConfig`, `SetConfigJson`, or `PatchConfig` take
 effect immediately. Changes via `SetConfigFilePath` require a subsequent
 `Reload` to be applied.
 While the built-in controller follows the capture source, `GetConfig` returns
-the config that runs, which is the loaded config adapted to the source rate or
-a per-format config file.
+the config that runs, which is the loaded config adapted to the source format.
 `SetConfig`, `SetConfigJson`, `PatchConfig` and `SetConfigValue` switch the
 controller to the websocket source, where the config runs exactly as sent and
 nothing is followed, until a config is loaded from a file again with `Reload`.
@@ -744,11 +743,11 @@ from device errors. Its settings are the `controller` section of the statefile,
 and both features only work in wait mode.
 
 The config comes from one of two sources. From the files source, the controller
-loads the entry config file through a provider: `Single` runs it as is, `Adapt`
-adapts it to the source format, and `Specific` loads a per-format file instead.
+loads the entry config file through a provider: `Single` runs it as is, and `Adapt`
+adapts it to the source format.
 A config sent with `SetConfig` or `SetConfigJson`, or patched with `PatchConfig`
 or `SetConfigValue`, switches to the websocket source. It then runs exactly as
-sent: it is not adapted, no other file is selected, and a source format change
+sent: it is not adapted, and a source format change
 stops processing as it does without following. Error recovery works the same for
 both sources, it restarts the config that ran. A config loaded from a file switches
 back to the files source, with `Reload`, `SetConfigFilePath` followed by `Reload`,
@@ -781,11 +780,10 @@ Returns ([`ControllerStatusReport`](#controllerstatusreport)): The controller st
 
 #### `CheckControllerFiles`
 
-Check the configs the follow providers can use: every file the Specific template
-can match, and the entry config that Adapt starts from. Loads every file, so it is
-meant to be run on demand rather than polled.
+Check the entry config that Adapt starts from. Loads the config and its
+coefficient files, so it is meant to be run on demand rather than polled.
 
-Returns ([`ControllerFileChecks`](#controllerfilechecks)): One section per provider, `null` for a provider that is off.
+Returns ([`ControllerFileChecks`](#controllerfilechecks)): The check, with `adapt` `null` when following is off.
 
 ### Config reading and checking
 
@@ -1085,7 +1083,7 @@ The `controller` section of the statefile.
 
 Fields:
 
-- `follow_capture` ([`FollowCapture`](#followcapture) or `null`, optional): Follow the capture source format, absent to disable following.
+- `follow_capture` (`boolean` or `null`, optional): Follow the capture source format, adapting the entry config to it.
 - `error_recovery` (`boolean` or `null`, optional): Retry after a device error.
 
 ### `ControllerStatusReport`
@@ -1096,7 +1094,7 @@ Fields:
 
 - `source` ([`ControllerSource`](#controllersource)): Where the config comes from. It stays until the next switch, also while nothing runs.
 - `provider` ([`ConfigProvider`](#configprovider) or `null`, optional): The provider of the running config. `null` for the websocket source, and while nothing runs.
-- `config_file` (`string` or `null`, optional): The file that runs: the entry config file for `Single` and `Adapt`, the per-format file for `Specific`. `null` when `provider` is.
+- `config_file` (`string` or `null`, optional): The entry config file that runs, `null` when `provider` is.
 - `entry_config_file` (`string` or `null`, optional): The entry config file, the one `GetConfigFilePath` gives, and the one `Reload` loads.
 - `recovering` (`boolean`): Waiting to retry after a device error.
 - `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
@@ -1108,12 +1106,11 @@ Fields:
 
 ### `ControllerFileChecks`
 
-Value of the `CheckControllerFiles` reply, one section per follow provider.
+Value of the `CheckControllerFiles` reply.
 
 Fields:
 
-- `specific` (array of [`FileCheck`](#filecheck) or `null`, optional): Each file the Specific template matches, with the format read from its name and the problem found, if any. `null` when Specific is off.
-- `adapt` ([`AdaptCheck`](#adaptcheck) or `null`, optional): The entry config Adapt starts from. `null` when Adapt is off.
+- `adapt` ([`AdaptCheck`](#adaptcheck) or `null`, optional): The entry config Adapt starts from. `null` when following is off.
 
 ### `AudioDeviceDescriptor`
 
@@ -1183,15 +1180,6 @@ Serialised as a lowercase string: `"playback"` or `"capture"`.
 
 One of `"playback"`, `"capture"`.
 
-### `FollowCapture`
-
-Settings for following the capture source format.
-
-Fields:
-
-- `specific` (`string` or `null`, optional): Template for the Specific provider, absent to disable it.
-- `adapt` (`boolean` or `null`, optional): Enable the Adapt provider.
-
 ### `ControllerSource`
 
 Where the config the controller runs comes from.
@@ -1207,21 +1195,8 @@ The provider that supplied a config of the files source.
 
 - `Single`: the entry config file as is.
 - `Adapt`: the entry config file adapted to the source format.
-- `Specific`: the per-format file the template gives.
 
-One of `"Single"`, `"Adapt"`, `"Specific"`.
-
-### `FileCheck`
-
-One file the Specific template matches, and what is wrong with it, if anything.
-
-Fields:
-
-- `file` (`string`): Path of the file.
-- `samplerate` (non-negative `integer` or `null`, optional): Sample rate read from the file name, if the template has the token.
-- `channels` (non-negative `integer` or `null`, optional): Channels read from the file name, if the template has the token.
-- `format` (`string` or `null`, optional): Sample format read from the file name, if the template has the token.
-- `problem` (`string` or `null`, optional): What is wrong with the file, `null` if it is usable.
+One of `"Single"`, `"Adapt"`.
 
 ### `AdaptCheck`
 
