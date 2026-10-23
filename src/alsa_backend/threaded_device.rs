@@ -524,6 +524,10 @@ fn run_playback_inner_loop<C>(
                 device_consumer.skip(stale_bytes);
                 sample_queue_bytes -= stale_bytes;
                 write_remainder.clear();
+                // The device is now empty, and the outer thread has dropped everything since
+                // the stall. Start it on silence without warning about it, and top it up to
+                // the target when data arrives, like after a gap in the data.
+                playback_interrupted = true;
                 // Only after the skip, so that the first chunk let through is not dropped
                 // with the stale ones.
                 playback_stalled.store(false, Ordering::Release);
