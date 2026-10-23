@@ -21,7 +21,6 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::countertimer::BufferEstimate;
 use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -38,6 +37,7 @@ use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::{HeapRb, traits::*};
 use std::fmt::Debug;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -357,6 +357,7 @@ fn run_playback_inner_loop<C>(
     buf_manager: &PlaybackBufferManager,
     status_channel_inner: &crossbeam_channel::Sender<StatusMessage>,
     buffer_fill: &Mutex<countertimer::DeviceBufferEstimator>,
+    playback_stalled: &AtomicBool,
     samplerate: usize,
     chunksize: usize,
     channels: usize,
@@ -388,7 +389,9 @@ fn run_playback_inner_loop<C>(
 
     let mut end_of_stream = false;
     let mut channel_disconnected = false;
-    let mut playback_interrupted = false;
+    // The device starts out empty, and runs on silence until the first data arrives,
+    // without warning about it, like after a stall.
+    let mut playback_interrupted = true;
 
     loop {
         let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
@@ -500,6 +503,7 @@ fn run_playback_inner_loop<C>(
                 Some((pcmdevice, io, buf_manager, bytes_per_frame, &silence_buf)),
             );
             if device_stalled {
+                playback_stalled.store(true, Ordering::Release);
                 // The device is not consuming frames, so estimates of its buffer level
                 // would decay to zero and wind up the rate controller.
                 if let Some(mut est) = buffer_fill.try_lock() {
@@ -522,6 +526,13 @@ fn run_playback_inner_loop<C>(
                 device_consumer.skip(stale_bytes);
                 sample_queue_bytes -= stale_bytes;
                 write_remainder.clear();
+                // The device is now empty, and the outer thread has dropped everything since
+                // the stall. Start it on silence without warning about it, and top it up to
+                // the target when data arrives, like after a gap in the data.
+                playback_interrupted = true;
+                // Only after the skip, so that the first chunk let through is not dropped
+                // with the stale ones.
+                playback_stalled.store(false, Ordering::Release);
             }
             if device_stalled && (end_of_stream || channel_disconnected) {
                 // A stalled device will not take what is left, and waiting for it would
@@ -1115,6 +1126,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_inner = buffer_fill.clone();
+                // Set by the inner thread while the device is stalled. It is kept apart from
+                // the buffer estimate, which only exists for rate adjust and must not decide
+                // whether audio is played.
+                let playback_stalled = Arc::new(AtomicBool::new(false));
+                let playback_stalled_inner = playback_stalled.clone();
 
                 let innerhandle = thread::Builder::new()
                     .name("AlsaPlaybackInner".to_string())
@@ -1172,6 +1188,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     &buf_manager,
                                     &status_channel_inner,
                                     &buffer_fill_inner,
+                                    &playback_stalled_inner,
                                     samplerate,
                                     chunksize,
                                     channels,
@@ -1265,7 +1282,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                                 .unwrap_or(());
                                         }
                                     }
-                                    if estimate == Some(BufferEstimate::Invalid) {
+                                    if playback_stalled.load(Ordering::Acquire) {
                                         // Playback is stalled. Drop the chunk, like the non-threaded
                                         // backend drains its channel while stalled. Waiting for room
                                         // in the full ring buffer would hold up the whole pipeline,

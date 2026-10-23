@@ -10,9 +10,11 @@ CamillaDSP is on the first loopback card and keeps running all along, the way th
 microphone or the DAC on the other side of a gadget does. The card can lose time on a
 busy machine, and a test that fails after it did is run again, see `attempts`.
 
-Three things can go wrong, and each has a test:
+Four things can go wrong, and each has a test:
 
 - A stalled capture has to show in the processing state.
+- A playback that resumes has to play what comes in again. The device moves on silence
+  just as well, so neither its position nor a level tells whether audio gets through.
 - While a playback is stalled there is no buffer level to measure. Anything that keeps
   averaging one anyway feeds the rate controller garbage, and it winds up to the clamp.
   A stalled capture delivers no chunks, so nothing reaches the controller then.
@@ -32,6 +34,7 @@ import threading
 import time
 from collections import namedtuple
 
+import numpy as np
 import pytest
 
 from .loopback import (
@@ -40,9 +43,12 @@ from .loopback import (
     STALL_CAPTURE,
     STALL_CARD,
     STALL_PLAYBACK,
+    STALL_RECORD,
     DummyClock,
+    decode,
     hw_ptr,
     pcm_state,
+    record,
     set_rate_shift,
     stall_card_present,
 )
@@ -83,6 +89,13 @@ SETTLE_TIMEOUT = 30.0
 ATTEMPTS = 3
 EXIT_OK = 0
 STALL_CABLES = {"playback": 0, "capture": 1}
+# The feeder's tone, see the `feeder` fixture, and how close a peak has to come to it.
+RATE = 48000
+TONE_DB = -6.0
+TONE_TOLERANCE_DB = 0.2
+# How much of the output is recorded after a resume, and in what pieces it is judged.
+RECORD_FRAMES = RATE // 2
+PIECE_FRAMES = RATE // 20
 
 
 @pytest.fixture
@@ -143,6 +156,30 @@ def median_level(cdsp, seconds=2.0, interval=0.1):
         values.append(cdsp.send("GetBufferLevel"))
         time.sleep(interval)
     return statistics.median(values)
+
+
+def is_tone(peaks):
+    """Whether peak meter readings in dB are the feeder's tone, on every channel."""
+    return len(peaks) == 2 and all(abs(peak - TONE_DB) < TONE_TOLERANCE_DB for peak in peaks)
+
+
+def tone_fraction(recorded):
+    """The fraction of `PIECE_FRAMES` pieces of a S16_LE recording that carry the tone.
+
+    Judged in pieces, like `exact_fraction` in test_alsa_audio.py, so that an xrun on a
+    busy VM costs a piece rather than the whole recording. A playback that only writes
+    silence fails every piece.
+    """
+    pieces = len(recorded) // PIECE_FRAMES
+    found = 0
+    for n in range(pieces):
+        piece = recorded[n * PIECE_FRAMES : (n + 1) * PIECE_FRAMES]
+        peak = np.abs(piece).max(axis=0)
+        with np.errstate(divide="ignore"):
+            peaks_db = 20 * np.log10(peak / 2**15)
+        if is_tone(list(peaks_db)):
+            found += 1
+    return found / pieces
 
 
 class TickWatch:
@@ -361,18 +398,52 @@ def test_the_level_comes_back_after_a_stall(attempts, direction):
 
     The first two adjust periods after the resume are skipped, since the level
     published then can still hold readings from before the stall.
+
+    The published level is only updated while chunks reach the playback, and holds its
+    last value otherwise. A playback that stops taking chunks after the resume would
+    keep showing the level from before the stall, close to the target, so with the
+    playback on the stall card the test also checks that the tone got through while the
+    level was read. With the capture on the stall card the playback gets silence.
     """
 
     def body(run):
         run.stall()
         run.resume()
         time.sleep(2 * ADJUST_INTERVAL)
-        level = median_level(run.cdsp)
+        measure_time = 2.0
+        level = median_level(run.cdsp, seconds=measure_time)
+        if direction == "playback":
+            peaks = run.cdsp.send("GetPlaybackSignalPeakSince", measure_time)
+            assert is_tone(peaks), (
+                f"the playback peak was {peaks} while the level was read, "
+                f"no chunks got through after the stall"
+            )
         assert abs(level - TARGET_LEVEL) < SETUPS[direction].level_tolerance, (
             f"the level was {level} after the stall, the target is {TARGET_LEVEL}"
         )
 
     attempts(direction, body)
+
+
+def test_the_audio_comes_back_after_a_playback_stall(attempts):
+    """After a playback stall, what CamillaDSP plays reaches the device again.
+
+    This is the gadget playback whose host closed the microphone stream and opened it
+    again. The device moves on silence just as well as on audio, so only a recording of
+    its far end shows that the audio came back.
+    """
+
+    def body(run):
+        run.stall()
+        run.resume()
+        time.sleep(2 * ADJUST_INTERVAL)
+        recorded = decode("S16_LE", record(RECORD_FRAMES, device=STALL_RECORD))
+        fraction = tone_fraction(recorded)
+        assert fraction >= 0.75, (
+            f"only {fraction:.0%} of the output after the stall carried the tone"
+        )
+
+    attempts("playback", body)
 
 
 @pytest.mark.parametrize("direction", ["capture", "playback"])
