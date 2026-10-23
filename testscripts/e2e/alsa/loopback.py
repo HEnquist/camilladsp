@@ -32,9 +32,10 @@ cables are clocked by that PCM's period interrupts instead of the system timer. 
 `DummyClock` running on `DUMMY_CLOCK` the card runs, and when it is killed every stream
 on the card stops moving, without an error and without leaving the running state. That
 is what a UAC2 gadget looks like when the host closes its stream. CamillaDSP plays into
-`STALL_PLAYBACK` on cable 0 to stall a playback, and captures from `STALL_CAPTURE` on
-cable 1 to stall a capture. Nothing plays into cable 1, so the capture records silence,
-at the pace of the clock. Three traps come with it:
+`STALL_PLAYBACK` on cable 0 to stall a playback, and the test records `STALL_RECORD` on
+the far end of that cable when it wants to see the output. CamillaDSP captures from
+`STALL_CAPTURE` on cable 1 to stall a capture. Nothing plays into cable 1, so the capture
+records silence, at the pace of the clock. Three traps come with it:
 
 - The loopback's period has to take exactly as long as the Dummy's, or every tick is
   rejected as the wrong resolution and the stream is stopped with an xrun. So the
@@ -65,6 +66,7 @@ DUMMY = "hw:Dummy"
 
 STALL_CARD = "Loopback_1"
 STALL_PLAYBACK = "hw:Loopback_1,0,0"
+STALL_RECORD = "hw:Loopback_1,1,0"
 STALL_CAPTURE = "hw:Loopback_1,1,1"
 DUMMY_CLOCK = "hw:Dummy,0,0"
 
