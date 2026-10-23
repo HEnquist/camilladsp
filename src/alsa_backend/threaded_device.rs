@@ -389,7 +389,9 @@ fn run_playback_inner_loop<C>(
 
     let mut end_of_stream = false;
     let mut channel_disconnected = false;
-    let mut playback_interrupted = false;
+    // The device starts out empty, and runs on silence until the first data arrives,
+    // without warning about it, like after a stall.
+    let mut playback_interrupted = true;
 
     loop {
         let available_bytes = sample_queue_bytes.min(device_consumer.occupied_len());
