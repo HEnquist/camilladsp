@@ -19,6 +19,9 @@ use parking_lot::RwLock;
 use crate::PlaybackStatus;
 use crate::utils::countertimer::{Averager, BufferEstimate, Stopwatch};
 
+/// The largest adjustment the controller asks for, as a fraction of the rate.
+const MAX_ADJUST: f64 = 0.005;
+
 /// PI controller that adjusts the resampling ratio to keep the capture buffer at a target level.
 pub struct PIRateController {
     target_level: f64,
@@ -109,12 +112,21 @@ impl PIRateController {
         };
         let err = level - current_target;
         let rel_err = err / self.frames_per_interval;
-        self.accumulated += rel_err * self.interval;
         let proportional = self.k_p * rel_err;
+        let step = rel_err * self.interval;
+        // Anti-windup: while the output is held at the limit, only integrate an error
+        // that brings it back. Otherwise the integral keeps growing past the clamp, and
+        // once the error turns it takes as long again to unwind, all the while asking
+        // for the wrong speed. The buffer then runs over or dry, and the levels measured
+        // around the recovery can keep pushing the integral further out.
+        let unclamped = proportional + self.k_i * (self.accumulated + step);
+        if unclamped.abs() <= MAX_ADJUST || unclamped.signum() != step.signum() {
+            self.accumulated += step;
+        }
         let integral = self.k_i * self.accumulated;
         let mut output = proportional + integral;
         trace!("Rate controller, error: {err}, output: {output}, P: {proportional}, I: {integral}");
-        output = output.clamp(-0.005, 0.005);
+        output = output.clamp(-MAX_ADJUST, MAX_ADJUST);
         1.0 - output
     }
 }
@@ -229,5 +241,70 @@ impl RateAdjustReporter {
             xtrace!("Playback status blocked, skip buffer level update.");
         }
         Some(speed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_ADJUST, PIRateController};
+
+    // Default gains, no ramp, so the error is just level - target.
+    fn controller() -> PIRateController {
+        PIRateController::new(48000, 10.0, 10000, 0.2, 0.004, 0, 0.33)
+    }
+
+    fn at_limit(speed: f64) -> bool {
+        ((1.0 - speed).abs() - MAX_ADJUST).abs() < 1e-12
+    }
+
+    #[test]
+    fn small_errors_are_plain_pi() {
+        let mut c = controller();
+        let mut accumulated = 0.0;
+        for level in [10100.0, 10200.0, 9900.0, 10050.0, 9800.0] {
+            let rel_err: f64 = (level - 10000.0) / 480000.0;
+            accumulated += rel_err * 10.0;
+            let expected = 1.0 - (0.2 * rel_err + 0.004 * accumulated);
+            assert!((c.next(level) - expected).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn leaves_the_limit_as_soon_as_the_error_turns() {
+        // The defaults: chunksize 1024 as the target, a 10 s adjust period. An error
+        // can not be larger than the target on the empty side.
+        let mut c = PIRateController::new(48000, 10.0, 1024, 0.2, 0.004, 0, 0.33);
+        // Too full for a long time: held at the limit.
+        for _ in 0..1000 {
+            c.next(1624.0);
+        }
+        assert!(at_limit(c.next(1624.0)));
+        // Now empty: the first reading comes off the limit, and the controller asks
+        // for the other side once the integral has come down, about 51 periods at
+        // these gains. An integral wound up over the 1000 periods would take about
+        // 580, and one wound up for a day several thousand.
+        let first = c.next(0.0);
+        assert!(!at_limit(first));
+        let mut periods = 1;
+        let mut speed = first;
+        while speed < 1.0 {
+            speed = c.next(0.0);
+            periods += 1;
+            assert!(
+                periods <= 60,
+                "still asking to slow down after {periods} periods"
+            );
+        }
+    }
+
+    #[test]
+    fn the_integral_unwinds_from_saturation() {
+        let mut c = controller();
+        for _ in 0..1000 {
+            c.next(13000.0);
+        }
+        // Integrating into saturation is stopped, so what was built up is no more
+        // than the limit's worth.
+        assert!((0.004 * c.accumulated).abs() <= MAX_ADJUST + 1e-12);
     }
 }
