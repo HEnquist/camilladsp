@@ -271,24 +271,27 @@ mod tests {
 
     #[test]
     fn leaves_the_limit_as_soon_as_the_error_turns() {
-        let mut c = controller();
-        // Far too full for a long time: held at the limit.
+        // The defaults: chunksize 1024 as the target, a 10 s adjust period. An error
+        // can not be larger than the target on the empty side.
+        let mut c = PIRateController::new(48000, 10.0, 1024, 0.2, 0.004, 0, 0.33);
+        // Too full for a long time: held at the limit.
         for _ in 0..1000 {
-            c.next(13000.0);
+            c.next(1624.0);
         }
-        assert!(at_limit(c.next(13000.0)));
-        // Now too empty: the first reading comes off the limit, and the controller
-        // asks for the other side once the integral has come down: about 11 periods
-        // here, where an integral wound up over the 1000 periods would take 1000.
-        let first = c.next(7000.0);
+        assert!(at_limit(c.next(1624.0)));
+        // Now empty: the first reading comes off the limit, and the controller asks
+        // for the other side once the integral has come down, about 51 periods at
+        // these gains. An integral wound up over the 1000 periods would take about
+        // 580, and one wound up for a day several thousand.
+        let first = c.next(0.0);
         assert!(!at_limit(first));
         let mut periods = 1;
         let mut speed = first;
         while speed < 1.0 {
-            speed = c.next(7000.0);
+            speed = c.next(0.0);
             periods += 1;
             assert!(
-                periods <= 12,
+                periods <= 60,
                 "still asking to slow down after {periods} periods"
             );
         }
