@@ -1,0 +1,35 @@
+---
+# A dummy to dummy config with a control socket on each device, for the tests that make
+# a device misbehave while it is running. Needs a build with the dummy-backend feature.
+#
+# The two port numbers are placeholders. The tests replace them with ports the OS says
+# are free, so concurrent runs do not collide, which is why they are distinctive rather
+# than plausible.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Dummy
+    channels: 2
+    control_port: 11111
+    signal:
+      type: Sine
+      freq: 1000
+      # -6 dBFS, so the peak to peak signal range is 1.0.
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 2
+    control_port: 22222
+
+filters:
+  testgain:
+    type: Gain
+    description: "nbr 1"
+    parameters:
+      gain: -6.0
+
+pipeline:
+  - type: Filter
+    channels: [0, 1]
+    names: [testgain]

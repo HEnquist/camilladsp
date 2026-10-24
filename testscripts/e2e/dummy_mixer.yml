@@ -1,0 +1,60 @@
+---
+# Two channels in, eight out, for the multichannel end-to-end test. Needs a build with
+# the dummy-backend feature.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Dummy
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 8
+
+mixers:
+  to_eight:
+    description: "fan two channels out to eight"
+    channels:
+      in: 2
+      out: 8
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+      - dest: 2
+        sources:
+          - channel: 0
+            gain: 0
+      - dest: 3
+        sources:
+          - channel: 1
+            gain: 0
+      - dest: 4
+        sources:
+          - channel: 0
+            gain: 0
+      - dest: 5
+        sources:
+          - channel: 1
+            gain: 0
+      - dest: 6
+        sources:
+          - channel: 0
+            gain: 0
+      - dest: 7
+        sources:
+          - channel: 1
+            gain: 0
+
+pipeline:
+  - type: Mixer
+    name: to_eight

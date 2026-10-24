@@ -16,16 +16,19 @@
 
 // RACE, recursive ambiophonic crosstalk eliminator
 
-use crate::PrcFmt;
-use crate::Res;
+use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::config::DelayParameters;
 use crate::config::GainParameters;
+use crate::config::finite;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Delay;
 use crate::filters::basicfilters::Gain;
 use crate::processors::Processor;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::race::validate_race;
 
 //#[derive(Debug)]
 pub struct RACE {
@@ -33,8 +36,8 @@ pub struct RACE {
     pub channels: usize,
     pub channel_a: usize,
     pub channel_b: usize,
-    pub feedback_a: PrcFmt,
-    pub feedback_b: PrcFmt,
+    pub feedback_a: CamillaFloat,
+    pub feedback_b: CamillaFloat,
     pub delay_a: Delay,
     pub delay_b: Delay,
     pub gain: Gain,
@@ -44,23 +47,26 @@ pub struct RACE {
 fn delay_config(config: &config::RACEParameters, samplerate: usize) -> DelayParameters {
     // compensate the delay by subtracting one sample period from the delay, clamp at zero
     let sample_period_in_delay_unit = match config.delay_unit() {
-        config::TimeUnit::Microseconds => 1000000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Milliseconds => 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Millimetres => 343.0 * 1000.0 / samplerate as PrcFmt,
-        config::TimeUnit::Samples => 1.0,
+        config::DelayUnit::Microseconds => 1000000.0 / samplerate as f64,
+        config::DelayUnit::Milliseconds => 1000.0 / samplerate as f64,
+        config::DelayUnit::Seconds => 1.0 / samplerate as f64,
+        config::DelayUnit::Millimetres => 343.0 * 1000.0 / samplerate as f64,
+        config::DelayUnit::Samples => 1.0,
     };
-    let compensated_delay = (config.delay - sample_period_in_delay_unit).max(0.0);
+    let compensated_delay = (config.delay.get() - sample_period_in_delay_unit).max(0.0);
 
     config::DelayParameters {
-        delay: compensated_delay,
-        unit: config.delay_unit,
+        // Both operands are finite, so the difference is too.
+        delay: finite!(compensated_delay),
+        delay_unit: config.delay_unit,
         subsample: config.subsample_delay,
     }
 }
 
 fn gain_config(config: &config::RACEParameters) -> GainParameters {
     config::GainParameters {
-        gain: -config.attenuation,
+        // Negating a finite value keeps it finite.
+        gain: finite!(-config.attenuation.get()),
         scale: Some(config::GainScale::Decibel),
         inverted: Some(true),
         mute: Some(false),
@@ -116,12 +122,12 @@ impl Processor for RACE {
     }
 
     /// Apply a RACE processor to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         let (first, second) = input.waveforms.split_at_mut(self.channel_b);
         let channel_a = &mut first[self.channel_a];
         let channel_b = &mut second[0];
         if channel_a.is_empty() || channel_b.is_empty() {
-            return Ok(());
+            return;
         }
         for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
             // todo math
@@ -134,7 +140,6 @@ impl Processor for RACE {
             *value_a = added_a;
             *value_b = added_b;
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -179,38 +184,4 @@ impl Processor for RACE {
             panic!("Invalid config change!");
         }
     }
-}
-
-/// Validate the RACE processor config, to give a helpful message intead of a panic.
-pub fn validate_race(config: &config::RACEParameters) -> Res<()> {
-    let channels = config.channels;
-    if config.attenuation <= 0.0 {
-        let msg = "Attenuation value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.delay <= 0.0 {
-        let msg = "Delay value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.channel_a == config.channel_b {
-        let msg = "Channels a and b must be different";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.channel_a >= channels {
-        let msg = format!(
-            "Invalid channel a to process: {}, max is: {}.",
-            config.channel_a,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    if config.channel_b >= channels {
-        let msg = format!(
-            "Invalid channel b to process: {}, max is: {}.",
-            config.channel_b,
-            channels - 1
-        );
-        return Err(config::ConfigError::new(&msg).into());
-    }
-    Ok(())
 }
