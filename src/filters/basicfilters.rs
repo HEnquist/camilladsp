@@ -16,10 +16,6 @@
 
 use std::sync::Arc;
 
-use ringbuf::LocalRb;
-use ringbuf::storage::Heap;
-use ringbuf::traits::*;
-
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::Filter;
@@ -45,7 +41,8 @@ pub struct Gain {
 pub struct Delay {
     pub name: String,
     samplerate: usize,
-    queue: Option<LocalRb<Heap<CamillaFloat>>>,
+    queue: Vec<CamillaFloat>,
+    index: usize,
     biquad: Option<Biquad>,
 }
 
@@ -257,20 +254,11 @@ impl Delay {
             (samples, None)
         };
 
-        let queue = if integerdelay > 0 {
-            let mut q = LocalRb::new(integerdelay);
-            for _ in 0..integerdelay {
-                let _ = q.try_push(0.0);
-            }
-            Some(q)
-        } else {
-            None
-        };
-
         Self {
             name,
             samplerate,
-            queue,
+            queue: vec![0.0; integerdelay],
+            index: 0,
             biquad,
         }
     }
@@ -282,11 +270,14 @@ impl Delay {
     }
 
     pub fn process_single(&mut self, input: CamillaFloat) -> CamillaFloat {
-        let mut value = if let Some(q) = &mut self.queue {
-            q.push_overwrite(input).unwrap()
-        } else {
-            input
-        };
+        let mut value = input;
+        if !self.queue.is_empty() {
+            std::mem::swap(&mut value, &mut self.queue[self.index]);
+            self.index += 1;
+            if self.index == self.queue.len() {
+                self.index = 0;
+            }
+        }
         if let Some(bq) = &mut self.biquad {
             value = bq.process_single(value);
         }
@@ -300,10 +291,16 @@ impl Filter for Delay {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        if let Some(q) = &mut self.queue {
-            for item in waveform.iter_mut() {
-                // this returns the item that was popped while pushing
-                *item = q.push_overwrite(*item).unwrap();
+        if !self.queue.is_empty() {
+            let mut remaining = &mut waveform[..];
+            while !remaining.is_empty() {
+                let len = remaining.len().min(self.queue.len() - self.index);
+                remaining[..len].swap_with_slice(&mut self.queue[self.index..self.index + len]);
+                self.index += len;
+                if self.index == self.queue.len() {
+                    self.index = 0;
+                }
+                remaining = &mut remaining[len..];
             }
         }
         if let Some(bq) = &mut self.biquad {
@@ -394,6 +391,32 @@ mod tests {
         delay.process_waveform(&mut waveform2);
         assert_eq!(waveform1, vec![0.0; 8]);
         assert_eq!(waveform2, waveform_delayed);
+    }
+
+    #[test]
+    fn delay_blocks_and_single_samples_share_history() {
+        use crate::ToCamillaFloat;
+        use std::collections::VecDeque;
+
+        for length in [0, 1, 31, 480, 4800] {
+            let mut delay = Delay::new("test", 48000, length as f64, false);
+            let mut history = VecDeque::from(vec![0.0; length]);
+            for frames in [64, 1024, 257, 4096, 64] {
+                let mut wave: Vec<_> = (0..frames)
+                    .map(|i| (0.5 * (0.1 * i as f64).sin()).to_camilla_float())
+                    .collect();
+                let expected: Vec<_> = wave
+                    .iter()
+                    .map(|&value| {
+                        history.push_back(value);
+                        history.pop_front().unwrap()
+                    })
+                    .collect();
+                wave[0] = delay.process_single(wave[0]);
+                delay.process_waveform(&mut wave[1..]);
+                assert_eq!(wave, expected, "delay {length}, chunk {frames}");
+            }
+        }
     }
 
     #[test]
