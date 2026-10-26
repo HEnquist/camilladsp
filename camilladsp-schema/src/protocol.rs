@@ -251,6 +251,47 @@ pub struct SpectrumData {
     pub magnitudes: Vec<f32>,
 }
 
+// ── Startup ────────────────────────────────────────────────────────────────
+
+/// The command line arguments CamillaDSP was started with that decide what runs, returned by
+/// the `GetStartupArgs` command. Each one given overrides its own field of the statefile at
+/// every start, so a client can't change it permanently.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct StartupArgs {
+    /// `--statefile`, `null` without one. Without a statefile nothing that is changed while
+    /// running is kept over a restart.
+    pub statefile: Option<String>,
+    /// The config file given on the command line. It runs at every start, in place of the
+    /// statefile's `config_path`.
+    pub config_file: Option<String>,
+    /// `--no_config`: start without a config, ignoring the statefile's `config_path`.
+    pub no_config: bool,
+    /// `--wait`. Without it the process exits when processing stops, and following and error
+    /// recovery are off.
+    pub wait: bool,
+    /// `--follow_capture`: following is on at every start. `false` means it was not given,
+    /// and the statefile decides.
+    pub follow_capture: bool,
+    /// `--error_recovery`: error recovery is on at every start. `false` means it was not
+    /// given, and the statefile decides.
+    pub error_recovery: bool,
+    /// `--samplerate`, overriding the one in the config.
+    pub samplerate: Option<usize>,
+    /// `--channels`, overriding the capture channels in the config.
+    pub channels: Option<usize>,
+    /// `--extra_samples`, overriding the one of a file capture device.
+    pub extra_samples: Option<usize>,
+    /// `--format`, overriding the capture sample format in the config.
+    pub sample_format: Option<String>,
+    /// `--gain` and `--gain1` to `--gain4`, the starting volume of each fader in dB, `null`
+    /// for one that was not given.
+    pub volume: [Option<f32>; 5],
+    /// `--mute` and `--mute1` to `--mute4`. `false` means it was not given, and the statefile
+    /// decides.
+    pub mute: [bool; 5],
+}
+
 // ── Built-in controller ────────────────────────────────────────────────────
 
 /// The `controller` section of the statefile.
@@ -363,7 +404,9 @@ pub struct ControllerStatusReport {
     pub next_retry_s: Option<f32>,
     /// The source format no config was found for, while waiting for the source to change.
     pub waiting_for_source: Option<SourceFormat>,
-    /// Whether following is on, enabled and in wait mode. `false` for the websocket source.
+    /// Whether the running session follows the source format. It was started with following
+    /// enabled and in wait mode, and runs from the files source. A change to the setting only
+    /// applies at the next session start. While nothing runs, whether the next session will.
     pub following: bool,
     /// Whether error recovery is on, enabled and in wait mode.
     pub error_recovery: bool,
@@ -631,6 +674,15 @@ ws_protocol! {
             value: (Vec<String>, Vec<String>),
         },
 
+        /// Get the command line arguments that decide what runs: the statefile, the config
+        /// file, wait mode, the controller settings, the config overrides, and the starting
+        /// volume and mute. Each one given overrides the statefile at every start, so it is
+        /// what a restart comes back to.
+        GetStartupArgs -> {
+            /// The arguments.
+            value: StartupArgs,
+        },
+
         /// Stop processing and wait for a new configuration to be uploaded
         /// via [`SetConfig`](Self::SetConfig) or [`SetConfigFilePath`](Self::SetConfigFilePath) +
         /// [`Reload`](Self::Reload).
@@ -738,7 +790,8 @@ ws_protocol! {
             value: f32,
         },
 
-        /// Get the path of the state file, if one is configured.
+        /// Get the path of the state file, if one is configured. It is also part of
+        /// [`GetStartupArgs`](Self::GetStartupArgs).
         GetStateFilePath -> {
             /// File path of the state file, or `null` if no state file is used.
             value: Option<String>,
@@ -1189,9 +1242,12 @@ ws_protocol! {
             value: Option<ControllerSettings>,
         },
 
-        /// Replace the settings of the built-in controller. They take effect at the next
-        /// session start, so send a [`Reload`](Self::Reload) to apply them at once.
-        /// This doesn't switch back to the files source, the `Reload` does.
+        /// Replace the settings of the built-in controller. Following is set up when the
+        /// devices open, so a change to it takes effect at the next session start. Send a
+        /// [`Reload`](Self::Reload) to apply it at once. A change to error recovery applies
+        /// at once. This doesn't switch back to the files source, the `Reload` does.
+        /// A setting given on the command line comes back at the next start, see
+        /// [`GetStartupArgs`](Self::GetStartupArgs).
         SetControllerSettings {
             /// The whole `controller` section, or `null` to remove it.
             value: Option<ControllerSettings>,

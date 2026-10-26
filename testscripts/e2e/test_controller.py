@@ -12,11 +12,14 @@ The settings live in the `controller` section of the statefile, and the CLI args
 `SetControllerSettings` write them there.
 """
 
+import os
 import subprocess
 import time
 
 import pytest
 import yaml
+
+from conftest import HERE
 
 EXIT_OK = 0
 CLAP_USAGE_ERROR = 2
@@ -226,6 +229,29 @@ def test_settings_can_be_removed(start_cdsp, statefile):
     reply = cdsp.send_text('{"command": "SetControllerSettings", "value": null}')
     assert reply["result"] == "Ok"
     assert cdsp.send("GetControllerSettings") is None
+
+
+def test_the_startup_args_are_reported(start_cdsp, statefile):
+    cdsp = start_cdsp(
+        extra_args=[
+            "--statefile", statefile, "--wait", "--follow_capture",
+            "-r", "44100", "--gain=-6", "--mute2",
+        ]
+    )
+    assert cdsp.send("GetStartupArgs") == {
+        "statefile": statefile,
+        "config_file": os.path.join(HERE, "dummy_sine.yml"),
+        "no_config": False,
+        "wait": True,
+        "follow_capture": True,
+        "error_recovery": False,
+        "samplerate": 44100,
+        "channels": None,
+        "extra_samples": None,
+        "sample_format": None,
+        "volume": [-6.0, None, None, None, None],
+        "mute": [False, False, True, False, False],
+    }
 
 
 @pytest.mark.parametrize("args", [["--follow_capture"], ["--error_recovery"]])

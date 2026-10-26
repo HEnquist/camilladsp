@@ -329,7 +329,7 @@
           },
           "following": {
             "type": "boolean",
-            "description": "Whether following is on, enabled and in wait mode. `false` for the websocket source."
+            "description": "Whether the running session follows the source format. It was started with following\nenabled and in wait mode, and runs from the files source. A change to the setting only\napplies at the next session start. While nothing runs, whether the next session will."
           },
           "error_recovery": {
             "type": "boolean",
@@ -598,6 +598,100 @@
         },
         "unevaluatedProperties": false
       },
+      "StartupArgs": {
+        "type": "object",
+        "description": "The command line arguments CamillaDSP was started with that decide what runs, returned by\nthe `GetStartupArgs` command. Each one given overrides its own field of the statefile at\nevery start, so a client can't change it permanently.",
+        "required": [
+          "no_config",
+          "wait",
+          "follow_capture",
+          "error_recovery",
+          "volume",
+          "mute"
+        ],
+        "properties": {
+          "statefile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`--statefile`, `null` without one. Without a statefile nothing that is changed while\nrunning is kept over a restart."
+          },
+          "config_file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The config file given on the command line. It runs at every start, in place of the\nstatefile's `config_path`."
+          },
+          "no_config": {
+            "type": "boolean",
+            "description": "`--no_config`: start without a config, ignoring the statefile's `config_path`."
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "`--wait`. Without it the process exits when processing stops, and following and error\nrecovery are off."
+          },
+          "follow_capture": {
+            "type": "boolean",
+            "description": "`--follow_capture`: following is on at every start. `false` means it was not given,\nand the statefile decides."
+          },
+          "error_recovery": {
+            "type": "boolean",
+            "description": "`--error_recovery`: error recovery is on at every start. `false` means it was not\ngiven, and the statefile decides."
+          },
+          "samplerate": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "`--samplerate`, overriding the one in the config.",
+            "minimum": 0
+          },
+          "channels": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "`--channels`, overriding the capture channels in the config.",
+            "minimum": 0
+          },
+          "extra_samples": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "`--extra_samples`, overriding the one of a file capture device.",
+            "minimum": 0
+          },
+          "sample_format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`--format`, overriding the capture sample format in the config."
+          },
+          "volume": {
+            "type": "array",
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "float"
+            },
+            "description": "`--gain` and `--gain1` to `--gain4`, the starting volume of each fader in dB, `null`\nfor one that was not given."
+          },
+          "mute": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "`--mute` and `--mute1` to `--mute4`. `false` means it was not given, and the statefile\ndecides."
+          }
+        },
+        "unevaluatedProperties": false
+      },
       "StateUpdate": {
         "type": "object",
         "description": "Payload of a [`WsReply::StateEvent`] pushed by [`WsCommand::SubscribeState`].",
@@ -845,6 +939,22 @@
                 "type": "string",
                 "enum": [
                   "GetSupportedDeviceTypes"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          {
+            "type": "object",
+            "description": "Get the command line arguments that decide what runs: the statefile, the config\nfile, wait mode, the controller settings, the config overrides, and the starting\nvolume and mute. Each one given overrides the statefile at every start, so it is\nwhat a restart comes back to.",
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "GetStartupArgs"
                 ]
               }
             },
@@ -1114,7 +1224,7 @@
           },
           {
             "type": "object",
-            "description": "Get the path of the state file, if one is configured.",
+            "description": "Get the path of the state file, if one is configured. It is also part of\n[`GetStartupArgs`](Self::GetStartupArgs).",
             "required": [
               "command"
             ],
@@ -2143,7 +2253,7 @@
           },
           {
             "type": "object",
-            "description": "Replace the settings of the built-in controller. They take effect at the next\nsession start, so send a [`Reload`](Self::Reload) to apply them at once.\nThis doesn't switch back to the files source, the `Reload` does.",
+            "description": "Replace the settings of the built-in controller. Following is set up when the\ndevices open, so a change to it takes effect at the next session start. Send a\n[`Reload`](Self::Reload) to apply it at once. A change to error recovery applies\nat once. This doesn't switch back to the files source, the `Reload` does.\nA setting given on the command line comes back at the next start, see\n[`GetStartupArgs`](Self::GetStartupArgs).",
             "required": [
               "command"
             ],
@@ -2480,6 +2590,40 @@
                     "type": "string",
                     "enum": [
                       "GetSupportedDeviceTypes"
+                    ]
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WsResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "#/components/schemas/StartupArgs",
+                    "description": "The arguments."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "reply"
+                ],
+                "properties": {
+                  "reply": {
+                    "type": "string",
+                    "enum": [
+                      "GetStartupArgs"
                     ]
                   }
                 }

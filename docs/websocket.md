@@ -163,6 +163,15 @@ Get the list of supported playback and capture device types.
 
 Returns (array \[array of `string`, array of `string`\]): `[list_of_playback_types, list_of_capture_types]`.
 
+#### `GetStartupArgs`
+
+Get the command line arguments that decide what runs: the statefile, the config
+file, wait mode, the controller settings, the config overrides, and the starting
+volume and mute. Each one given overrides the statefile at every start, so it is
+what a restart comes back to.
+
+Returns ([`StartupArgs`](#startupargs)): The arguments.
+
 #### `Stop`
 
 Stop processing and wait for a new configuration to be uploaded
@@ -281,7 +290,8 @@ Returns (`number`): Resampler processing load in percent.
 
 #### `GetStateFilePath`
 
-Get the path of the state file, if one is configured.
+Get the path of the state file, if one is configured. It is also part of
+`GetStartupArgs`.
 
 Returns (`string` or `null`): File path of the state file, or `null` if no state file is used.
 
@@ -763,9 +773,12 @@ Returns ([`ControllerSettings`](#controllersettings) or `null`): The `controller
 
 #### `SetControllerSettings`
 
-Replace the settings of the built-in controller. They take effect at the next
-session start, so send a `Reload` to apply them at once.
-This doesn't switch back to the files source, the `Reload` does.
+Replace the settings of the built-in controller. Following is set up when the
+devices open, so a change to it takes effect at the next session start. Send a
+`Reload` to apply it at once. A change to error recovery applies
+at once. This doesn't switch back to the files source, the `Reload` does.
+A setting given on the command line comes back at the next start, see
+`GetStartupArgs`.
 
 Arguments:
 
@@ -945,6 +958,27 @@ Fields:
 
 The structured values used by the commands and replies.
 
+### `StartupArgs`
+
+The command line arguments CamillaDSP was started with that decide what runs, returned by
+the `GetStartupArgs` command. Each one given overrides its own field of the statefile at
+every start, so a client can't change it permanently.
+
+Fields:
+
+- `statefile` (`string` or `null`, optional): `--statefile`, `null` without one. Without a statefile nothing that is changed while running is kept over a restart.
+- `config_file` (`string` or `null`, optional): The config file given on the command line. It runs at every start, in place of the statefile's `config_path`.
+- `no_config` (`boolean`): `--no_config`: start without a config, ignoring the statefile's `config_path`.
+- `wait` (`boolean`): `--wait`. Without it the process exits when processing stops, and following and error recovery are off.
+- `follow_capture` (`boolean`): `--follow_capture`: following is on at every start. `false` means it was not given, and the statefile decides.
+- `error_recovery` (`boolean`): `--error_recovery`: error recovery is on at every start. `false` means it was not given, and the statefile decides.
+- `samplerate` (non-negative `integer` or `null`, optional): `--samplerate`, overriding the one in the config.
+- `channels` (non-negative `integer` or `null`, optional): `--channels`, overriding the capture channels in the config.
+- `extra_samples` (non-negative `integer` or `null`, optional): `--extra_samples`, overriding the one of a file capture device.
+- `sample_format` (`string` or `null`, optional): `--format`, overriding the capture sample format in the config.
+- `volume` (array of (`number` or `null`)): `--gain` and `--gain1` to `--gain4`, the starting volume of each fader in dB, `null` for one that was not given.
+- `mute` (array of `boolean`): `--mute` and `--mute1` to `--mute4`. `false` means it was not given, and the statefile decides.
+
 ### `ProcessingState`
 
 The state of the processing, as reported by [`GetState`](#getstate).
@@ -1102,7 +1136,7 @@ Fields:
 - `attempts` (non-negative `integer`): Retries since the last session that ran long enough.
 - `next_retry_s` (`number` or `null`, optional): Seconds until the next retry, while waiting for one.
 - `waiting_for_source` ([`SourceFormat`](#sourceformat) or `null`, optional): The source format no config was found for, while waiting for the source to change.
-- `following` (`boolean`): Whether following is on, enabled and in wait mode. `false` for the websocket source.
+- `following` (`boolean`): Whether the running session follows the source format. It was started with following enabled and in wait mode, and runs from the files source. A change to the setting only applies at the next session start. While nothing runs, whether the next session will.
 - `error_recovery` (`boolean`): Whether error recovery is on, enabled and in wait mode.
 - `stop_reason` ([`StopReason`](#stopreason)): Why processing last stopped.
 

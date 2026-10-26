@@ -178,6 +178,8 @@ pub struct ControllerStatus {
     pub provider: Option<ConfigProvider>,
     /// The file that runs, `None` when `provider` is.
     pub config_file: Option<String>,
+    /// Whether the running session was started following, `None` while nothing runs.
+    pub session_follows: Option<bool>,
     /// Waiting to retry after an error.
     pub recovering: bool,
     /// Retry attempts since the last session that ran long enough.

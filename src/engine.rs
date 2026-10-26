@@ -33,7 +33,7 @@ use crate::utils::stash;
 use crate::websocket_server;
 use crate::{
     CommandMessage, ControllerMessage, ProcessingState, SHUTDOWN_REQUESTED, SharedConfigs,
-    StatusMessage, StatusStructs, StopReason,
+    StartupArgs, StatusMessage, StatusStructs, StopReason,
 };
 use crate::{config, statefile};
 
@@ -72,6 +72,8 @@ pub struct EngineConfig {
     pub initial_mutes: [bool; 5],
     /// Settings for the built-in controller, `None` if there are none.
     pub controller_settings: Option<ControllerSettings>,
+    /// The command line arguments that decide what runs, for `GetStartupArgs`.
+    pub startup_args: StartupArgs,
     /// If `true`, wait for a configuration via WebSocket rather than exiting when none is provided.
     pub wait: bool,
     /// WebSocket server port.
@@ -367,6 +369,7 @@ impl Controller {
         let settings = self.shared.settings();
         let follow = self.following(&settings);
         self.publish_running(&selected);
+        self.shared.status.lock().session_follows = Some(follow);
 
         debug!("Config ready, start processing");
         SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -383,6 +386,7 @@ impl Controller {
             let mut status = self.shared.status.lock();
             status.provider = None;
             status.config_file = None;
+            status.session_follows = None;
         }
 
         let last = result.last;
@@ -429,9 +433,10 @@ impl Controller {
                 started,
             } => {
                 let format = controller::snap_format(&format);
-                // Asked again rather than taken from the session start, since a config
-                // sent during the session switches to the websocket source.
-                let follow = self.following(&self.shared.settings());
+                // Following is decided at the session start, since the backends are told
+                // at open. A config sent during the session switches to the websocket
+                // source, which isn't followed.
+                let follow = follow && self.source == ControllerSource::Files;
                 if !follow || !(capture || is_asio_full_duplex(&last.config)) {
                     return Next::Idle;
                 }
@@ -961,6 +966,7 @@ pub fn run_engine(engine_params: EngineConfig, logger: flexi_logger::LoggerHandl
             processing_status,
             state_change_notify: tx_state,
             state_file_path: statefilename.clone(),
+            startup_args: engine_params.startup_args,
             unsaved_state_change: unsaved_state_changes.clone(),
             controller: controller_shared.clone(),
         };

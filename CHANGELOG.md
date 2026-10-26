@@ -18,6 +18,8 @@ New features:
   provider and file of the running config.
 - Alsa: follow a player on the Loopback, with the capture open the whole time.
   Needs a kernel where the Loopback's `PCM Notify` works, Linux 7.4 or a stable kernel with the fix.
+- Websocket command `GetStartupArgs`, returning the command line arguments that decide what runs,
+  so a client can tell what a restart comes back to.
 
 Changes:
 - The `CaptureFormatChange` and `PlaybackFormatChange` stop reasons give the new `samplerate`,

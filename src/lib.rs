@@ -85,7 +85,7 @@ pub use camilladsp_schema::{CamillaFloat, Res, ToCamillaFloat, ToF32, ToF64};
 // defined in camilladsp-schema so that clients can use it too.
 pub use camilladsp_schema::protocol::{
     AudioDeviceDescriptor, CapabilityMode, ChannelCapability, DeviceCapabilitySet, ProcessingState,
-    SamplerateCapability, StopReason,
+    SamplerateCapability, StartupArgs, StopReason,
 };
 
 /// ALSA audio backend (Linux only).

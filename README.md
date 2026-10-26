@@ -658,6 +658,11 @@ If the file doesn't exist, it will be created on the first write.
 If the `configfile` argument is given, then this will be used instead of the value from the statefile.
 Similarly, the `--gain` and `--mute` options also override the values in the statefile for the main fader
 while the `--gain1` to `--gain4` and `--mute1` to `--mute4` do the same for the Aux faders.
+These overrides apply at every start, so a system started with them always comes back to the same state.
+A change made while running to a value given on the command line,
+for example a new config file path set over the websocket, lasts only until the next restart.
+The websocket command `GetStartupArgs` returns the arguments CamillaDSP was started with,
+so that a client can tell what a restart will come back to.
 
 **Use this feature with caution! The volume setting given in the statefile will be applied immediately when CamillaDSP starts processing.**
 In systems that have a gain structure such that a too high volume setting can damage equipment or ears,
@@ -784,11 +789,14 @@ Leave out `follow_capture` and `error_recovery`, or set them to false, to disabl
 error recovery.
 The same settings can be switched on from the command line with `--follow_capture` and
 `--error_recovery`.
-These only switch things on. Each one overrides its own field of the statefile, and the result
-is written back to the statefile at startup.
+These only switch things on. Each one overrides its own field of the statefile at every start,
+and the result is written back to the statefile.
+A setting switched off over the websocket is therefore on again after a restart.
 Over the websocket, the settings are read and changed with `GetControllerSettings` and
 `SetControllerSettings`.
-A change takes effect at the next session start, so send a `Reload` to apply it at once.
+The backends are set up for following when the devices open, so a change to `follow_capture`
+takes effect at the next session start. Send a `Reload` to apply it at once.
+A change to `error_recovery` applies at once.
 
 ### Following the capture format
 The config file that is loaded explicitly, from the command line, the statefile,
@@ -950,7 +958,9 @@ so a client can see that a stopped session ran a config from the websocket.
 For the files source, `provider` gives the provider of the running config, and `config_file` the
 startup config file that runs.
 Both are `null` for the websocket source, and while nothing runs.
-`following` is `false` for the websocket source.
+`following` tells whether the running session follows the source, which is decided when it starts.
+It is `false` for the websocket source.
+While nothing runs, it tells whether the next session will follow.
 
 ### Error recovery
 When processing stops because of a capture or playback error, the controller tries again with

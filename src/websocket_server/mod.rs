@@ -78,8 +78,8 @@ use crate::{
 use crate::{ControllerMessage, config};
 use camilladsp_schema::protocol::{
     AllLevels, ChannelLabels, ControllerStatusReport, Fader, PbCapLevels, SpectrumRequest,
-    SpectrumSide, SpectrumSubscription, VuLevels, VuSubscription, WsCommand, WsReply, WsResult,
-    WsSignalLevelSide,
+    SpectrumSide, SpectrumSubscription, StartupArgs, VuLevels, VuSubscription, WsCommand, WsReply,
+    WsResult, WsSignalLevelSide,
 };
 
 const SUBSCRIPTION_READ_TIMEOUT_MS: u64 = 10;
@@ -96,6 +96,7 @@ pub struct SharedData {
     pub processing_status: Arc<RwLock<ProcessingStatus>>,
     pub state_change_notify: crossbeam_channel::Sender<()>,
     pub state_file_path: Option<String>,
+    pub startup_args: StartupArgs,
     pub unsaved_state_change: Arc<AtomicBool>,
     pub controller: ControllerShared,
 }
@@ -1451,8 +1452,10 @@ fn handle_command(
                         .next_retry
                         .map(|t| t.saturating_duration_since(Instant::now()).as_secs_f32()),
                     waiting_for_source: status.waiting_for_source,
-                    following: shared.wait
-                        && settings.following_enabled()
+                    // The running session's, or the next one's while nothing runs.
+                    following: status
+                        .session_follows
+                        .unwrap_or(shared.wait && settings.following_enabled())
                         && status.source == ControllerSource::Files,
                     error_recovery: shared.wait && settings.recovery_enabled(),
                     stop_reason,
@@ -1877,6 +1880,10 @@ fn handle_command(
                 value: devs,
             })
         }
+        WsCommand::GetStartupArgs {} => Some(WsReply::GetStartupArgs {
+            result: WsResult::Ok,
+            value: shared_data_inst.startup_args.clone(),
+        }),
         WsCommand::GetAvailableCaptureDevices { backend } => {
             let devs = list_available_devices(&backend, true);
             Some(WsReply::GetAvailableCaptureDevices {

@@ -246,6 +246,24 @@ def test_a_sent_config_is_left_alone_until_a_reload(source_cdsp, source):
     assert (state["provider"], state["config_file"]) == ("Adapt", cdsp.config_path)
 
 
+def test_following_changes_at_the_next_session(source_cdsp, source):
+    """The backends follow when told so at open, so turning following off leaves the
+    running session following, and `following` says so. The source change ends that
+    session, and the next one runs the startup config as is."""
+    source.play(48000)
+    cdsp = source_cdsp()
+    wait_for_rate(cdsp, 48000)
+    cdsp.send("SetControllerSettings", {"follow_capture": False, "error_recovery": None})
+    assert cdsp.send("GetControllerStatus")["following"] is True
+
+    source.play(96000)
+    cdsp.poll_until_true(
+        "GetControllerStatus", lambda s: s["following"] is False and s["provider"] == "Single"
+    )
+    wait_for_rate(cdsp, 48000)
+    assert running_from(cdsp) == ("Files", "Single", cdsp.config_path)
+
+
 def test_a_patch_runs_from_the_websocket_source(source_cdsp, source):
     """A `SetConfigValue` while Adapt runs at 96 kHz patches the running config, so it
     keeps 96 kHz. It switches to the websocket source, so a later rate change stops

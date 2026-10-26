@@ -28,7 +28,7 @@ use log::Record;
 use camilladsp::config;
 use camilladsp::engine::{EXIT_BAD_CONFIG, EXIT_OK, EngineConfig, run_engine};
 use camilladsp::statefile;
-use camilladsp::{ProcessingParameters, list_supported_devices};
+use camilladsp::{ProcessingParameters, StartupArgs, list_supported_devices};
 
 const GIT_HASH: &str = git_version!(fallback = "unknown");
 // Display name. The package name from crate_name!() is the lowercase "camilladsp".
@@ -591,6 +591,22 @@ fn main_process() -> i32 {
     let mut configname = matches.get_one::<String>("configfile").cloned();
     debug!("Read config file {configname:?}");
 
+    let startup_args = StartupArgs {
+        statefile: statefilename.clone(),
+        config_file: configname.clone(),
+        no_config: matches.get_flag("no_config"),
+        wait: matches.get_flag("wait"),
+        follow_capture: matches.get_flag("follow_capture"),
+        error_recovery: matches.get_flag("error_recovery"),
+        samplerate: matches.get_one::<usize>("samplerate").copied(),
+        channels: matches.get_one::<usize>("channels").copied(),
+        extra_samples: matches.get_one::<usize>("extra_samples").copied(),
+        sample_format: matches.get_one::<String>("format").cloned(),
+        volume: ["gain", "gain1", "gain2", "gain3", "gain4"]
+            .map(|name| matches.get_one::<f32>(name).copied()),
+        mute: ["mute", "mute1", "mute2", "mute3", "mute4"].map(|name| matches.get_flag(name)),
+    };
+
     if matches.get_flag("check") {
         match config::load_validate_config(&configname.unwrap()) {
             Ok(_) => {
@@ -641,6 +657,7 @@ fn main_process() -> i32 {
         initial_volumes,
         initial_mutes,
         controller_settings,
+        startup_args,
         wait: matches.get_flag("wait"),
         ws_port: matches.get_one::<usize>("port").copied(),
         ws_address: matches
