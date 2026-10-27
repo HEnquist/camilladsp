@@ -92,16 +92,19 @@ impl AudioRingBuffer {
         {
             *live = waveform.len() >= n_frames;
             let mut pos = self.write_pos;
-            if *live {
-                for value in &waveform[..n_frames] {
-                    ring[pos] = value.to_f32();
-                    pos = (pos + 1) % RING_BUFFER_CAPACITY;
+            let mut offset = 0;
+            while offset < n_frames {
+                let len = (RING_BUFFER_CAPACITY - pos).min(n_frames - offset);
+                let target = &mut ring[pos..pos + len];
+                if *live {
+                    for (slot, value) in target.iter_mut().zip(&waveform[offset..offset + len]) {
+                        *slot = value.to_f32();
+                    }
+                } else {
+                    target.fill(0.0);
                 }
-            } else {
-                for _ in 0..n_frames {
-                    ring[pos] = f32::default();
-                    pos = (pos + 1) % RING_BUFFER_CAPACITY;
-                }
+                offset += len;
+                pos = 0;
             }
         }
         self.write_pos = (self.write_pos + n_frames) % RING_BUFFER_CAPACITY;
@@ -135,12 +138,12 @@ impl AudioRingBuffer {
             return false;
         }
         let start = (self.write_pos + RING_BUFFER_CAPACITY - n_frames) % RING_BUFFER_CAPACITY;
+        let first_len = n_frames.min(RING_BUFFER_CAPACITY - start);
         buf.resize(n_frames, f32::default());
         match channel {
             Some(ch_idx) => {
-                for (i, sample) in buf.iter_mut().enumerate() {
-                    *sample = self.channels[ch_idx][(start + i) % RING_BUFFER_CAPACITY];
-                }
+                buf[..first_len].copy_from_slice(&self.channels[ch_idx][start..start + first_len]);
+                buf[first_len..].copy_from_slice(&self.channels[ch_idx][..n_frames - first_len]);
             }
             None => {
                 let n_live = self.live.iter().filter(|live| **live).count();
@@ -149,17 +152,22 @@ impl AudioRingBuffer {
                     return true;
                 }
                 let n = n_live as f32;
-                for (i, sample) in buf.iter_mut().enumerate() {
-                    let idx = (start + i) % RING_BUFFER_CAPACITY;
-                    *sample = self
-                        .channels
-                        .iter()
-                        .zip(self.live.iter())
-                        .filter(|(_, live)| **live)
-                        .map(|(ch, _)| ch[idx])
-                        .sum::<f32>()
-                        / n;
+                buf.fill(-0.0);
+                for (ch, live) in self.channels.iter().zip(&self.live) {
+                    if !live {
+                        continue;
+                    }
+                    let (first, second) = buf.split_at_mut(first_len);
+                    for (target, source) in [
+                        (first, &ch[start..start + first_len]),
+                        (second, &ch[..n_frames - first_len]),
+                    ] {
+                        for (sample, value) in target.iter_mut().zip(source) {
+                            *sample += value;
+                        }
+                    }
                 }
+                buf.iter_mut().for_each(|sample| *sample /= n);
             }
         }
         true
@@ -635,6 +643,45 @@ mod tests {
         }
         assert_eq!(buf.channel_count(), 1);
         assert!(buf.read_latest(65536, None).is_some());
+    }
+
+    #[test]
+    fn wrapped_reads_preserve_channel_order_and_partial_chunks() {
+        let mut ring = AudioRingBuffer::new();
+        let mut history = Vec::new();
+        for frames in [
+            RING_BUFFER_CAPACITY - 37,
+            1024,
+            2 * RING_BUFFER_CAPACITY + 13,
+        ] {
+            let mut chunk =
+                make_chunk_with_unused(1234.0, 0.7, 48000, frames, &[true, false, true]);
+            for value in &mut chunk.waveforms[2] {
+                *value *= -0.25;
+            }
+            chunk.valid_frames -= 7;
+            history.extend((0..chunk.valid_frames).map(|i| {
+                [
+                    chunk.waveforms[0][i].to_f32(),
+                    0.0,
+                    chunk.waveforms[2][i].to_f32(),
+                ]
+            }));
+            ring.push_chunk(&chunk);
+            for len in [0, 1024, history.len().min(RING_BUFFER_CAPACITY)] {
+                let latest = &history[history.len() - len..];
+                for channel in [Some(0), Some(1), Some(2), None] {
+                    let actual = ring.read_latest(len, channel).unwrap();
+                    let expected: Vec<_> = latest
+                        .iter()
+                        .map(|sample| {
+                            channel.map_or((sample[0] + sample[2]) / 2.0, |ch| sample[ch])
+                        })
+                        .collect();
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
     }
 
     // Capture chunks have an empty waveform for each unused capture channel, and
