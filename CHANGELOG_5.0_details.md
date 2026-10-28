@@ -242,6 +242,12 @@ These apply to the optional `threaded-alsa` build feature.
   filled with leftover audio from the previous chunk. It is now filled with silence.
 
 ### WASAPI
+- The playback buffer level could jump by one device period, 10 ms in shared mode, and stay there.
+  Rate adjust then corrected for drift that was not there.
+  The level counted only the data waiting in front of the device, which shrinks by a period each
+  time the engine reads, and whether the latest read was visible depended on how the playback
+  thread happened to be timed against the engine.
+  The data held by the device is now taken from the device position, which advances smoothly.
 - A stalled capture did not show as `Stalled` in the processing state.
 - Exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form, which
   cannot tell packed 24-bit samples from padded ones. A driver could accept the format there and
