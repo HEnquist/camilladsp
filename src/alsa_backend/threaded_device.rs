@@ -21,7 +21,7 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::ringbuffer::RingBufferFeeder;
+use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -137,6 +137,7 @@ fn running_device_delay(
         .map(|avail| buf_manager.current_delay(avail).max(0) as usize)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prime_playback_delay(
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
@@ -145,7 +146,11 @@ fn prime_playback_delay(
     queued_frames: usize,
     buf_manager: &PlaybackBufferManager,
     silence_buf: &[u8],
+    playback_restarted: &AtomicBool,
 ) -> Res<()> {
+    // Data held up before the device may arrive on top of the silence written here,
+    // let the outer thread drop it.
+    playback_restarted.store(true, Ordering::Release);
     if buf_manager.target_level() == 0 {
         return Ok(());
     }
@@ -358,6 +363,7 @@ fn run_playback_inner_loop<C>(
     status_channel_inner: &crossbeam_channel::Sender<StatusMessage>,
     buffer_fill: &Mutex<countertimer::DeviceBufferEstimator>,
     playback_stalled: &AtomicBool,
+    playback_restarted: &AtomicBool,
     samplerate: usize,
     chunksize: usize,
     channels: usize,
@@ -456,6 +462,7 @@ fn run_playback_inner_loop<C>(
                     sample_queue_bytes / bytes_per_frame,
                     buf_manager,
                     &silence_buf,
+                    playback_restarted,
                 )
                 .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
             }
@@ -490,6 +497,7 @@ fn run_playback_inner_loop<C>(
                 sample_queue_bytes / bytes_per_frame,
                 buf_manager,
                 &silence_buf,
+                playback_restarted,
             );
             let was_stalled = device_stalled;
             device_stalled = apply_playback_write_result(
@@ -646,6 +654,7 @@ fn run_playback_inner_loop<C>(
                             chunksize,
                             buf_manager,
                             &silence_buf,
+                            playback_restarted,
                         );
                     }
                 }
@@ -674,6 +683,7 @@ fn play_buffer(
     queued_frames: usize,
     buf_manager: &PlaybackBufferManager,
     silence_buf: &[u8],
+    playback_restarted: &AtomicBool,
 ) -> Res<PlaybackResult> {
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
@@ -696,6 +706,7 @@ fn play_buffer(
             queued_frames,
             buf_manager,
             silence_buf,
+            playback_restarted,
         )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
         recover_suspended_pcm(pcmdevice, "PB")?;
@@ -707,6 +718,7 @@ fn play_buffer(
             queued_frames,
             buf_manager,
             silence_buf,
+            playback_restarted,
         )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
@@ -718,6 +730,7 @@ fn play_buffer(
             queued_frames,
             buf_manager,
             silence_buf,
+            playback_restarted,
         )?;
     } else if playback_state == alsa_sys::SND_PCM_STATE_PAUSED as i32 {
         debug!("PB: Device is in paused state, unpausing.");
@@ -775,6 +788,7 @@ fn play_buffer(
                     queued_frames,
                     buf_manager,
                     silence_buf,
+                    playback_restarted,
                 )?;
             }
         }
@@ -809,6 +823,7 @@ fn play_buffer(
                         queued_frames,
                         buf_manager,
                         silence_buf,
+                        playback_restarted,
                     )?;
                 }
                 Ok(PlaybackResult::Normal(0))
@@ -1131,6 +1146,9 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                 // whether audio is played.
                 let playback_stalled = Arc::new(AtomicBool::new(false));
                 let playback_stalled_inner = playback_stalled.clone();
+                // Set by the inner thread every time it restarts the device.
+                let playback_restarted = Arc::new(AtomicBool::new(false));
+                let playback_restarted_inner = playback_restarted.clone();
 
                 let innerhandle = thread::Builder::new()
                     .name("AlsaPlaybackInner".to_string())
@@ -1189,6 +1207,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     &status_channel_inner,
                                     &buffer_fill_inner,
                                     &playback_stalled_inner,
+                                    &playback_restarted_inner,
                                     samplerate,
                                     chunksize,
                                     channels,
@@ -1260,15 +1279,33 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_enabled,
                         );
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
+                        let mut backlog_trimmer =
+                            BacklogTrimmer::new(target_level, chunksize, samplerate);
 
                         loop {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
+                                    if playback_restarted.swap(false, Ordering::AcqRel) {
+                                        backlog_trimmer.restarted();
+                                    }
                                     let estimate =
                                         buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                    let queued_frames = channel.len() * chunksize;
+                                    let level = match estimate {
+                                        Some(countertimer::BufferEstimate::Level(frames)) => {
+                                            Some(frames + queued_frames)
+                                        }
+                                        _ => None,
+                                    };
+                                    if backlog_trimmer.drop_chunk(level) {
+                                        // The levels measured with the backlog in place would
+                                        // push rate adjust the wrong way.
+                                        rate_reporter.interrupt();
+                                        continue;
+                                    }
                                     if let Some(speed) = rate_reporter.update_from_estimate(
                                         estimate,
-                                        channel.len() * chunksize,
+                                        queued_frames,
                                         &playback_status,
                                     ) {
                                         if pitch_supported {

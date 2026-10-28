@@ -20,6 +20,7 @@ use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
+use crate::utils::ringbuffer::BacklogTrimmer;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -101,6 +102,8 @@ struct PlaybackChannels {
 #[derive(Debug)]
 enum PlaybackResult {
     Normal,
+    /// Played after starting the device again, from empty up to the target level.
+    Restarted,
     Stalled,
 }
 
@@ -115,6 +118,7 @@ fn play_buffer(
     buf_manager: &PlaybackBufferManager,
 ) -> Res<PlaybackResult> {
     let play_start = Instant::now();
+    let mut restarted = false;
     let playback_state = pcmdevice.state_raw();
     xtrace!("Playback state {:?}", playback_state);
     if playback_state < 0 {
@@ -129,11 +133,14 @@ fn play_buffer(
         warn!("PB: Prepare playback after buffer underrun");
         pcmdevice.prepare()?;
         buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
+        restarted = true;
     } else if playback_state == alsa_sys::SND_PCM_STATE_SUSPENDED as i32 {
         recover_suspended_pcm(pcmdevice, "PB")?;
         buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
+        restarted = true;
     } else if playback_state == alsa_sys::SND_PCM_STATE_PREPARED as i32 {
         info!("PB: Starting playback from Prepared state");
+        restarted = true;
         // This sleep applies for the first chunk and in combination with the threshold=1 (i.e. start at first write)
         // and the next chunk generates the initial target delay.
         buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
@@ -180,11 +187,13 @@ fn play_buffer(
                     warn!("PB: wait underrun, trying to recover. Error: {err}");
                     trace!("snd_pcm_prepare");
                     pcmdevice.prepare()?;
+                    restarted = true;
                 }
                 Errno::ESTRPIPE => {
                     warn!("PB: wait interrupted by suspend, trying to recover. Error: {err}");
                     recover_suspended_pcm(pcmdevice, "PB")?;
                     buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
+                    restarted = true;
                 }
                 _ => {
                     warn!(
@@ -223,12 +232,14 @@ fn play_buffer(
                     pcmdevice.prepare()?;
                     buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
                     io.writei(buffer)?;
+                    restarted = true;
                     break;
                 }
                 Errno::ESTRPIPE => {
                     warn!("PB: write interrupted by suspend, trying to recover. Error: {err}");
                     recover_suspended_pcm(pcmdevice, "PB")?;
                     buf_manager.sleep_for_target_delay(millis_per_frame, play_start, queued_frames);
+                    restarted = true;
                     continue;
                 }
                 _ => {
@@ -238,7 +249,11 @@ fn play_buffer(
             },
         };
     }
-    Ok(PlaybackResult::Normal)
+    if restarted {
+        Ok(PlaybackResult::Restarted)
+    } else {
+        Ok(PlaybackResult::Normal)
+    }
 }
 
 /// Capture a buffer.
@@ -521,6 +536,8 @@ fn playback_loop_bytes(
         params.adjust_period as f64,
         params.target_level,
     );
+    let mut backlog_trimmer =
+        BacklogTrimmer::new(params.target_level, params.chunksize, params.samplerate);
     trace!("PB: {buf_manager:?}");
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
@@ -564,6 +581,17 @@ fn playback_loop_bytes(
                     "Avail frames in buffer: {avail_at_chunk_recvd:?}, waiting chunks in channel: {waiting_chunks_in_channel}"
                 );
                 //trace!("PB: Avail at chunk rcvd: {:?}", avail_at_chunk_recvd);
+                let level = avail_at_chunk_recvd.map(|avail| {
+                    buf_manager.current_delay(avail).max(0) as usize
+                        + params.chunksize * waiting_chunks_in_channel
+                });
+                if backlog_trimmer.drop_chunk(level) {
+                    // The levels measured with the backlog in place would push rate adjust
+                    // the wrong way.
+                    timer.restart();
+                    buffer_avg.restart();
+                    continue;
+                }
                 chunk.update_stats(&mut chunk_stats);
                 crate::push_playback_audio_buffer(&params.playback_status, &chunk);
                 conversion_result =
@@ -579,8 +607,11 @@ fn playback_loop_bytes(
                     buf_manager,
                 );
                 pcm_paused = false;
+                if let Ok(PlaybackResult::Restarted) = playback_res {
+                    backlog_trimmer.restarted();
+                }
                 device_stalled = match playback_res {
-                    Ok(PlaybackResult::Normal) => {
+                    Ok(PlaybackResult::Normal | PlaybackResult::Restarted) => {
                         if device_stalled {
                             info!("PB: device resumed normal operation");
                             // The buffer accumulated outdated samples while the device was
