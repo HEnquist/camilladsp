@@ -150,6 +150,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   Schur-Cohn stability test when the config is loaded, and a filter with poles on or outside the
   unit circle is no longer accepted and then allowed to run away to full scale.
 
+### Config updates
+- A new config that only changes `description` fields no longer rebuilds anything.
+  A changed pipeline step or mixer description used to rebuild the whole pipeline,
+  and a filter or processor description rebuilt that filter or processor,
+  which for a `Conv` filter meant reading the coefficient file again.
+  The new descriptions are still stored and returned by `GetConfig`.
+
 ### DSP
 - The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
   coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong

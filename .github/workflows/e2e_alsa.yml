@@ -31,14 +31,15 @@ jobs:
   # cloud image under KVM instead, which runs the generic kernel. The binary is built on
   # the runner and copied in, and so is the suite, so the VM needs no Rust toolchain.
   # The guest is the same Ubuntu release as the runner, which keeps the binary's glibc
-  # requirement satisfied.
+  # requirement satisfied. So the runner is pinned rather than `ubuntu-latest`, which
+  # moves to a new release on its own. Update the runner and IMAGE_URL together.
   #
   # Both ALSA backends, since the threaded one is a separate implementation rather than
   # an option on the other. The steps before the tests check each thing the suite
   # depends on in turn, so a runner or image change fails there and says which.
   alsa:
     name: ALSA, ${{ matrix.backend }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
