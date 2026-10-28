@@ -431,13 +431,14 @@ fn transform_coeffs(
     // `validate_config` rejecting empty coefficients, but the constructors are
     // public.
     let nsegments = coeffs.len().div_ceil(data_length).max(1);
-    let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
+    let mut coeffs_padded = vec![0.0; 2 * data_length];
     let mut coeffs_f = SegmentedSpectrum::zeroed(nsegments, data_length + 1);
-    for (n, coeff) in coeffs.iter().enumerate() {
-        coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as CamillaFloat;
-    }
-    for (n, segment) in coeffs_padded.iter_mut().enumerate() {
-        fft.process_with_scratch(segment, coeffs_f.segment_mut(n), scratch)
+    for (n, segment) in coeffs.chunks(data_length).enumerate() {
+        coeffs_padded.fill(0.0);
+        for (padded, coeff) in coeffs_padded.iter_mut().zip(segment) {
+            *padded = coeff / (2 * data_length) as CamillaFloat;
+        }
+        fft.process_with_scratch(&mut coeffs_padded, coeffs_f.segment_mut(n), scratch)
             .unwrap();
     }
     Arc::new(coeffs_f)
@@ -931,6 +932,27 @@ mod tests {
         assert!(compare_waveforms(wave3, exp3, 1e-5));
         assert!(compare_waveforms(wave4, exp4, 1e-5));
         assert!(compare_waveforms(wave5, exp5, 1e-5));
+    }
+
+    #[test]
+    fn partial_last_segment_is_zero_padded() {
+        use crate::ToCamillaFloat;
+
+        let coeffs: Vec<_> = (0..173)
+            .map(|i| (0.1 * (i as f64 * 0.2).sin()).to_camilla_float())
+            .collect();
+        let mut filter = FftConv::new("test", 64, &coeffs);
+        for block in 0..5 {
+            let mut wave = vec![0.0; 64];
+            if block == 0 {
+                wave[0] = 1.0;
+            }
+            filter.process_waveform(&mut wave);
+            for (i, value) in wave.iter().enumerate() {
+                let expected = coeffs.get(block * 64 + i).copied().unwrap_or(0.0);
+                assert!((value - expected).abs() < 1e-6);
+            }
+        }
     }
 
     // FMA rounds differently from scalar; SIMD results may differ by a few ULPs.
