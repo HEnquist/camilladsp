@@ -30,7 +30,9 @@ jobs:
   linux_amd64:
     name: Linux amd64
     needs: version
-    runs-on: ubuntu-latest
+    # Built natively, so the runner's glibc sets the glibc floor of the released binary.
+    # Pinned rather than `ubuntu-latest`, which moves to a new release on its own.
+    runs-on: ubuntu-24.04
     #container: ubuntu:20.04
     steps:
       - name: Checkout sources
