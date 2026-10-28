@@ -16,10 +16,16 @@
 
 use ringbuf::traits::*;
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How many times [`RingBufferFeeder::push`] waits for room before it drops a chunk.
 const PUSH_RETRIES: usize = 16;
+
+/// The shortest time after a restart that [`BacklogTrimmer`] watches the level.
+const BACKLOG_WINDOW: Duration = Duration::from_millis(500);
+
+/// The shortest time after a restart that [`BacklogTrimmer`] watches the level, in chunks.
+const BACKLOG_WINDOW_CHUNKS: f64 = 4.0;
 
 /// Pushes whole playback chunks into a device ring buffer.
 ///
@@ -65,6 +71,86 @@ impl RingBufferFeeder {
             );
             false
         }
+    }
+}
+
+/// Drops the backlog that arrives right after the playback device was restarted.
+///
+/// When no data reaches the playback device for a while, the device runs low or underruns,
+/// and it is restarted at the target level. The data that was held up somewhere before the
+/// device, for example in the capture device, then arrives all at once on top of that.
+/// The level ends up above the target by about the length of the gap, and rate adjust
+/// takes a long time to bring it down, since it only changes the rate by a fraction of a percent.
+/// The backlog can not be counted when the device is restarted, since it is not visible yet.
+///
+/// Instead, for a short time after each restart, chunks are dropped while the level is well
+/// above the target. A level more than two chunks above the target starts the dropping,
+/// so that a burst of a chunk or two from the capture side does not. It then goes on until the
+/// level is at most one chunk above the target. That drops audio, so it is only done right after
+/// a restart, when the audio already has a gap.
+pub struct BacklogTrimmer {
+    target_level: usize,
+    chunksize: usize,
+    window: Duration,
+    restarted_at: Option<Instant>,
+    dropping: bool,
+    dropped_frames: usize,
+}
+
+impl BacklogTrimmer {
+    pub fn new(target_level: usize, chunksize: usize, samplerate: usize) -> Self {
+        let window =
+            Duration::from_secs_f64(BACKLOG_WINDOW_CHUNKS * chunksize as f64 / samplerate as f64)
+                .max(BACKLOG_WINDOW);
+        BacklogTrimmer {
+            target_level,
+            chunksize,
+            window,
+            restarted_at: None,
+            dropping: false,
+            dropped_frames: 0,
+        }
+    }
+
+    /// The playback device was just restarted, start watching the level.
+    pub fn restarted(&mut self) {
+        self.restarted_at = Some(Instant::now());
+    }
+
+    /// Check the `level` measured as a chunk arrives, `None` if it is not known.
+    /// Returns `true` if the chunk should be dropped.
+    pub fn drop_chunk(&mut self, level: Option<usize>) -> bool {
+        let Some(restarted_at) = self.restarted_at else {
+            return false;
+        };
+        if restarted_at.elapsed() > self.window {
+            self.restarted_at = None;
+            self.finish();
+            return false;
+        }
+        let Some(level) = level else {
+            return false;
+        };
+        if level > self.target_level + 2 * self.chunksize {
+            self.dropping = true;
+        }
+        if self.dropping && level > self.target_level + self.chunksize {
+            self.dropped_frames += self.chunksize;
+            return true;
+        }
+        self.finish();
+        false
+    }
+
+    fn finish(&mut self) {
+        if self.dropping {
+            warn!(
+                "Dropped {} frames that arrived late after a playback restart",
+                self.dropped_frames
+            );
+        }
+        self.dropping = false;
+        self.dropped_frames = 0;
     }
 }
 
@@ -119,9 +205,13 @@ pub fn append_from_ringbuffer(
 
 #[cfg(test)]
 mod tests {
-    use super::{RingBufferFeeder, append_from_ringbuffer, fill_playback_output_from_ringbuffer};
+    use super::{
+        BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer,
+        fill_playback_output_from_ringbuffer,
+    };
     use ringbuf::{HeapRb, traits::*};
     use std::collections::VecDeque;
+    use std::time::Duration;
 
     #[test]
     fn full_underrun_outputs_silence() {
@@ -268,5 +358,52 @@ mod tests {
         });
         assert!(feeder.push(&mut producer, &[1; 8]));
         drain.join().unwrap();
+    }
+
+    // Target 2000 frames, chunks of 1000. Dropping starts above 4000 and ends at 3000.
+    fn trimmer() -> BacklogTrimmer {
+        BacklogTrimmer::new(2000, 1000, 48000)
+    }
+
+    #[test]
+    fn trimmer_keeps_everything_without_a_restart() {
+        let mut trimmer = trimmer();
+        assert!(!trimmer.drop_chunk(Some(10000)));
+    }
+
+    #[test]
+    fn trimmer_drops_a_backlog_down_to_a_chunk_above_the_target() {
+        let mut trimmer = trimmer();
+        trimmer.restarted();
+        let dropped: Vec<bool> = [2000, 6500, 5500, 4500, 3500, 2500, 3500]
+            .into_iter()
+            .map(|level| trimmer.drop_chunk(Some(level)))
+            .collect();
+        assert_eq!(dropped, [false, true, true, true, true, false, false]);
+    }
+
+    #[test]
+    fn trimmer_lets_a_burst_of_two_chunks_through() {
+        let mut trimmer = trimmer();
+        trimmer.restarted();
+        assert!(!trimmer.drop_chunk(Some(4000)));
+        assert!(!trimmer.drop_chunk(Some(3500)));
+    }
+
+    #[test]
+    fn trimmer_keeps_a_chunk_with_an_unknown_level() {
+        let mut trimmer = trimmer();
+        trimmer.restarted();
+        assert!(!trimmer.drop_chunk(None));
+        assert!(trimmer.drop_chunk(Some(6000)));
+    }
+
+    #[test]
+    fn trimmer_stops_after_the_window() {
+        let mut trimmer = trimmer();
+        trimmer.window = Duration::ZERO;
+        trimmer.restarted();
+        std::thread::sleep(Duration::from_millis(1));
+        assert!(!trimmer.drop_chunk(Some(10000)));
     }
 }
