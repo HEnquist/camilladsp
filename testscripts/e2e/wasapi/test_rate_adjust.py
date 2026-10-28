@@ -34,7 +34,14 @@ from .cable import (
     wasapi_block,
 )
 
-pytestmark = [pytest.mark.wasapi, pytest.mark.usefixtures("dummy_backend")]
+pytestmark = [
+    pytest.mark.wasapi,
+    pytest.mark.usefixtures("dummy_backend"),
+    # Longer than the 120 s from pytest.ini, which would kill a slow test before its own
+    # timeouts run out: 20 s for the adjust to start, SETTLE_TIMEOUT, MEASURE_TIMEOUT and
+    # the startup. Only the test's own failure says what the shifts were.
+    pytest.mark.timeout(300),
+]
 
 DEVICES = {
     "enable_rate_adjust": "true",
