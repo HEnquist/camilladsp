@@ -431,6 +431,10 @@ enum PlaybackDeviceMessage {
     Stop,
 }
 
+/// The number of passes used to find the usual amount of data held by the device,
+/// see the buffer level in [`playback_loop`].
+const DEVICE_FILL_PASSES: usize = 100;
+
 // Playback loop, play samples received from channel
 #[allow(clippy::too_many_arguments)]
 fn playback_loop(
@@ -439,6 +443,7 @@ fn playback_loop(
     handle: Option<wasapi::Handle>,
     blockalign: usize,
     chunksize: usize,
+    samplerate: usize,
     sync: PlaybackSync,
     mut ringbuffer: Caching<Arc<HeapRb<u8>>, false, true>,
     target_level: usize,
@@ -482,6 +487,13 @@ fn playback_loop(
             None
         }
     };
+
+    let audio_clock = audio_client.get_audioclock()?;
+    let frames_per_clock_unit = samplerate as f64 / audio_clock.get_frequency()? as f64;
+    let mut frames_written: u64 = 0;
+    let mut device_fill_sum = 0.0;
+    let mut device_fill_passes = 0;
+    let mut usual_device_fill: Option<f64> = None;
 
     let mut running = false;
     let mut starting = true;
@@ -562,7 +574,32 @@ fn playback_loop(
             None,
         )?;
         sample_queue.drain(..nbr_bytes);
-        let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        frames_written += buffer_free_frame_count as u64;
+        let queued_frames = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        // The level is the data on our side, but measuring only that makes it jump.
+        // The queue shrinks by a whole device period each time the engine reads,
+        // and whether that read is visible in this pass depends on how the pass
+        // happens to be timed against the engine. When that changes, the level moves
+        // by a period although the delay through the device is the same.
+        // The device position advances smoothly, so the data held by the device is
+        // taken from that instead, and its deviation from the usual amount is added.
+        // The usual amount is the average over the first passes after the device
+        // starts playing, which keeps the level at the data on our side on average.
+        let (position, _) = audio_clock.get_position()?;
+        let device_fill = frames_written as f64 - position as f64 * frames_per_clock_unit;
+        let curr_buffer_fill = match usual_device_fill {
+            Some(usual) => (queued_frames as f64 + device_fill - usual).max(0.0) as usize,
+            None => {
+                if position > 0 {
+                    device_fill_sum += device_fill;
+                    device_fill_passes += 1;
+                    if device_fill_passes == DEVICE_FILL_PASSES {
+                        usual_device_fill = Some(device_fill_sum / DEVICE_FILL_PASSES as f64);
+                    }
+                }
+                queued_frames
+            }
+        };
         if let Some(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
@@ -902,6 +939,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             handle,
                             blockalign as usize,
                             chunksize,
+                            samplerate,
                             sync,
                             device_consumer,
                             target_level,
