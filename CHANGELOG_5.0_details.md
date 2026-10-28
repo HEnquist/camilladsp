@@ -190,6 +190,12 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - Restarting playback after an underrun waited the whole target delay on top of the time spent
   preparing the device and the chunks already queued, so it started above the target level.
   Both are now subtracted from the wait.
+- After a gap in the data, for example while CamillaDSP got no CPU time, playback underran and
+  was restarted at the target level. The data that had been held up in the capture device during
+  the gap then arrived on top of that. The level ended up thousands of frames above the target,
+  and rate adjust took 30 s or more to bring it back. Right after a restart, chunks are now
+  dropped while the level is more than a chunk or two above the target.
+  This applies to both the default and the threaded backend.
 
 ### Alsa, threaded backend
 These apply to the optional `threaded-alsa` build feature.
