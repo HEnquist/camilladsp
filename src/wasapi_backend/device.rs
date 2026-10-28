@@ -439,6 +439,7 @@ fn playback_loop(
     handle: Option<wasapi::Handle>,
     blockalign: usize,
     chunksize: usize,
+    samplerate: usize,
     sync: PlaybackSync,
     mut ringbuffer: Caching<Arc<HeapRb<u8>>, false, true>,
     target_level: usize,
@@ -495,6 +496,21 @@ fn playback_loop(
             poll_delay.as_micros()
         );
     }
+    // Workaround for VB-Audio Virtual Cable in shared mode.
+    // In event mode, each event follows a read of one device period by the engine.
+    // With VB-Cable that read is sometimes not yet visible when the pass runs,
+    // and then the data on our side looks a period larger until a later pass sees
+    // two periods taken at once. A pass that finds nothing taken after a real wait
+    // for the event is assumed to be such a late read, and the period is subtracted
+    // from the buffer level until two periods are seen.
+    // When the event was already set, the pass comes right after the previous one,
+    // and nothing taken is to be expected.
+    // This has only been seen with VB-Cable, and is likely down to how that virtual
+    // device works. If VB-Cable stops doing it, `waited_for_event`, `late_read`
+    // and `period_frames` can all be removed.
+    let period_frames = device_period_hns as usize * samplerate / 10_000_000;
+    let mut waited_for_event = false;
+    let mut late_read = false;
     // Fill the endpoint buffer with the first block before starting the stream,
     // so playback begins with real audio (preceded by the target_level silence)
     // instead of an empty buffer. This follows the ordering recommended by Microsoft:
@@ -507,6 +523,12 @@ fn playback_loop(
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("Playback, new buffer frame count {buffer_free_frame_count}.");
+        // VB-Cable workaround, see above.
+        if buffer_free_frame_count == 0 && waited_for_event {
+            late_read = true;
+        } else if buffer_free_frame_count as usize > period_frames {
+            late_read = false;
+        }
 
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("Playback loop needs more samples, reading from channel.");
@@ -562,7 +584,11 @@ fn playback_loop(
             None,
         )?;
         sample_queue.drain(..nbr_bytes);
-        let curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        let mut curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        // VB-Cable workaround, see above.
+        if late_read {
+            curr_buffer_fill = curr_buffer_fill.saturating_sub(period_frames);
+        }
         if let Some(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
@@ -572,7 +598,9 @@ fn playback_loop(
             started = true;
         }
         if let Some(ref h) = handle {
-            if h.wait_for_event(1000).is_err() {
+            // Check if the event is already set, for the VB-Cable workaround above.
+            waited_for_event = h.wait_for_event(0).is_err();
+            if waited_for_event && h.wait_for_event(1000).is_err() {
                 error!("Error on playback, stopping stream");
                 audio_client.stop_stream()?;
                 return Err(DeviceError::new("Error on playback").into());
@@ -902,6 +930,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             handle,
                             blockalign as usize,
                             chunksize,
+                            samplerate,
                             sync,
                             device_consumer,
                             target_level,

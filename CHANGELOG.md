@@ -39,6 +39,8 @@ Bugfixes:
   instead of staying high for 30 s or more.
 - Alsa, threaded backend: many fixes for stalls, pauses and rate adjust,
   and it no longer keeps a CPU core busy.
+- Wasapi: the playback buffer level no longer jumps by a device period,
+  which made rate adjust correct for drift that was not there.
 - Various smaller fixes, see the [detailed changelog](CHANGELOG_5.0_details.md#bugfixes).
 
 Config changes (breaking):

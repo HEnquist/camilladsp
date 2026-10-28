@@ -242,6 +242,12 @@ These apply to the optional `threaded-alsa` build feature.
   filled with leftover audio from the previous chunk. It is now filled with silence.
 
 ### WASAPI
+- The playback buffer level could jump by one device period, 10 ms in shared mode, and stay there
+  for seconds. Rate adjust then corrected for drift that was not there.
+  With VB-Audio Virtual Cable, the engine's read of a period is sometimes not yet visible
+  when the playback thread wakes up for it. The data waiting in front of the device then looks a
+  period larger, until a later wakeup sees two periods taken at once.
+  Such a late read is now recognised and left out of the level.
 - A stalled capture did not show as `Stalled` in the processing state.
 - Exclusive mode no longer asks the driver about 24-bit formats in the WAVEFORMATEX form, which
   cannot tell packed 24-bit samples from padded ones. A driver could accept the format there and
