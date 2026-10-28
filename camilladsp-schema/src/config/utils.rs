@@ -504,6 +504,10 @@ pub fn load_validate_config(configname: &str) -> Result<(Configuration, ImpulseC
 }
 
 /// Compare two configurations and return the most significant [`ConfigChange`] between them.
+///
+/// The descriptions are metadata only and are ignored, so a change that only touches
+/// descriptions rebuilds nothing. It still gives a [`ConfigChange::FilterParameters`] with no
+/// names rather than [`ConfigChange::None`], so that the new config gets stored.
 pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> ConfigChange {
     if currentconf == newconf {
         return ConfigChange::None;
@@ -511,10 +515,10 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     if currentconf.devices != newconf.devices {
         return ConfigChange::Devices;
     }
-    if currentconf.pipeline != newconf.pipeline {
+    if !same_pipeline(&currentconf.pipeline, &newconf.pipeline) {
         return ConfigChange::Pipeline;
     }
-    if currentconf.mixers != newconf.mixers {
+    if !same_mixers(&currentconf.mixers, &newconf.mixers) {
         return ConfigChange::MixerParameters;
     }
     let mut filters = Vec::<String>::new();
@@ -523,27 +527,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
         for (filter, params) in newfilters {
             // The pipeline didn't change, any added filter isn't included and can be skipped
             if let Some(current_filter) = oldfilters.get(filter) {
-                // Did the filter change type?
-                match (params, current_filter) {
-                    (Filter::Biquad { .. }, Filter::Biquad { .. })
-                    | (Filter::BiquadCombo { .. }, Filter::BiquadCombo { .. })
-                    | (Filter::Conv { .. }, Filter::Conv { .. })
-                    | (Filter::Delay { .. }, Filter::Delay { .. })
-                    | (Filter::Gain { .. }, Filter::Gain { .. })
-                    | (Filter::Dither { .. }, Filter::Dither { .. })
-                    | (Filter::DiffEq { .. }, Filter::DiffEq { .. })
-                    | (Filter::Volume { .. }, Filter::Volume { .. })
-                    | (Filter::Loudness { .. }, Filter::Loudness { .. })
-                    | (Filter::Clipper { .. }, Filter::Clipper { .. })
-                    | (Filter::LookaheadLimiter { .. }, Filter::LookaheadLimiter { .. }) => {}
-                    _ => {
-                        // A filter changed type, need to rebuild the pipeline
-                        return ConfigChange::Pipeline;
-                    }
-                };
-                // Only parameters changed, ok to update
-                if params != current_filter {
-                    filters.push(filter.to_string());
+                match filter_parameters_changed(params, current_filter) {
+                    // A filter changed type, need to rebuild the pipeline
+                    None => return ConfigChange::Pipeline,
+                    // Only parameters changed, ok to update
+                    Some(true) => filters.push(filter.to_string()),
+                    Some(false) => {}
                 }
             }
         }
@@ -552,20 +541,12 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
         for (proc, params) in newprocs {
             // The pipeline didn't change, any added processor isn't included and can be skipped
             if let Some(current_proc) = oldprocs.get(proc) {
-                // Did the processor change type?
-                match (params, current_proc) {
-                    (Processor::Compressor { .. }, Processor::Compressor { .. })
-                    | (Processor::NoiseGate { .. }, Processor::NoiseGate { .. })
-                    | (Processor::LookaheadLimiter { .. }, Processor::LookaheadLimiter { .. })
-                    | (Processor::RACE { .. }, Processor::RACE { .. }) => {}
-                    _ => {
-                        // A processor changed type, need to rebuild the pipeline
-                        return ConfigChange::Pipeline;
-                    }
-                };
-                // Only parameters changed, ok to update
-                if params != current_proc {
-                    processors.push(proc.to_string());
+                match processor_parameters_changed(params, current_proc) {
+                    // A processor changed type, need to rebuild the pipeline
+                    None => return ConfigChange::Pipeline,
+                    // Only parameters changed, ok to update
+                    Some(true) => processors.push(proc.to_string()),
+                    Some(false) => {}
                 }
             }
         }
@@ -573,6 +554,134 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
     ConfigChange::FilterParameters {
         filters,
         processors,
+    }
+}
+
+/// Whether two pipelines have the same steps, ignoring the descriptions.
+fn same_pipeline(a: &Option<Vec<PipelineStep>>, b: &Option<Vec<PipelineStep>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_pipeline_step(a, b))
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Whether two pipeline steps are the same, ignoring the descriptions.
+///
+/// The steps are destructured in full, so that a new field has to be added here as well.
+fn same_pipeline_step(a: &PipelineStep, b: &PipelineStep) -> bool {
+    match (a, b) {
+        (PipelineStep::Mixer(a), PipelineStep::Mixer(b)) => {
+            let PipelineStepMixer {
+                name,
+                description: _,
+                bypassed,
+            } = a;
+            *name == b.name && *bypassed == b.bypassed
+        }
+        (PipelineStep::Filter(a), PipelineStep::Filter(b)) => {
+            let PipelineStepFilter {
+                channels,
+                names,
+                description: _,
+                bypassed,
+            } = a;
+            *channels == b.channels && *names == b.names && *bypassed == b.bypassed
+        }
+        (PipelineStep::Processor(a), PipelineStep::Processor(b)) => {
+            let PipelineStepProcessor {
+                name,
+                description: _,
+                bypassed,
+            } = a;
+            *name == b.name && *bypassed == b.bypassed
+        }
+        _ => false,
+    }
+}
+
+/// Whether two sets of mixers are the same, ignoring the descriptions.
+fn same_mixers(a: &Option<HashMap<String, Mixer>>, b: &Option<HashMap<String, Mixer>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|(name, mixer)| {
+                    b.get(name).is_some_and(|other| {
+                        let Mixer {
+                            description: _,
+                            channels,
+                            mapping,
+                            labels,
+                        } = mixer;
+                        *channels == other.channels
+                            && *mapping == other.mapping
+                            && *labels == other.labels
+                    })
+                })
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// Whether the parameters of a filter changed, ignoring the description.
+/// `None` when the filter changed type.
+fn filter_parameters_changed(new: &Filter, current: &Filter) -> Option<bool> {
+    match (new, current) {
+        (Filter::Biquad { parameters: a, .. }, Filter::Biquad { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::BiquadCombo { parameters: a, .. }, Filter::BiquadCombo { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::Conv { parameters: a, .. }, Filter::Conv { parameters: b, .. }) => Some(a != b),
+        (Filter::Delay { parameters: a, .. }, Filter::Delay { parameters: b, .. }) => Some(a != b),
+        (Filter::Gain { parameters: a, .. }, Filter::Gain { parameters: b, .. }) => Some(a != b),
+        (Filter::Dither { parameters: a, .. }, Filter::Dither { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::DiffEq { parameters: a, .. }, Filter::DiffEq { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::Volume { parameters: a, .. }, Filter::Volume { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::Loudness { parameters: a, .. }, Filter::Loudness { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (Filter::Clipper { parameters: a, .. }, Filter::Clipper { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        (
+            Filter::LookaheadLimiter { parameters: a, .. },
+            Filter::LookaheadLimiter { parameters: b, .. },
+        ) => Some(a != b),
+        _ => None,
+    }
+}
+
+/// Whether the parameters of a processor changed, ignoring the description.
+/// `None` when the processor changed type.
+fn processor_parameters_changed(new: &Processor, current: &Processor) -> Option<bool> {
+    match (new, current) {
+        (
+            Processor::Compressor { parameters: a, .. },
+            Processor::Compressor { parameters: b, .. },
+        ) => Some(a != b),
+        (
+            Processor::NoiseGate { parameters: a, .. },
+            Processor::NoiseGate { parameters: b, .. },
+        ) => Some(a != b),
+        (
+            Processor::LookaheadLimiter { parameters: a, .. },
+            Processor::LookaheadLimiter { parameters: b, .. },
+        ) => Some(a != b),
+        (Processor::RACE { parameters: a, .. }, Processor::RACE { parameters: b, .. }) => {
+            Some(a != b)
+        }
+        _ => None,
     }
 }
 
@@ -1182,11 +1291,11 @@ pub fn playback_channel_labels(config: &Option<Configuration>) -> Option<Vec<Opt
 #[cfg(test)]
 mod tests {
     use super::{
-        check_all_finite, deserialize_config, max_channels, parse_config, used_capture_channels,
-        validate_config, validate_resampler, validate_unused,
+        check_all_finite, config_diff, deserialize_config, max_channels, parse_config,
+        used_capture_channels, validate_config, validate_resampler, validate_unused,
     };
     use crate::config::{AsyncSincInterpolation, AsyncSincParameters, AsyncSincWindow, Resampler};
-    use crate::config::{IssueKind, Issues, format_path};
+    use crate::config::{ConfigChange, IssueKind, Issues, format_path};
 
     fn free_sinc(
         sinc_len: usize,
@@ -1748,5 +1857,103 @@ pipeline:
         );
         // An empty file name is invalid, not a missing file.
         assert!(issues.iter().all(|issue| issue.kind == IssueKind::Invalid));
+    }
+
+    /// A config with a description on every mixer, filter, processor and pipeline step.
+    fn described_config() -> String {
+        format!(
+            r#"{BASE}mixers:
+  mix:
+    description: mixer desc
+    channels: {{in: 2, out: 2}}
+    mapping:
+      - dest: 0
+        sources: [{{channel: 0, gain: 0}}]
+filters:
+  g:
+    type: Gain
+    description: filter desc
+    parameters: {{gain: -6}}
+processors:
+  gate:
+    type: NoiseGate
+    description: processor desc
+    parameters:
+      {{channels: 2, attack: 1, attack_unit: ms, release: 1, release_unit: ms,
+       threshold: -50, attenuation: -20}}
+pipeline:
+  - type: Mixer
+    name: mix
+    description: mixer step desc
+  - type: Filter
+    names: [g]
+    description: filter step desc
+  - type: Processor
+    name: gate
+    description: processor step desc
+"#
+        )
+    }
+
+    fn diff(current: &str, new: &str) -> ConfigChange {
+        config_diff(&parse(current).unwrap(), &parse(new).unwrap())
+    }
+
+    #[test]
+    fn description_changes_rebuild_nothing() {
+        let current = described_config();
+        for description in [
+            "mixer desc",
+            "filter desc",
+            "processor desc",
+            "mixer step desc",
+            "filter step desc",
+            "processor step desc",
+        ] {
+            let new = current.replace(description, "changed");
+            // Not `None`, the new descriptions must still be stored.
+            assert!(
+                matches!(
+                    diff(&current, &new),
+                    ConfigChange::FilterParameters { ref filters, ref processors }
+                        if filters.is_empty() && processors.is_empty()
+                ),
+                "{description}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_changes_are_found_next_to_description_changes() {
+        let current = described_config();
+        let new = current
+            .replace("filter desc", "changed")
+            .replace("gain: -6", "gain: -3");
+        assert!(matches!(
+            diff(&current, &new),
+            ConfigChange::FilterParameters { ref filters, ref processors }
+                if filters == &["g"] && processors.is_empty()
+        ));
+        let new = current
+            .replace("processor desc", "changed")
+            .replace("threshold: -50", "threshold: -40");
+        assert!(matches!(
+            diff(&current, &new),
+            ConfigChange::FilterParameters { ref filters, ref processors }
+                if filters.is_empty() && processors == &["gate"]
+        ));
+        let new = current
+            .replace("mixer desc", "changed")
+            .replace("gain: 0", "gain: -1");
+        assert!(matches!(
+            diff(&current, &new),
+            ConfigChange::MixerParameters
+        ));
+        let new = current.replace(
+            "description: mixer step desc",
+            "description: changed\n    bypassed: true",
+        );
+        assert!(matches!(diff(&current, &new), ConfigChange::Pipeline));
+        assert!(matches!(diff(&current, &current), ConfigChange::None));
     }
 }
