@@ -505,9 +505,9 @@ fn playback_loop(
     // from the buffer level until two periods are seen.
     // When the event was already set, the pass comes right after the previous one,
     // and nothing taken is to be expected.
-    // This was not seen with any other device tried (Virtual Audio Cable and a built-in
-    // Qualcomm sound card), nor in exclusive mode. If VB-Cable stops doing it,
-    // `waited_for_event`, `late_read` and `period_frames` can all be removed.
+    // This has only been seen with VB-Cable, and is likely down to how that virtual
+    // device works. If VB-Cable stops doing it, `waited_for_event`, `late_read`
+    // and `period_frames` can all be removed.
     let period_frames = device_period_hns as usize * samplerate / 10_000_000;
     let mut waited_for_event = false;
     let mut late_read = false;
