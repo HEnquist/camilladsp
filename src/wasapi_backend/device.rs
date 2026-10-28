@@ -496,14 +496,18 @@ fn playback_loop(
             poll_delay.as_micros()
         );
     }
+    // Workaround for VB-Audio Virtual Cable in shared mode.
     // In event mode, each event follows a read of one device period by the engine.
-    // With some devices that read is sometimes not yet visible when the pass runs,
+    // With VB-Cable that read is sometimes not yet visible when the pass runs,
     // and then the data on our side looks a period larger until a later pass sees
     // two periods taken at once. A pass that finds nothing taken after a real wait
     // for the event is assumed to be such a late read, and the period is subtracted
     // from the buffer level until two periods are seen.
     // When the event was already set, the pass comes right after the previous one,
     // and nothing taken is to be expected.
+    // This was not seen with any other device tried (Virtual Audio Cable and a built-in
+    // Qualcomm sound card), nor in exclusive mode. If VB-Cable stops doing it,
+    // `waited_for_event`, `late_read` and `period_frames` can all be removed.
     let period_frames = device_period_hns as usize * samplerate / 10_000_000;
     let mut waited_for_event = false;
     let mut late_read = false;
@@ -519,6 +523,7 @@ fn playback_loop(
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("Playback, new buffer frame count {buffer_free_frame_count}.");
+        // VB-Cable workaround, see above.
         if buffer_free_frame_count == 0 && waited_for_event {
             late_read = true;
         } else if buffer_free_frame_count as usize > period_frames {
@@ -580,6 +585,7 @@ fn playback_loop(
         )?;
         sample_queue.drain(..nbr_bytes);
         let mut curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        // VB-Cable workaround, see above.
         if late_read {
             curr_buffer_fill = curr_buffer_fill.saturating_sub(period_frames);
         }
@@ -592,6 +598,7 @@ fn playback_loop(
             started = true;
         }
         if let Some(ref h) = handle {
+            // Check if the event is already set, for the VB-Cable workaround above.
             waited_for_event = h.wait_for_event(0).is_err();
             if waited_for_event && h.wait_for_event(1000).is_err() {
                 error!("Error on playback, stopping stream");
