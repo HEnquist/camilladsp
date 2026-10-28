@@ -431,10 +431,6 @@ enum PlaybackDeviceMessage {
     Stop,
 }
 
-/// The number of passes used to find the usual amount of data held by the device,
-/// see the buffer level in [`playback_loop`].
-const DEVICE_FILL_PASSES: usize = 100;
-
 // Playback loop, play samples received from channel
 #[allow(clippy::too_many_arguments)]
 fn playback_loop(
@@ -488,13 +484,6 @@ fn playback_loop(
         }
     };
 
-    let audio_clock = audio_client.get_audioclock()?;
-    let frames_per_clock_unit = samplerate as f64 / audio_clock.get_frequency()? as f64;
-    let mut frames_written: u64 = 0;
-    let mut device_fill_sum = 0.0;
-    let mut device_fill_passes = 0;
-    let mut usual_device_fill: Option<f64> = None;
-
     let mut running = false;
     let mut starting = true;
     let mut started = false;
@@ -507,6 +496,17 @@ fn playback_loop(
             poll_delay.as_micros()
         );
     }
+    // In event mode, each event follows a read of one device period by the engine.
+    // With some devices that read is sometimes not yet visible when the pass runs,
+    // and then the data on our side looks a period larger until a later pass sees
+    // two periods taken at once. A pass that finds nothing taken after a real wait
+    // for the event is assumed to be such a late read, and the period is subtracted
+    // from the buffer level until two periods are seen.
+    // When the event was already set, the pass comes right after the previous one,
+    // and nothing taken is to be expected.
+    let period_frames = device_period_hns as usize * samplerate / 10_000_000;
+    let mut waited_for_event = false;
+    let mut late_read = false;
     // Fill the endpoint buffer with the first block before starting the stream,
     // so playback begins with real audio (preceded by the target_level silence)
     // instead of an empty buffer. This follows the ordering recommended by Microsoft:
@@ -519,6 +519,11 @@ fn playback_loop(
     loop {
         buffer_free_frame_count = audio_client.get_available_space_in_frames()?;
         trace!("Playback, new buffer frame count {buffer_free_frame_count}.");
+        if buffer_free_frame_count == 0 && waited_for_event {
+            late_read = true;
+        } else if buffer_free_frame_count as usize > period_frames {
+            late_read = false;
+        }
 
         while sample_queue.len() < (blockalign * buffer_free_frame_count as usize) {
             trace!("Playback loop needs more samples, reading from channel.");
@@ -574,32 +579,10 @@ fn playback_loop(
             None,
         )?;
         sample_queue.drain(..nbr_bytes);
-        frames_written += buffer_free_frame_count as u64;
-        let queued_frames = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
-        // The level is the data on our side, but measuring only that makes it jump.
-        // The queue shrinks by a whole device period each time the engine reads,
-        // and whether that read is visible in this pass depends on how the pass
-        // happens to be timed against the engine. When that changes, the level moves
-        // by a period although the delay through the device is the same.
-        // The device position advances smoothly, so the data held by the device is
-        // taken from that instead, and its deviation from the usual amount is added.
-        // The usual amount is the average over the first passes after the device
-        // starts playing, which keeps the level at the data on our side on average.
-        let (position, _) = audio_clock.get_position()?;
-        let device_fill = frames_written as f64 - position as f64 * frames_per_clock_unit;
-        let curr_buffer_fill = match usual_device_fill {
-            Some(usual) => (queued_frames as f64 + device_fill - usual).max(0.0) as usize,
-            None => {
-                if position > 0 {
-                    device_fill_sum += device_fill;
-                    device_fill_passes += 1;
-                    if device_fill_passes == DEVICE_FILL_PASSES {
-                        usual_device_fill = Some(device_fill_sum / DEVICE_FILL_PASSES as f64);
-                    }
-                }
-                queued_frames
-            }
-        };
+        let mut curr_buffer_fill = sample_queue.len() / blockalign + sync.rx_play.len() * chunksize;
+        if late_read {
+            curr_buffer_fill = curr_buffer_fill.saturating_sub(period_frames);
+        }
         if let Some(mut estimator) = sync.bufferfill.try_lock() {
             estimator.add(curr_buffer_fill)
         }
@@ -609,7 +592,8 @@ fn playback_loop(
             started = true;
         }
         if let Some(ref h) = handle {
-            if h.wait_for_event(1000).is_err() {
+            waited_for_event = h.wait_for_event(0).is_err();
+            if waited_for_event && h.wait_for_event(1000).is_err() {
                 error!("Error on playback, stopping stream");
                 audio_client.stop_stream()?;
                 return Err(DeviceError::new("Error on playback").into());
