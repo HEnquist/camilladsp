@@ -83,17 +83,16 @@ impl RingBufferFeeder {
 /// takes a long time to bring it down, since it only changes the rate by a fraction of a percent.
 /// The backlog can not be counted when the device is restarted, since it is not visible yet.
 ///
-/// Instead, for a short time after each restart, chunks are dropped while the level is well
-/// above the target. A level more than two chunks above the target starts the dropping,
-/// so that a burst of a chunk or two from the capture side does not. It then goes on until the
-/// level is at most one chunk above the target. That drops audio, so it is only done right after
-/// a restart, when the audio already has a gap.
+/// Instead, for a short time after each restart, chunks are dropped while the level is more
+/// than one chunk above the target. How big the backlog is depends on where in a chunk period
+/// the gap ends, so it is often less than two chunks even after a long gap.
+/// A burst of a chunk or two from the capture side can then also lose a chunk.
+/// That drops audio, so it is only done right after a restart, when the audio already has a gap.
 pub struct BacklogTrimmer {
     target_level: usize,
     chunksize: usize,
     window: Duration,
     restarted_at: Option<Instant>,
-    dropping: bool,
     dropped_frames: usize,
 }
 
@@ -107,7 +106,6 @@ impl BacklogTrimmer {
             chunksize,
             window,
             restarted_at: None,
-            dropping: false,
             dropped_frames: 0,
         }
     }
@@ -131,10 +129,7 @@ impl BacklogTrimmer {
         let Some(level) = level else {
             return false;
         };
-        if level > self.target_level + 2 * self.chunksize {
-            self.dropping = true;
-        }
-        if self.dropping && level > self.target_level + self.chunksize {
+        if level > self.target_level + self.chunksize {
             self.dropped_frames += self.chunksize;
             return true;
         }
@@ -143,13 +138,12 @@ impl BacklogTrimmer {
     }
 
     fn finish(&mut self) {
-        if self.dropping {
+        if self.dropped_frames > 0 {
             warn!(
                 "Dropped {} frames that arrived late after a playback restart",
                 self.dropped_frames
             );
         }
-        self.dropping = false;
         self.dropped_frames = 0;
     }
 }
@@ -360,7 +354,7 @@ mod tests {
         drain.join().unwrap();
     }
 
-    // Target 2000 frames, chunks of 1000. Dropping starts above 4000 and ends at 3000.
+    // Target 2000 frames, chunks of 1000. Chunks are dropped while the level is above 3000.
     fn trimmer() -> BacklogTrimmer {
         BacklogTrimmer::new(2000, 1000, 48000)
     }
@@ -375,7 +369,7 @@ mod tests {
     fn trimmer_drops_a_backlog_down_to_a_chunk_above_the_target() {
         let mut trimmer = trimmer();
         trimmer.restarted();
-        let dropped: Vec<bool> = [2000, 6500, 5500, 4500, 3500, 2500, 3500]
+        let dropped: Vec<bool> = [2000, 6500, 5500, 4500, 3500, 2500, 2900]
             .into_iter()
             .map(|level| trimmer.drop_chunk(Some(level)))
             .collect();
@@ -383,11 +377,14 @@ mod tests {
     }
 
     #[test]
-    fn trimmer_lets_a_burst_of_two_chunks_through() {
+    fn trimmer_drops_a_backlog_of_less_than_two_chunks() {
         let mut trimmer = trimmer();
         trimmer.restarted();
-        assert!(!trimmer.drop_chunk(Some(4000)));
-        assert!(!trimmer.drop_chunk(Some(3500)));
+        let dropped: Vec<bool> = [2000, 3700, 2700, 2500]
+            .into_iter()
+            .map(|level| trimmer.drop_chunk(Some(level)))
+            .collect();
+        assert_eq!(dropped, [false, true, false, false]);
     }
 
     #[test]
