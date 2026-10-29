@@ -47,18 +47,21 @@ use crate::asio_backend::driver::{
     teardown_asio_driver, with_driver,
 };
 use crate::asio_backend::utils::{
-    ChannelBuffers, asio_format_to_str, asio_sample_type_name, copy_from_queue_at_offset,
-    create_asio_buffers, dispose_asio_buffers, get_preferred_buffer_size, log_asio_latencies,
-    make_channel_ids, read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format,
-    start_asio_stream, stop_asio_stream,
+    ChannelBuffers, asio_format_to_str, asio_sample_type_name, asio_sample_type_to_format,
+    copy_from_queue_at_offset, create_asio_buffers, dispose_asio_buffers,
+    get_preferred_buffer_size, log_asio_latencies, make_channel_ids, query_device_format,
+    read_current_asio_sample_rate_hz, resolve_binary_format, resolve_format, start_asio_stream,
+    stop_asio_stream,
 };
 use crate::audiochunk::ChunkStats;
 use crate::audiodevice::*;
 use crate::config::{AsioSampleFormat, BinarySampleFormat, ConfigError};
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
+use crate::utils::ringbuffer::RingBufferFeeder;
 use crate::{CaptureStatus, PlaybackStatus};
 
 // ---------------------------------------------------------------------------
@@ -113,9 +116,11 @@ struct AsioPlaybackContext {
     read_tmp: Vec<u8>,
     target_level: usize,
     /// Estimator for the current buffer fill level.
-    buffer_fill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
+    buffer_fill: Arc<parking_lot::Mutex<countertimer::DeviceBufferEstimator>>,
     /// Whether the stream is currently running (receiving data).
     running: bool,
+    /// Whether the stream stopped because of an underrun, as opposed to not having started.
+    interrupted: bool,
 }
 
 /// Context passed to the ASIO capture callback via a global AtomicPtr.
@@ -132,6 +137,8 @@ struct AsioCaptureContext {
     /// Preallocated interleaved capture buffer reused by callback.
     interleaved_tmp: Vec<u8>,
     chunk_counter: u64,
+    /// Whether the ring buffer was full on the last push, to warn once per episode.
+    ring_full: bool,
 }
 
 static PLAYBACK_CONTEXT: AtomicPtr<AsioPlaybackContext> = AtomicPtr::new(ptr::null_mut());
@@ -305,18 +312,24 @@ pub unsafe extern "system" fn buffer_switch_playback(buffer_index: c_long, _dire
         let available = ctx.device_consumer.occupied_len();
         if available == 0 {
             // No data — fill remainder with silence
-            warn!(
+            if ctx.running {
+                warn!("Playback interrupted, no data available.");
+                ctx.running = false;
+                ctx.interrupted = true;
+            }
+            trace!(
                 "ASIO playback callback: underrun, filled {} bytes of silence.",
                 needed_bytes - ctx.sample_queue.len()
             );
             ctx.sample_queue.resize(needed_bytes, 0);
-            if ctx.running {
-                ctx.running = false;
-            }
             break;
         }
         if !ctx.running {
             ctx.running = true;
+            if ctx.interrupted {
+                info!("Restarting playback after buffer underrun.");
+                ctx.interrupted = false;
+            }
             // Prefill at least one full callback's worth of frames so the loop
             // below doesn't immediately re-drain the ring buffer to empty and
             // re-trigger an underrun when target_level is smaller than the
@@ -362,7 +375,7 @@ pub unsafe extern "system" fn buffer_switch_playback(buffer_index: c_long, _dire
     // to represent total pending playback frames.
     let curr_buffer_fill =
         (ctx.sample_queue.len() + ctx.device_consumer.occupied_len()) / bytes_per_frame;
-    if let Ok(mut estimator) = ctx.buffer_fill.try_lock() {
+    if let Some(mut estimator) = ctx.buffer_fill.try_lock() {
         estimator.add(curr_buffer_fill);
     }
 }
@@ -436,22 +449,24 @@ pub unsafe extern "system" fn buffer_switch_capture(buffer_index: c_long, _direc
     let pushed_bytes = ctx.device_producer.push_slice(buf);
     if pushed_bytes < buf.len() {
         // Ring buffer full — data will be lost
-        warn!(
-            "ASIO capture callback: ringbuffer full, dropped {} of {} bytes.",
+        if !ctx.ring_full {
+            warn!("Capture ring buffer is full, dropping samples");
+            ctx.ring_full = true;
+        }
+        trace!(
+            "Capture ring buffer is full, dropped {} out of {} bytes",
             buf.len() - pushed_bytes,
             buf.len()
         );
+    } else {
+        ctx.ring_full = false;
     }
     match ctx.tx_dev.try_send((ctx.chunk_counter, pushed_bytes)) {
         Ok(()) => {}
         Err(TrySendError::Full((nbr, length_bytes))) => {
-            // Channel full, drop notification
-            xtrace!(
-                "ASIO capture callback: notify channel full, dropped notification chunk={}, bytes={}",
-                nbr,
-                length_bytes
+            trace!(
+                "Capture notification channel full, dropped notification for chunk {nbr} with {length_bytes} bytes"
             );
-            let _ = (nbr, length_bytes);
         }
         Err(_) => {
             // Channel disconnected
@@ -1241,17 +1256,17 @@ fn probe_device_capabilities(
     .unwrap_or_default();
 
     // ASIO uses one fixed format for all channels and rates within a driver.
+    // A native format we do not support gives empty capabilities, not an error.
     let direction_name = if input { "capture" } else { "playback" };
-    let fmt = match resolve_format(device_name, &None, input) {
-        Ok(fmt) => fmt,
-        Err(_) => {
+    let fmt = match query_device_format(device_name, input) {
+        Ok(sample_type) => asio_sample_type_to_format(sample_type),
+        Err(err) => {
             teardown_asio_driver(device_name);
             return Err(crate::DeviceError::Other(format!(
-                "Failed to detect {direction_name} sample format for ASIO device '{device_name}'"
+                "Failed to detect {direction_name} sample format for ASIO device '{device_name}': {err}"
             )));
         }
     };
-    let fmt_str = asio_format_to_str(fmt).to_string();
 
     // Get channel count for the requested direction.
     // A failure from getChannels indicates a real driver error; treat it as a probe
@@ -1280,14 +1295,19 @@ fn probe_device_capabilities(
 
     // A driver that only supports the opposite direction will report 0 channels
     // for the requested direction — filter that out rather than emitting a
-    // zero-channel capability entry.
-    if channels == 0 || supported_rates.is_empty() {
-        return Ok(crate::AudioDeviceDescriptor {
-            name: device_name.to_string(),
-            description: device_name.to_string(),
-            capability_sets: Vec::new(),
-        });
-    }
+    // zero-channel capability entry. Same for a native format we do not support.
+    let fmt_str = match fmt {
+        Some(fmt) if channels > 0 && !supported_rates.is_empty() => {
+            asio_format_to_str(fmt).to_string()
+        }
+        _ => {
+            return Ok(crate::AudioDeviceDescriptor {
+                name: device_name.to_string(),
+                description: device_name.to_string(),
+                capability_sets: Vec::new(),
+            });
+        }
+    };
 
     let samplerates: Vec<crate::SamplerateCapability> = supported_rates
         .iter()
@@ -1373,24 +1393,20 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (_tx_dev, _rx_dev) = bounded::<usize>(channel_capacity);
 
-                let buffer_fill = Arc::new(Mutex::new(
-                    countertimer::DeviceBufferEstimator::new(samplerate),
+                let buffer_fill = Arc::new(parking_lot::Mutex::new(
+                    countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_clone = buffer_fill.clone();
-                let mut buffer_avg = countertimer::Averager::new();
-                let mut timer = countertimer::Stopwatch::new();
                 let mut chunk_stats = ChunkStats {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
                 };
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
+                let clipped_counter = playback_status.read().clipped_samples.clone();
 
-                let mut rate_controller = PIRateController::new_with_default_gains(
-                    samplerate,
-                    adjust_period as f64,
-                    target_level,
-                );
+                let mut rate_reporter =
+                    RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
 
                 // --- Device-specific setup (full-duplex vs single-direction) ---
                 // Format is resolved inside; bytes_per_sample depends on it.
@@ -1514,6 +1530,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
+                        interrupted: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -1585,6 +1602,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         target_level,
                         buffer_fill: buffer_fill_clone,
                         running: false,
+                        interrupted: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     PLAYBACK_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -1631,6 +1649,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                 debug!("Playback device starts now!");
 
                 let mut conversion_result;
+                let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                 'deviceloop: loop {
                     if take_playback_rate_change_event() {
                         let new_rate = read_current_asio_sample_rate_hz(&devname).unwrap_or(0);
@@ -1658,34 +1677,15 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                     match channel.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(AudioMessage::Audio(chunk)) => {
-                            let estimated_buffer_fill = buffer_fill
-                                .try_lock()
-                                .map(|b| b.estimate() as f64)
-                                .unwrap_or_default();
-                            buffer_avg.add_value(
-                                estimated_buffer_fill + (channel.len() * chunksize) as f64,
-                            );
-
-                            if adjust
-                                && timer.larger_than_millis((1000.0 * adjust_period) as u64)
-                                && let Some(av_delay) = buffer_avg.average()
-                            {
-                                let speed = rate_controller.next(av_delay);
-                                timer.restart();
-                                buffer_avg.restart();
-                                debug!(
-                                    "Playback, current buffer level {:.1}, set capture rate to {:.4}%.",
-                                    av_delay,
-                                    100.0 * speed
-                                );
+                            let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            if let Some(speed) = rate_reporter.update_from_estimate(
+                                estimate,
+                                channel.len() * chunksize,
+                                &playback_status,
+                            ) {
                                 status_channel
                                     .send(StatusMessage::SetSpeed(speed))
                                     .unwrap_or(());
-                                if let Some(mut playback_status) = playback_status.try_write() {
-                                    playback_status.buffer_level = av_delay as usize;
-                                } else {
-                                    xtrace!("playback status blocked, skip buffer level update");
-                                }
                             }
 
                             chunk.update_stats(&mut chunk_stats);
@@ -1698,37 +1698,14 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 &mut rms_values,
                                 &mut peak_values,
                                 conversion_result.1,
+                                &clipped_counter,
                             );
 
-                            // Wait for enough space in the ring buffer before pushing.
-                            // This is essential when the capture side is not rate-limited
-                            // (e.g. signal generator): without this wait the data would
-                            // arrive far faster than the ASIO callback can drain it and
-                            // most of it would be dropped.  The sleep duration is based
-                            // on the time it takes to play back one chunksize.
-                            let bytes_to_write = conversion_result.0;
-                            let sleep_duration = std::time::Duration::from_micros(
-                                (1_000_000 * chunksize / samplerate / 2) as u64
-                            );
-                            let max_retries = 8;
-                            for _ in 0..max_retries {
-                                if device_producer.vacant_len() >= bytes_to_write {
-                                    break;
-                                }
-                                std::thread::sleep(sleep_duration);
-                            }
-                            let pushed_bytes =
-                                device_producer.push_slice(&buf[0..bytes_to_write]);
-                            if pushed_bytes < bytes_to_write {
-                                debug!(
-                                    "Playback ring buffer is full, dropped {} out of {} bytes.",
-                                    bytes_to_write - pushed_bytes,
-                                    bytes_to_write
-                                );
-                            }
+                            feeder.push(&mut device_producer, &buf[0..conversion_result.0]);
                         }
                         Ok(AudioMessage::Pause) => {
                             trace!("Playback, pause message received.");
+                            rate_reporter.interrupt();
                         }
                         Ok(AudioMessage::EndOfStream) => {
                             status_channel
@@ -1971,6 +1948,7 @@ impl CaptureDevice for AsioCaptureDevice {
                         bytes_per_sample,
                         interleaved_tmp: vec![0u8; asio_buffer_size * bytes_per_sample * channels],
                         chunk_counter: 0,
+                        ring_full: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -2040,6 +2018,7 @@ impl CaptureDevice for AsioCaptureDevice {
                             (preferred_buf as usize) * bytes_per_sample * channels
                         ],
                         chunk_counter: 0,
+                        ring_full: false,
                     });
                     let ctx_raw = Box::into_raw(ctx);
                     CAPTURE_CONTEXT.store(ctx_raw, Ordering::Release);
@@ -2082,6 +2061,8 @@ impl CaptureDevice for AsioCaptureDevice {
                 };
                 let mut rms_values = Vec::new();
                 let mut peak_values = Vec::new();
+                let used_channels = capture_status.read().used_channels.clone();
+                let mut channel_mask = Vec::with_capacity(channels);
                 let mut rate_adjust = 0.0;
                 // Sample rate measured over the last completed `rate_measure_interval` window,
                 // kept separate from the short update cadence.
@@ -2145,39 +2126,19 @@ impl CaptureDevice for AsioCaptureDevice {
                     }
 
                     // Handle commands
-                    match command_channel.try_recv() {
-                        Ok(CommandMessage::Exit) => {
-                            debug!("Exit message received, sending EndOfStream.");
-                            channel.send(AudioMessage::EndOfStream).unwrap_or(());
-                            status_channel
-                                .send(StatusMessage::CaptureDone)
-                                .unwrap_or(());
+                    match handle_capture_command(
+                        command_channel.try_recv(),
+                        &mut rate_adjust,
+                        &mut resampler,
+                        async_src,
+                        false,
+                    ) {
+                        CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
+                        CommandOutcome::Exit => {
+                            send_capture_done(&channel, &status_channel);
                             break 'deviceloop;
                         }
-                        Ok(CommandMessage::SetSpeed { speed }) => {
-                            rate_adjust = speed;
-                            debug!("Requested to adjust capture speed to {speed}.");
-                            if let Some(resampl) = &mut resampler {
-                                debug!("Adjusting resampler rate to {speed}.");
-                                if async_src {
-                                    if resampl
-                                        .set_resample_ratio_relative(speed, true)
-                                        .is_err()
-                                    {
-                                        debug!(
-                                            "Failed to set resampling speed to {speed}."
-                                        );
-                                    }
-                                } else {
-                                    warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
-                                }
-                            }
-                        }
-                        Err(crossbeam_channel::TryRecvError::Empty) => {}
-                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                            error!("Command channel was closed.");
-                            break 'deviceloop;
-                        }
+                        CommandOutcome::Disconnected => break 'deviceloop,
                     }
 
                     // Determine how many frames to capture
@@ -2224,8 +2185,12 @@ impl CaptureDevice for AsioCaptureDevice {
                         }
                     }
 
-                    // Read data from ring buffer
-                    device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                    // Read data from ring buffer. After a timeout it may hold less than
+                    // requested, so zero the rest rather than pass on the previous chunk.
+                    let popped = device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                    if popped < capture_bytes {
+                        data_buffer[popped..capture_bytes].fill(0);
+                    }
 
                     // Measure sample rate
                     averager.add_value(capture_frames);
@@ -2281,12 +2246,13 @@ impl CaptureDevice for AsioCaptureDevice {
                     }
 
                     // Convert buffer to audio chunk
+                    used_channels.copy_to(&mut channel_mask);
                     let mut chunk = buffer_to_chunk_rawbytes(
                         &data_buffer[0..capture_bytes],
                         channels,
                         &binary_format,
                         capture_bytes,
-                        &capture_status.read().used_channels,
+                        &channel_mask,
                         false,
                     );
 
@@ -2346,7 +2312,6 @@ impl CaptureDevice for AsioCaptureDevice {
                 // Harmless if already nulled by release_shared_asio
                 CAPTURE_CONTEXT.store(ptr::null_mut(), Ordering::Release);
                 let _ = unsafe { Box::from_raw(ctx_raw) };
-                crate::set_capture_state(&capture_status, ProcessingState::Inactive);
             })?;
         Ok(Box::new(handle))
     }

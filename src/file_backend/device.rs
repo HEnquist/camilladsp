@@ -19,6 +19,7 @@ use crate::audiochunk::{AudioChunk, ChunkStats};
 use crate::audiodevice::*;
 use crate::config;
 use crate::config::BinarySampleFormat;
+use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 
@@ -254,6 +255,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                         };
                         let mut rms_values = Vec::new();
                         let mut peak_values = Vec::new();
+                        let clipped_counter = playback_status.read().clipped_samples.clone();
                         barrier.wait();
                         debug!("starting playback loop");
                         let mut buffer = vec![0u8; chunksize * channels * store_bytes_per_sample];
@@ -293,6 +295,7 @@ impl PlaybackDevice for FilePlaybackDevice {
                                         &mut rms_values,
                                         &mut peak_values,
                                         nbr_clipped,
+                                        &clipped_counter,
                                     );
                                 }
                                 Ok(AudioMessage::Pause) => {
@@ -391,7 +394,7 @@ fn capture_loop(
     let chunksize_bytes = params.channels * params.chunksize * params.store_bytes_per_sample;
     let bytes_per_frame = params.channels * params.store_bytes_per_sample;
     let mut buf = vec![0u8; params.buffer_bytes];
-    let mut bytes_read = 0;
+    let mut bytes_read;
     let mut bytes_to_capture = chunksize_bytes;
     let mut bytes_to_capture_tmp;
     let mut capture_done: bool;
@@ -418,6 +421,8 @@ fn capture_loop(
     };
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
+    let used_channels = params.capture_status.read().used_channels.clone();
+    let mut channel_mask = Vec::with_capacity(params.channels);
     let mut value_range = 0.0;
     let mut rate_adjust = 0.0;
     // Sample rate measured over the last completed `rate_measure_interval` window,
@@ -427,35 +432,20 @@ fn capture_loop(
     let mut prev_state = ProcessingState::Running;
     let mut stalled = false;
     loop {
-        match msg_channels.command.try_recv() {
-            Ok(CommandMessage::Exit) => {
-                debug!("Exit message received, sending EndOfStream");
-                let msg = AudioMessage::EndOfStream;
-                msg_channels.audio.send(msg).unwrap_or(());
-                msg_channels
-                    .status
-                    .send(StatusMessage::CaptureDone)
-                    .unwrap_or(());
+        match handle_capture_command(
+            msg_channels.command.try_recv(),
+            &mut rate_adjust,
+            &mut resampler,
+            params.async_src,
+            false,
+        ) {
+            CommandOutcome::Continue | CommandOutcome::SetPitch(_) => {}
+            CommandOutcome::Exit => {
+                send_capture_done(&msg_channels.audio, &msg_channels.status);
                 break;
             }
-            Ok(CommandMessage::SetSpeed { speed }) => {
-                rate_adjust = speed;
-                if let Some(resampl) = &mut resampler {
-                    if params.async_src {
-                        if resampl.set_resample_ratio_relative(speed, true).is_err() {
-                            debug!("Failed to set resampling speed to {speed}");
-                        }
-                    } else {
-                        warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
-                    }
-                }
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => {}
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                error!("Command channel was closed");
-                break;
-            }
-        };
+            CommandOutcome::Disconnected => break,
+        }
         bytes_to_capture = nbr_capture_bytes(
             &resampler,
             bytes_to_capture,
@@ -496,6 +486,7 @@ fn capture_loop(
                         params.channels,
                         params.chunksize,
                         &msg_channels.audio,
+                        &msg_channels.command,
                         &mut resampler,
                     );
                     let msg = AudioMessage::EndOfStream;
@@ -594,17 +585,23 @@ fn capture_loop(
             (Err(err), _) => {
                 debug!("Encountered a read error");
                 msg_channels
+                    .audio
+                    .send(AudioMessage::EndOfStream)
+                    .unwrap_or(());
+                msg_channels
                     .status
                     .send(StatusMessage::CaptureError(err.to_string()))
                     .unwrap_or(());
+                break;
             }
         };
+        used_channels.copy_to(&mut channel_mask);
         let mut chunk = buffer_to_chunk_rawbytes(
             &buf[0..bytes_to_capture],
             params.channels,
             &params.sample_format,
             bytes_read,
-            &params.capture_status.read().used_channels, //channel_mask??
+            &channel_mask,
             true,
         );
         chunk.update_stats(&mut chunk_stats);
@@ -637,7 +634,6 @@ fn capture_loop(
             sleep_until_next(bytes_per_frame, params.capture_samplerate, bytes_to_capture);
         }
     }
-    crate::set_capture_state(&params.capture_status, ProcessingState::Inactive);
 }
 
 /// Start a capture thread providing AudioMessages via a channel
@@ -735,12 +731,14 @@ impl CaptureDevice for FileCaptureDevice {
                             Box::new(NonBlockingReader::new(
                                 f,
                                 2 * 1000 * chunksize as u64 / samplerate as u64,
+                                channels * store_bytes_per_sample,
                             )) as Box<dyn Reader>
                         })
                         .map_err(|e| e.into()),
                     CaptureSource::Stdin => Ok(Box::new(NonBlockingReader::new(
                         stdin(),
                         2 * 1000 * chunksize as u64 / samplerate as u64,
+                        channels * store_bytes_per_sample,
                     ))),
                 };
                 match file_res {
@@ -779,15 +777,39 @@ impl CaptureDevice for FileCaptureDevice {
     }
 }
 
+/// Hand over `samples` frames of silence, the tail a capture adds after its input ends.
+///
+/// Returns early when an Exit command arrives, which is what keeps a long tail from
+/// making the device unresponsive. The audio queue is bounded and a playback device
+/// drains it in real time, so handing over a tail of several seconds takes several
+/// seconds of blocking sends. Without a check in here the loop never gets back to the
+/// one at the top of the capture loop, and a user asking to stop, or a config reload,
+/// waits for the whole tail to play out first. The caller ends the stream the same way
+/// whether the tail finished or was cut short, so there is nothing to report back.
 fn send_silence(
     samples: usize,
     channels: usize,
     chunksize: usize,
     audio_channel: &crossbeam_channel::Sender<AudioMessage>,
+    command_channel: &crossbeam_channel::Receiver<CommandMessage>,
     resampler: &mut Option<ChunkResampler>,
 ) {
     let mut samples_left = samples;
     while samples_left > 0 {
+        match command_channel.try_recv() {
+            Ok(CommandMessage::Exit) => {
+                debug!("Exit message received, cutting the extra samples short");
+                return;
+            }
+            // A rate adjust has nothing left to act on once the input has ended, so it
+            // is dropped rather than parked.
+            Ok(CommandMessage::SetSpeed { .. }) => {}
+            Err(crossbeam_channel::TryRecvError::Empty) => {}
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                debug!("Command channel was closed, cutting the extra samples short");
+                return;
+            }
+        }
         let chunk_samples = if samples_left > chunksize {
             chunksize
         } else {

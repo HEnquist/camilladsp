@@ -1,0 +1,122 @@
+# Runs on a change to the engine or the shared e2e fixtures, and skips a change that is
+# only inside a hardware backend, since those have workflows of their own.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/asio_backend/**"
+      - "!src/coreaudio_backend/**"
+      - "!src/pipewire_backend/**"
+      - "!src/wasapi_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - .github/workflows/e2e_software.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+name: End-to-end, software backends
+
+# Kept separate from ci_test.yml so a flaky device job can never block the lint and
+# unit test signal. One workflow per backend, so each can get its own path filter.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs the whole binary on the test-only dummy devices, which need no sound card,
+  # no kernel module and no driver, so this works on a stock runner.
+  dummy_backend:
+    name: Dummy backend, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The pacing tests run here and nowhere else. What they cover, the rate
+          # control loop and the buffer accounting, is portable code with no cfg in it,
+          # so one OS proves the logic. The stock, alsa, coreaudio and wasapi tests are
+          # deselected everywhere, since they need another build, a VM, BlackHole or
+          # VB-Cable, and have workflows of their own.
+          - os: ubuntu-latest
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi"
+          - os: macos-latest
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi and not pacing"
+          - os: windows-latest
+            pytest_args: -m "not stock and not alsa and not coreaudio and not wasapi and not pacing"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install Alsa devel
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install libasound2-dev -y
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The e2e profile is optimised, see Cargo.toml. An unoptimised build cannot
+      # resample a chunk inside a chunk period, and a device that cannot keep up
+      # produces underruns and missed deadlines that say nothing about the code.
+      - name: Build with the dummy backend
+        run: cargo build --profile e2e --features dummy-backend
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout websocket-client numpy
+
+      # The tests find the build above on their own, CAMILLADSP_BIN only overrides that.
+      - name: Run the end-to-end tests
+        run: pytest -v testscripts/e2e ${{ matrix.pytest_args }}
+
+  # The same suite's `stock` marked tests, against a build with no dummy-backend feature,
+  # which is the binary a release ships. They cover the file, wav, stdio and generator
+  # devices, so they need no hardware either.
+  software_backends:
+    name: Software backends, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because the file backend is not one implementation. Linux reads through
+        # `NonBlockingReader` and everything else through `BlockingReader`, see
+        # src/file_backend/mod.rs, so one runner covers one of them. Windows stands for
+        # the second, and is also where a byte stream through stdin or stdout is most
+        # likely to be mangled. macOS shares the Windows reader and adds nothing here.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install Alsa devel
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install libasound2-dev -y
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: stock
+
+      # No --features, which is the whole point of this job.
+      - name: Build without the dummy backend
+        run: cargo build --profile e2e
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout websocket-client numpy
+
+      - name: Run the software backend tests
+        run: pytest -v testscripts/e2e -m stock

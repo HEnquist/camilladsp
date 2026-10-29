@@ -15,21 +15,23 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::config;
+use crate::fader::FaderLevels;
 use crate::filters::Filter;
 use crate::filters::basicfilters::Gain;
 use crate::filters::biquad;
 use std::sync::Arc;
 
 use crate::CamillaFloat;
-use crate::ProcessingParameters;
-use crate::Res;
 use crate::ToF32;
 use crate::config::finite;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::filters::loudness::validate_config;
 
 pub struct Loudness {
     pub name: String,
     current_volume: CamillaFloat,
-    processing_params: Arc<ProcessingParameters>,
+    levels: Arc<FaderLevels>,
     reference_level: f32,
     high_boost: f32,
     low_boost: f32,
@@ -44,14 +46,6 @@ pub struct Loudness {
     active: bool,
     gain: Option<Gain>,
 }
-
-/// Below this the shelf spreads out so far that it no longer reaches its
-/// nominal boost within the audio band.
-const MIN_Q: f64 = 0.1;
-/// Above this the shelf overshoots badly at the corner frequency. At the
-/// largest allowed boost of 20 dB, a Q of 2.0 already peaks 5.6 dB above the
-/// shelf level.
-const MAX_Q: f64 = 2.0;
 
 fn rel_boost(level: f32, reference: f32) -> f32 {
     let rel_boost = (reference - level) / 20.0;
@@ -79,11 +73,11 @@ impl Loudness {
         name: &str,
         conf: config::LoudnessParameters,
         samplerate: usize,
-        processing_params: Arc<ProcessingParameters>,
+        levels: Arc<FaderLevels>,
     ) -> Self {
         info!("Create loudness filter");
         let fader = conf.fader();
-        let current_volume = processing_params.target_volume(fader);
+        let current_volume = levels.level_db(fader);
         let relboost = rel_boost(current_volume, conf.reference_level.get());
         let active = relboost > 0.01;
         let high_boost = (relboost * conf.high_boost()) as f64;
@@ -126,7 +120,7 @@ impl Loudness {
             high_q: conf.high_q(),
             low_q: conf.low_q(),
             shelves,
-            processing_params,
+            levels,
             fader,
             active,
             gain,
@@ -140,11 +134,7 @@ impl Filter for Loudness {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        // Written by `Volume` while it processes, so the two are
-        // order-sensitive across channels. See `parallelize_filters` in
-        // pipeline.rs, which changes that order and says why the one chunk of
-        // lag that can result is accepted.
-        let shared_vol = self.processing_params.current_volume(self.fader);
+        let shared_vol = self.levels.level_db(self.fader);
 
         // Volume setting changed
         if (shared_vol - self.current_volume.to_f32()).abs() > 0.01 {
@@ -198,7 +188,7 @@ impl Filter for Loudness {
         } = conf
         {
             self.fader = conf.fader();
-            let current_volume = self.processing_params.current_volume(self.fader);
+            let current_volume = self.levels.level_db(self.fader);
             let relboost = rel_boost(current_volume, conf.reference_level.get());
             let high_boost = (relboost * conf.high_boost()) as f64;
             let low_boost = (relboost * conf.low_boost()) as f64;
@@ -247,40 +237,6 @@ impl Filter for Loudness {
     }
 }
 
-/// Validate a Loudness config.
-pub fn validate_config(samplerate: usize, conf: &config::LoudnessParameters) -> Res<()> {
-    if conf.reference_level > 20.0 {
-        return Err(config::ConfigError::new("Reference level must be less than 20").into());
-    } else if conf.reference_level < -100.0 {
-        return Err(config::ConfigError::new("Reference level must be higher than -100").into());
-    } else if conf.high_boost() < 0.0 {
-        return Err(config::ConfigError::new("High boost cannot be less than 0").into());
-    } else if conf.low_boost() < 0.0 {
-        return Err(config::ConfigError::new("Low boost cannot be less than 0").into());
-    } else if conf.high_boost() > 20.0 {
-        return Err(config::ConfigError::new("High boost cannot be larger than 20").into());
-    } else if conf.low_boost() > 20.0 {
-        return Err(config::ConfigError::new("Low boost cannot be larger than 20").into());
-    } else if conf.low_freq() <= 0.0 {
-        return Err(config::ConfigError::new("Low freq must be > 0").into());
-    } else if conf.high_freq() >= samplerate as f64 / 2.0 {
-        return Err(config::ConfigError::new("High freq must be < samplerate/2").into());
-    } else if conf.high_freq() <= conf.low_freq() {
-        return Err(config::ConfigError::new("High freq must be higher than low freq").into());
-    } else if !(MIN_Q..=MAX_Q).contains(&conf.high_q()) {
-        return Err(config::ConfigError::new(&format!(
-            "High Q must be between {MIN_Q:.1} and {MAX_Q:.1}"
-        ))
-        .into());
-    } else if !(MIN_Q..=MAX_Q).contains(&conf.low_q()) {
-        return Err(config::ConfigError::new(&format!(
-            "Low Q must be between {MIN_Q:.1} and {MAX_Q:.1}"
-        ))
-        .into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Loudness, rel_boost};
@@ -288,6 +244,7 @@ mod tests {
     use crate::ProcessingParameters;
     use crate::config::{BiquadParameters, LoudnessParameters, ShelfSteepness};
     use crate::config::{finite, finite32};
+    use crate::fader::{FaderSettings, Faders};
     use crate::filters::Filter;
     use crate::filters::biquad::{self, BiquadCoefficients};
     use crate::filters::loudness::validate_config;
@@ -406,7 +363,12 @@ mod tests {
         let processing = Arc::new(ProcessingParameters::default());
         processing.set_target_volume(0, VOLUME);
         processing.sync_volumes_to_target();
-        let mut loudness = Loudness::from_config("l", conf.clone(), FS, processing);
+        let settings = [FaderSettings {
+            ramp_time_ms: 0.0,
+            limit: 50.0,
+        }; ProcessingParameters::NUM_FADERS];
+        let faders = Faders::new(settings, processing, 512, FS);
+        let mut loudness = Loudness::from_config("l", conf.clone(), FS, faders.levels());
 
         let signal: Vec<CamillaFloat> = (0..512)
             .map(|i| (0.017 * (i as CamillaFloat)).sin() * 0.5)

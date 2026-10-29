@@ -12,18 +12,12 @@ The CamillaDSP project encompasses:
 *   **CamillaDSP (the ecosystem):** A broader family of related projects, including:
     *   **[CamillaGUI](https://github.com/HEnquist/camillagui-backend):**
         A user-friendly web-based interface for configuring and controlling the CamillaDSP engine.
-    *   **[camilladsp-setupscripts](https://github.com/HEnquist/camilladsp-setupscripts):**
-        Automated setup scripts.
     *   **[pyCamillaDSP](https://github.com/HEnquist/pycamilladsp):**
         A Python library for interacting with the CamillaDSP engine via its websocket interface.
-    *   **[pyCamillaDSP-plot](https://github.com/HEnquist/pycamilladsp-plot):**
-        A Python library for visualizing CamillaDSP configurations and filter responses.
-    *   **[camilladsp-config](https://github.com/HEnquist/camilladsp-config):**
-        A repository of example configurations and scripts for common use cases.
     *   **[camilladsp-controller](https://github.com/HEnquist/camilladsp-controller):**
         A controller for automatic sample rate switching.
 
-# CamillaDSP engine v4.2
+# CamillaDSP engine
 
 The CamillaDSP engine is a command-line application that runs on Linux, macOS, and Windows.
 
@@ -41,6 +35,7 @@ All processing is done in chunks of a fixed number of samples.
 A small number of samples gives a small in-out latency
 while a larger number is more efficient.
 The full configuration is given in a YAML file.
+If something does not work as expected, see [Getting help](#getting-help).
 
 # License
 
@@ -151,8 +146,12 @@ and the Mozilla Public License Version 2.0:
 **[Related projects](#related-projects)**
 
 **[Getting help](#getting-help)**
-- **[FAQ](#faq)**
-- **[Troubleshooting](#troubleshooting)**
+- **[Underruns and dropouts](#underruns-and-dropouts)**
+- **[Channel count errors](#channel-count-errors)**
+- **[No sound on macOS](#no-sound-on-macos)**
+- **[Clipping with only negative gain](#clipping-with-only-negative-gain)**
+- **[Changelog](#changelog)**
+- **[Example configurations](#example-configurations)**
 
 
 
@@ -178,7 +177,7 @@ and passes the processed audio via another message queue to the playback thread.
 There is also a supervisor thread for control.
 This chart shows the most important parts:
 
-![Overview](overview.png)
+![Overview](./docs/overview.png)
 
 ### Capture
 The capture thread reads a chunk samples from the audio device in the selected format.
@@ -266,7 +265,7 @@ either as built-in features or via third-party solutions.
 CamillaDSP is then configured to capture from the output of this device
 and play the processed audio on the real sound card.
 
-See the [tutorial for a step-by-step guide.](./stepbystep.md)
+See the [tutorial for a step-by-step guide.](./docs/stepbystep.md)
 
 ## Dependencies
 These are the key dependencies for CamillaDSP.
@@ -286,8 +285,6 @@ These are the key dependencies for CamillaDSP.
 ## Companion libraries and tools
 These projects are part of the CamillaDSP family:
 * https://github.com/HEnquist/pycamilladsp - Library for communicating with CamillaDSP over websocket.
-* https://github.com/HEnquist/pycamilladsp-plot - Plotting and visualization of configurations.
-* https://github.com/HEnquist/camilladsp-config - Example configurations for things like running CamillaDSP as a systemd service.
 
 ## GUI
 [CamillaGUI](https://github.com/HEnquist/camillagui-backend) is a user interface for CamillaDSP that is accessed via a web browser.
@@ -338,10 +335,17 @@ problems. Keeping it in your own fork can be the right call.
 **Target the right branch.** `master` always matches the latest release and contains no unreleased
 work. Active development happens on a separate branch named after the upcoming version. This is
 usually, but not always, a major release named with just the major number such as `next6`, or a minor
-or patch release named with the full version such as `next5.2.0` or `next5.2.1`. Because `master` is
-usually behind the development branch, please ask which branch to target, or check which `next*`
-branch is currently active, before starting work. This avoids basing changes on code that has already
-been reworked.
+or patch release named with the full version such as `next5.2.0` or `next5.2.1`. The right target
+depends on the change, an urgent bug fix may go somewhere else than a new feature. Please ask which
+branch to target before starting work. This avoids basing changes on code that has already been
+reworked.
+
+**Using AI tools is fine, but steer them.** [AGENTS.md](AGENTS.md) describes the house style and the
+scope rules. Most coding agents read it automatically, otherwise point yours to it. Then challenge
+the result before opening a pull request: is this needed, can it be simpler?
+
+**Run the tests before opening a pull request.** [Testing](./docs/testing.md) describes the Rust
+tests, the end-to-end suite that drives the real binary, and the benchmarks.
 
 # Installing
 
@@ -350,7 +354,7 @@ Binaries for each release are available for the most common systems.
 See the ["Releases"](https://github.com/HEnquist/camilladsp/releases) page.
 To see the files click "Assets".
 
-These are compressed files containing a single executable file that is ready to run.
+The binary archives are compressed files containing a single executable file that is ready to run.
 
 The following configurations are provided:
 
@@ -366,6 +370,10 @@ The following configurations are provided:
 | `camilladsp-windows-amd64.zip` | Windows on 64-bit Intel or AMD CPU | Wasapi |
 
 All builds include the Websocket server.
+
+Each release also has `camilladsp-docs.zip`, which contains the documentation for that release.
+It has the readme and the documents linked from it, the changelog, the licenses and the example configurations.
+It does not contain a binary.
 
 The `.tar.gz`-files can be uncompressed with the `tar` command:
 
@@ -608,9 +616,9 @@ The option `custom_log_spec` can be used to define custom filters for the logs.
 When provided, this option overrides what is given by `-v` and `--loglevel`.
 Using this option, the log level can be set to different values for different modules.
 Example, set the base log level to `info`, but increase it to `trace` for the
-Wasapi backend (which is the `camillalib::wasapidevice` module):
+Wasapi backend (which is the `camilladsp::wasapi_backend::device` module):
 ```
---custom_log_spec="info, camillalib::wasapidevice=trace
+--custom_log_spec="info, camilladsp::wasapi_backend::device=trace"
 ```
 Module names are shown in square brackets in the log messages.
 See the [flexi-logger documentation](https://docs.rs/flexi_logger/latest/flexi_logger/struct.LogSpecification.html)
@@ -674,7 +682,7 @@ If it should be also available to remote machines, give the IP address of the in
 Giving 0.0.0.0 will bind to all interfaces.
 If CamillaDSP was built with the "secure-websocket" feature, it has two additional options `--cert` and `--pass`.
 These are used to provide an identity, to enable secure websocket connections.
-See the [websocket readme for more details.](./websocket.md)
+See the [websocket readme for more details.](./docs/websocket.md)
 
 If the "wait" flag, `--wait` is given, CamillaDSP will start the websocket server and wait for a configuration to be uploaded.
 Then the config file argument must be left out.
@@ -737,7 +745,7 @@ This will reload the config and if possible apply the new settings without inter
 Note that for this to update the coefficients for a FIR filter, the filename of the coefficients file needs to change.
 
 ## Controlling via websocket
-See the [separate readme for the websocket server](./websocket.md)
+See the [separate readme for the websocket server](./docs/websocket.md)
 
 
 # Processing audio
@@ -761,26 +769,26 @@ See [the capture device section](#file-rawfile-wavfile-stdin-stdout) for more de
 
 
 ## Windows
-See the [separate readme for Wasapi](./backend_wasapi.md).
+See the [separate readme for Wasapi](./docs/backend_wasapi.md).
 
 ### ASIO
-See the [separate readme for ASIO](./backend_asio.md).
+See the [separate readme for ASIO](./docs/backend_asio.md).
 
 ## MacOS (CoreAudio)
-See the [separate readme for CoreAudio](./backend_coreaudio.md).
+See the [separate readme for CoreAudio](./docs/backend_coreaudio.md).
 
 ## Linux
 Linux offers several audio APIs that CamillaDSP can use.
 
 ### ALSA
-See the [separate readme for ALSA](./backend_alsa.md).
+See the [separate readme for ALSA](./docs/backend_alsa.md).
 
 ### PipeWire
 
 #### Native PipeWire backend
 CamillaDSP has native PipeWire support via the `pipewire-backend` feature.
 This creates filter nodes in the PipeWire graph that can be connected to other nodes using WirePlumber rules or tools like Helvum.
-See [backend_pipewire.md](backend_pipewire.md) for configuration details.
+See [backend_pipewire.md](./docs/backend_pipewire.md) for configuration details.
 
 #### Capturing desktop audio via a null-sink
 PipeWire supports creating null-sinks. Create one with:
@@ -814,7 +822,25 @@ pulse.cmd = [
 PipeWire can also be configured to output to an ALSA Loopback.
 This is done by adding an ALSA sink in the PipeWire configuration.
 This sink then becomes available as an output device in the Gnome sound settings.
-See the "camilladsp-config" repository under [Related projects](#related-projects) for an example PipeWire configuration.
+To create it, add a file such as `~/.config/pipewire/pipewire.conf.d/alsa-loopback.conf` containing:
+```
+context.objects = [
+    {   factory = adapter
+        args = {
+            factory.name     = api.alsa.pcm.sink
+            node.name        = "alsa-loopback"
+            node.description = "ALSA Loopback"
+            media.class      = "Audio/Sink"
+            api.alsa.path    = "hw:Loopback,0,0"
+            audio.format     = "S32LE"
+            audio.rate       = 44100
+            audio.channels   = 2
+        }
+    }
+]
+```
+CamillaDSP then captures from the other side of the loopback, `hw:Loopback,1,0`, with the same
+format and rate.
 
 # Configuration
 
@@ -1101,8 +1127,13 @@ A parameter marked (*) in any example is optional. If they are left out from the
   The `rate_measure_interval_s` setting is used for adjusting the measurement period.
   A longer period gives a more accurate measurement of the rate, at the cost of slower response when the rate changes.
   The default is 1.0 seconds.
-  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate.
+  Processing will stop after 3 measurements in a row are more than 4% off from the configured rate,
+  all in the same direction.
   The value of 4% is chosen to allow some variation, while still catching changes between for example 44.1 to 48 kHz.
+  Data arrives a chunk at a time, so a single measurement can be off by about one chunk per interval.
+  That noise alternates, one measurement high and the next low, while a real rate change is off the same way every time.
+  Measurements that alternate between too high and too low therefore never stop the processing,
+  even when each of them is more than 4% off.
 
 * `volume_ramp_time_ms` (optional, defaults to 400 ms)
   This setting controls the duration of this ramp when changing volume of the default volume control.
@@ -1167,15 +1198,15 @@ A parameter marked (*) in any example is optional. If they are left out from the
 
     For `File`, `Stdin`, `Stdout` and `RawFile`, the choices are signed
     little-endian integers of 16, 24 and 32 bits as well as floats of 32 and 64 bits:
-    - [S16_LE](sample_formats.md#s16_le)
-    - [S24_3_LE](sample_formats.md#s24_3_le)
-    - [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
-    - [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
-    - [S32_LE](sample_formats.md#s32_le)
-    - [F32_LE](sample_formats.md#f32_le)
-    - [F64_LE](sample_formats.md#f64_le)
+    - [S16_LE](./docs/sample_formats.md#s16_le)
+    - [S24_3_LE](./docs/sample_formats.md#s24_3_le)
+    - [S24_4_RJ_LE](./docs/sample_formats.md#s24_4_rj_le)
+    - [S24_4_LJ_LE](./docs/sample_formats.md#s24_4_lj_le)
+    - [S32_LE](./docs/sample_formats.md#s32_le)
+    - [F32_LE](./docs/sample_formats.md#f32_le)
+    - [F64_LE](./docs/sample_formats.md#f64_le)
 
-    For [ALSA](./backend_alsa.md), [CoreAudio](./backend_coreaudio.md), [Wasapi](./backend_wasapi.md) and [ASIO](./backend_asio.md), see the respective backend documentation.
+    For [ALSA](./docs/backend_alsa.md), [CoreAudio](./docs/backend_coreaudio.md), [Wasapi](./docs/backend_wasapi.md) and [ASIO](./docs/backend_asio.md), see the respective backend documentation.
 
     __Note that there are three different 24-bit formats! Make sure to select the correct one.__
 
@@ -1321,16 +1352,16 @@ A parameter marked (*) in any example is optional. If they are left out from the
   ```
 
   ### Wasapi
-  See the [separate readme for Wasapi](./backend_wasapi.md#configuration-of-devices).
+  See the [separate readme for Wasapi](./docs/backend_wasapi.md#configuration-of-devices).
 
   ### Alsa
-  See the [separate readme for ALSA](./backend_alsa.md#configuration-of-devices).
+  See the [separate readme for ALSA](./docs/backend_alsa.md#configuration-of-devices).
 
   ### CoreAudio
-  See the [separate readme for CoreAudio](./backend_coreaudio.md#configuration-of-devices).
+  See the [separate readme for CoreAudio](./docs/backend_coreaudio.md#configuration-of-devices).
 
   ### PipeWire
-  See the [separate readme for PipeWire](./backend_pipewire.md).
+  See the [separate readme for PipeWire](./docs/backend_pipewire.md).
 
   ### Channel labels
   All capture device types have an optional `labels` property.
@@ -1621,6 +1652,13 @@ Each source has a `channel` number, a `gain` value, a `scale` for the gain (`dB`
 A channel that has no sources will be filled with silence.
 The `mute` option determines if an output channel of the mixer should be muted.
 The `mute`, `gain`, `scale` and `inverted` parameters are optional, and defaults to not muted, a gain of 0 in dB, and not inverted.
+The gain has the same range as for the [Gain filter](#gain), -150 to +150 in dB and -10.0 to +10.0 when linear.
+A source channel may only be listed once for each output channel.
+
+Downmix weights are often written as linear factors, such as 0.5 or 0.707.
+These need `scale: linear`.
+Without it the value is read as dB, so `gain: 0.5` meant as a factor of one half instead becomes a boost of 0.5 dB.
+Such values are within the allowed dB range, so this is not caught by the config validation.
 
 The optional `description` property is intended for the user and is not used by CamillaDSP itself.
 
@@ -1727,6 +1765,9 @@ The value will be rounded to the nearest number of chunks.
 The range of the volume control can be limited via the optional `limit` parameter.
 This sets a limit for the maximum value of the volume.
 If left out or set to `null`, it defaults to +50 dB.
+Like `volume_limit` in the devices section, it must be in the range -150 to +50 dB.
+
+All Volume filters that use the same fader must have the same `ramp_time_ms` and `limit`.
 
 Example Volume filter:
 ```
@@ -1752,7 +1793,7 @@ When used like this, there should only be a single Volume filter assigned to the
 It can also be used with a volume control external to CamillaDSP.
 The fader should then be set to one of the Aux faders, and the external volume control should update
 this fader when the volume setting changes.
-A special websocket command is provided for this, see the [websocket command documentation](websocket.md).
+A special websocket command is provided for this, see the [websocket command documentation](./docs/websocket.md).
 If the external volume control is placed after CamillaDSP in the audio chain,
 then the boost applied at high and low frequencies may cause clipping.
 To avoid this, set `attenuate_mid` to `true`.
@@ -1768,7 +1809,7 @@ The corner frequencies and the Q of the two shelves can be changed with `high_fr
 - When the volume is below `reference_level` - 20, the full correction is applied.
 - In the range between `reference_level` and `reference_level`-20, the boost value is scaled linearly.
 
-![Loudness](loudness.png)
+![Loudness](./docs/loudness.png)
 
 In this figure, the `reference_level` was set to -5 dB, and `high_boost` = `low_boost` = 10 dB.
 At a gain of 0 and -5, the curve is flat. Below that the boost increases.
@@ -1951,13 +1992,13 @@ This format is a simple text file with one value per row:
 -0.000012
 ```
 The other possible formats are raw data:
-- [S16_LE](sample_formats.md#s16_le)
-- [S24_3_LE](sample_formats.md#s24_3_le)
-- [S24_4_RJ_LE](sample_formats.md#s24_4_rj_le)
-- [S24_4_LJ_LE](sample_formats.md#s24_4_lj_le)
-- [S32_LE](sample_formats.md#s32_le)
-- [F32_LE](sample_formats.md#f32_le)
-- [F64_LE](sample_formats.md#f64_le)
+- [S16_LE](./docs/sample_formats.md#s16_le)
+- [S24_3_LE](./docs/sample_formats.md#s24_3_le)
+- [S24_4_RJ_LE](./docs/sample_formats.md#s24_4_rj_le)
+- [S24_4_LJ_LE](./docs/sample_formats.md#s24_4_lj_le)
+- [S32_LE](./docs/sample_formats.md#s32_le)
+- [F32_LE](./docs/sample_formats.md#f32_le)
+- [F64_LE](./docs/sample_formats.md#f64_le)
 
 
 ### IIR
@@ -2182,10 +2223,6 @@ The available types are:
           gain: 0.5
           q: 0.7
   ```
-
-
-Other types such as Bessel filters can be built by combining several Biquads.
-[See the separate readme for more filter functions.](./filterfunctions.md)
 
 * GraphicEqualizer
 
@@ -2450,6 +2487,7 @@ pipeline:
   * `release_unit`: Unit for the release time. Can be `s`, `ms`, `us` or `samples`.
   * `threshold`: the loudness threshold in dB where gate "opens".
   * `attenuation`: the amount of attenuation in dB to apply when the gate is "closed".
+    Must not be negative.
   * `monitor_channels`: a list of channels used when estimating the loudness. Optional, defaults to all channels.
   * `process_channels`: a list of channels to be gated. Optional, defaults to all channels.
 
@@ -2522,7 +2560,7 @@ Parameters:
 
 The RACE algorithm is normally used with filters,
 to only process a limited range of the audio spectrum.
-![RACE algoriths](race.png)
+![RACE algoriths](./docs/race.png)
 
 The RACE processor implements the recursive function block
 indicated by the dashed rectangle.
@@ -2799,8 +2837,60 @@ https://github.com/VilhoValittu/DecayCore - Free acoustic measurement tool and F
 
 # Getting help
 
-## FAQ
-See the [list of frequently asked questions.](./FAQ.md)
+Config errors are listed with their location in the config, and the messages describe the problem.
+For indentation problems and other YAML errors, see [The YAML format](#the-yaml-format).
 
-## Troubleshooting
-See the trouble [troubleshooting guide](./troubleshooting.md) for explanations of most error messages.
+## Underruns and dropouts
+The log shows messages like these when the playback device runs out of data:
+
+```
+PB: Prepare playback after buffer underrun
+PB: write underrun, trying to recover.
+Restarting playback after buffer underrun.
+```
+
+The most common cause is that the capture and playback devices have independent sample clocks.
+Two such clocks are never perfectly synchronised, so one of the devices always runs slightly faster.
+If the playback device is the faster one, it runs out of data to play, which gives almost periodic dropouts.
+If the capture device is the faster one, data piles up instead and the delay grows steadily.
+
+Set `enable_rate_adjust` to `true` to compensate for the drift.
+See [enable_rate_adjust](#devices) and [Rate adjust: what problem it solves, and how it works](#rate-adjust-what-problem-it-solves-and-how-it-works).
+Rate adjust needs a resampler that can change its ratio on the fly.
+Use [`Slip`](#slip-rate-adjust-for-independent-clocks-at-the-same-nominal-rate)
+if the capture and playback sample rates are equal, otherwise one of the `Async` types.
+
+A `chunksize` that is too small for the CPU, or other processes that load the CPU heavily, can also cause underruns.
+Increase `chunksize` to check.
+
+## Channel count errors
+The number of channels must match at every step of the pipeline:
+
+- A mixer's input channels must equal the output channels of the previous step.
+  For the first mixer, that is the number of channels of the capture device.
+  The error is `Mixer 'name' has wrong number of input channels. Expected X, found Y.`
+- The pipeline's output channels must equal the channels of the playback device.
+  If there is no mixer, the capture and playback devices must have the same number of channels.
+  The error is `Pipeline outputs X channels, playback device has Y.`
+- A filter step can only use channels that exist at that point of the pipeline.
+  The channels are numbered from 0 to X-1, where X is the channel count after the last mixer.
+  The error is `Use of non existing channel X`.
+
+## No sound on macOS
+Apps need microphone access to record sound from any source.
+Without it everything seems to run, but only silence is captured.
+See [Microphone access](./docs/backend_coreaudio.md#microphone-access).
+
+## Clipping with only negative gain
+The peak amplitude can increase even when all filters only attenuate.
+A signal is a sum of many frequency components, and in each sample some components add up while others cancel.
+If a filter removes a component that was lowering the peak, the value in that sample goes up.
+Filters also shift the phase over a wide range, which changes how the components sum.
+This is mostly a problem with modern productions that already have many samples at maximum level.
+Adding a `Gain` filter of -3 dB is usually enough.
+
+## Changelog
+See the [changelog](./CHANGELOG.md) for the changes in each release.
+
+## Example configurations
+The [exampleconfigs](./exampleconfigs/) folder contains a number of small configuration files.

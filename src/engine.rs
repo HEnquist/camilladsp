@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use crate::engine_pipeline::{EnginePipeline, start_pipeline};
 use crate::engine_process_signals::launch_process_signals_thread;
+use crate::utils::stash;
 use crate::websocket_server;
 use crate::{
     CommandMessage, ControllerMessage, ExitState, ProcessingState, SHUTDOWN_REQUESTED,
@@ -81,7 +82,6 @@ fn fail_and_restart(
         *active_cfg_shared = None;
         *prev_cfg_shared = Some(active_config);
     }
-    crate::set_capture_state(&status_structs.capture, ProcessingState::Inactive);
     trace!("All threads stopped, returning");
     Ok(ExitState::Restart)
 }
@@ -125,6 +125,11 @@ pub fn run(
                             config::ConfigChange::Pipeline
                             | config::ConfigChange::MixerParameters
                             | config::ConfigChange::FilterParameters { .. } => {
+                                // A new mixer can widen the pipeline, so top up the
+                                // stash before the processing thread gets to it.
+                                if !matches!(comp, config::ConfigChange::FilterParameters { .. }) {
+                                    stash::prefill_for_config(&new_conf);
+                                }
                                 // Transforming the coefficients happens here, so a
                                 // config whose files went missing since it was
                                 // validated fails before anything is changed, and
@@ -141,7 +146,11 @@ pub fn run(
                                 *shared_configs.active.lock() = Some(active_config.clone());
                                 let used_channels = config::used_capture_channels(&active_config);
                                 debug!("Using channels {used_channels:?}");
-                                status_structs.capture.write().used_channels = used_channels;
+                                status_structs
+                                    .capture
+                                    .read()
+                                    .used_channels
+                                    .set(&used_channels);
                                 debug!("Sent changes to pipeline");
                             }
                             config::ConfigChange::Devices => {
@@ -202,6 +211,13 @@ pub fn run(
                             pipeline.set_playback_ready();
                             if pipeline.release_barrier_if_ready() {
                                 is_starting = false;
+                                // Startup is complete once the second device reports in,
+                                // and which one that is depends on how the two threads
+                                // are scheduled. So the reason the previous session
+                                // stopped is cleared in both arms. Clearing it in only
+                                // one left a new session that came up playback-last
+                                // reporting the old reason for as long as it ran.
+                                crate::set_stop_reason(&status_structs.status, StopReason::None);
                             }
                         }
                         StatusMessage::CaptureReady => {

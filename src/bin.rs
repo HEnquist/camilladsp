@@ -17,7 +17,7 @@
 #[macro_use]
 extern crate log;
 
-use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_name, crate_version};
+use clap::{Arg, ArgAction, Command, crate_authors, crate_description, crate_version};
 use git_version::git_version;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -25,12 +25,14 @@ use std::path::PathBuf;
 use flexi_logger::DeferredNow;
 use log::Record;
 
-use camillalib::config;
-use camillalib::engine::{EXIT_BAD_CONFIG, EXIT_OK, EngineConfig, run_engine};
-use camillalib::statefile;
-use camillalib::{ProcessingParameters, list_supported_devices};
+use camilladsp::config;
+use camilladsp::engine::{EXIT_BAD_CONFIG, EXIT_OK, EngineConfig, run_engine};
+use camilladsp::statefile;
+use camilladsp::{ProcessingParameters, list_supported_devices};
 
 const GIT_HASH: &str = git_version!(fallback = "unknown");
+// Display name. The package name from crate_name!() is the lowercase "camilladsp".
+const APP_NAME: &str = "CamillaDSP";
 
 // Customized version of `colored_opt_format` from flexi_logger.
 fn custom_colored_logger_format(
@@ -108,7 +110,7 @@ fn main_process() -> i32 {
 
     let longabout = format!(
         "{} v{} ({})\n{}\n{}\n\n{}\n\n{}\n{}\n\nSupported device types:\n{}\n{}",
-        crate_name!(),
+        APP_NAME,
         crate_version!(),
         GIT_HASH,
         crate_authors!(),
@@ -120,7 +122,7 @@ fn main_process() -> i32 {
         playback_types
     );
 
-    let clapapp = Command::new("CamillaDSP")
+    let clapapp = Command::new(APP_NAME)
         .version(version_with_hash)
         .about(longabout)
         .author(crate_authors!())
@@ -485,7 +487,7 @@ fn main_process() -> i32 {
 
     let mut initial_volumes = if let Some(s) = &state {
         debug!("Using statefile for initial volume");
-        s.volume
+        s.volumes()
     } else {
         debug!("Using default initial volume");
         [
@@ -584,15 +586,15 @@ fn main_process() -> i32 {
 
     // All state variables are prepared, save to the statefile if needed
     if let Some(fname) = &statefilename {
-        let state_to_save = statefile::State {
-            config_path: configname.clone(),
-            volume: initial_volumes,
-            mute: initial_mutes,
-        };
-        if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
-            statefile::save_state_to_file(fname, &state_to_save);
-        } else {
-            debug!("No change to state from {fname}, not overwriting.");
+        match statefile::State::new(configname.clone(), initial_mutes, initial_volumes) {
+            Ok(state_to_save) => {
+                if state.is_none() || state.map(|s| s != state_to_save).unwrap_or(false) {
+                    statefile::save_state_to_file(fname, &state_to_save);
+                } else {
+                    debug!("No change to state from {fname}, not overwriting.");
+                }
+            }
+            Err(err) => error!("Not saving state to '{fname}', error: {err}"),
         }
     }
 

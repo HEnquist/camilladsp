@@ -81,7 +81,7 @@ pub(crate) fn make_channel_ids(num_channels: usize, is_input: bool) -> Vec<Chann
 pub(crate) fn resolve_binary_format(format: &AsioSampleFormat) -> BinarySampleFormat {
     match format {
         AsioSampleFormat::S16_LE => BinarySampleFormat::S16_LE,
-        AsioSampleFormat::S24_4_LE => BinarySampleFormat::S24_4_LJ_LE,
+        AsioSampleFormat::S24_4_LE => BinarySampleFormat::S24_4_RJ_LE,
         AsioSampleFormat::S24_3_LE => BinarySampleFormat::S24_3_LE,
         AsioSampleFormat::S32_LE => BinarySampleFormat::S32_LE,
         AsioSampleFormat::F32_LE => BinarySampleFormat::F32_LE,
@@ -133,14 +133,14 @@ pub(crate) fn asio_sample_type_name(sample_type: SampleType) -> &'static str {
 }
 
 /// Map an ASIO sample type to the matching `AsioSampleFormat`, if supported.
+///
+/// The `Int32LSBxx` types hold the sample right justified (sign extended) in a 32-bit word.
+/// Only the 24-bit variant has a matching format, the 16, 18 and 20-bit ones are unsupported.
 pub(crate) fn asio_sample_type_to_format(sample_type: SampleType) -> Option<AsioSampleFormat> {
     match sample_type {
         SampleType::PCM_I16_LSB => Some(AsioSampleFormat::S16_LE),
         SampleType::PCM_I24_LSB => Some(AsioSampleFormat::S24_3_LE),
         SampleType::PCM_I32_LSB => Some(AsioSampleFormat::S32_LE),
-        SampleType::PCM_I32_LSB_16 => Some(AsioSampleFormat::S32_LE),
-        SampleType::PCM_I32_LSB_18 => Some(AsioSampleFormat::S32_LE),
-        SampleType::PCM_I32_LSB_20 => Some(AsioSampleFormat::S32_LE),
         SampleType::PCM_I32_LSB_24 => Some(AsioSampleFormat::S24_4_LE),
         SampleType::PCM_F32_LSB => Some(AsioSampleFormat::F32_LE),
         SampleType::PCM_F64_LSB => Some(AsioSampleFormat::F64_LE),

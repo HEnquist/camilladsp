@@ -12,31 +12,41 @@ use num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
 
 use crate::audiochunk::AudioChunk;
+use camilladsp_schema::protocol::SpectrumSide;
 
 /// Maximum number of frames stored per channel in [`AudioRingBuffer`].
 pub const RING_BUFFER_CAPACITY: usize = 262144;
 
-static SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
+static CAPTURE_SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
+static PLAYBACK_SPECTRUM_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Record that a client has asked for spectrum data, so the audio threads start
-/// filling the ring buffer.
-///
-/// Filling costs a pass over every chunk on both the capture and playback
-/// threads, writing through a buffer of [`RING_BUFFER_CAPACITY`] frames per
-/// channel, so it is skipped until something actually wants the data. The flag
-/// is sticky: one-shot spectrum reads need history that is already there, so it
-/// cannot be turned off again when a subscription ends without breaking them.
-///
-/// The first request after startup therefore reports insufficient data until
-/// enough frames have accumulated, the same as a request made immediately after
-/// the process starts.
-pub fn request_spectrum_data() {
-    SPECTRUM_REQUESTED.store(true, Ordering::Relaxed);
+fn requested_flag(side: SpectrumSide) -> &'static AtomicBool {
+    match side {
+        SpectrumSide::Capture => &CAPTURE_SPECTRUM_REQUESTED,
+        SpectrumSide::Playback => &PLAYBACK_SPECTRUM_REQUESTED,
+    }
 }
 
-/// Whether the audio threads should be filling the ring buffer.
-pub fn spectrum_data_requested() -> bool {
-    SPECTRUM_REQUESTED.load(Ordering::Relaxed)
+/// Record that a client has asked for spectrum data on `side`, so the audio
+/// thread of that side starts filling its ring buffer.
+///
+/// Filling costs a pass over every chunk, writing through a buffer of
+/// [`RING_BUFFER_CAPACITY`] frames per channel, so it is skipped until something
+/// actually wants the data, and each side is only filled once something has asked
+/// for that side. The flag is sticky: one-shot spectrum reads need history that is
+/// already there, so it cannot be turned off again when a subscription ends
+/// without breaking them.
+///
+/// The first request for a side therefore reports insufficient data until enough
+/// frames have accumulated, the same as a request made immediately after the
+/// process starts.
+pub fn request_spectrum_data(side: SpectrumSide) {
+    requested_flag(side).store(true, Ordering::Relaxed);
+}
+
+/// Whether the audio thread of `side` should be filling its ring buffer.
+pub fn spectrum_data_requested(side: SpectrumSide) -> bool {
+    requested_flag(side).load(Ordering::Relaxed)
 }
 
 /// Circular ring buffer storing the last [`RING_BUFFER_CAPACITY`] frames per channel.
@@ -44,6 +54,7 @@ pub fn spectrum_data_requested() -> bool {
 #[derive(Clone, Debug)]
 pub struct AudioRingBuffer {
     channels: Vec<Vec<f32>>,
+    live: Vec<bool>,
     write_pos: usize,
     total_written: usize,
 }
@@ -53,25 +64,47 @@ impl AudioRingBuffer {
     pub fn new() -> Self {
         Self {
             channels: Vec::new(),
+            live: Vec::new(),
             write_pos: 0,
             total_written: 0,
         }
     }
 
+    /// Append the valid frames of `chunk` to every channel.
+    ///
+    /// Capture chunks carry an empty waveform for each capture channel the
+    /// pipeline does not use. Such a channel is stored as silence and marked as
+    /// not live, so that it is left out of the channel average.
     pub fn push_chunk(&mut self, chunk: &AudioChunk) {
         let n_frames = chunk.valid_frames;
         let n_ch = chunk.channels;
         if self.channels.len() != n_ch {
             self.channels = vec![vec![f32::default(); RING_BUFFER_CAPACITY]; n_ch];
+            self.live = vec![false; n_ch];
             self.write_pos = 0;
             self.total_written = 0;
         }
-        for frame in 0..n_frames {
-            for ch in 0..n_ch {
-                self.channels[ch][self.write_pos] = chunk.waveforms[ch][frame].to_f32();
+        for ((ring, live), waveform) in self
+            .channels
+            .iter_mut()
+            .zip(self.live.iter_mut())
+            .zip(chunk.waveforms.iter())
+        {
+            *live = waveform.len() >= n_frames;
+            let mut pos = self.write_pos;
+            if *live {
+                for value in &waveform[..n_frames] {
+                    ring[pos] = value.to_f32();
+                    pos = (pos + 1) % RING_BUFFER_CAPACITY;
+                }
+            } else {
+                for _ in 0..n_frames {
+                    ring[pos] = f32::default();
+                    pos = (pos + 1) % RING_BUFFER_CAPACITY;
+                }
             }
-            self.write_pos = (self.write_pos + 1) % RING_BUFFER_CAPACITY;
         }
+        self.write_pos = (self.write_pos + n_frames) % RING_BUFFER_CAPACITY;
         self.total_written += n_frames;
     }
 
@@ -110,10 +143,22 @@ impl AudioRingBuffer {
                 }
             }
             None => {
-                let n = self.channels.len() as f32;
+                let n_live = self.live.iter().filter(|live| **live).count();
+                if n_live == 0 {
+                    buf.fill(f32::default());
+                    return true;
+                }
+                let n = n_live as f32;
                 for (i, sample) in buf.iter_mut().enumerate() {
                     let idx = (start + i) % RING_BUFFER_CAPACITY;
-                    *sample = self.channels.iter().map(|ch| ch[idx]).sum::<f32>() / n;
+                    *sample = self
+                        .channels
+                        .iter()
+                        .zip(self.live.iter())
+                        .filter(|(_, live)| **live)
+                        .map(|(ch, _)| ch[idx])
+                        .sum::<f32>()
+                        / n;
                 }
             }
         }
@@ -121,7 +166,7 @@ impl AudioRingBuffer {
     }
 
     /// Copy the last `n_frames` samples in chronological order, mixing channels as requested.
-    /// `None` averages all channels; `Some(idx)` returns channel `idx` only.
+    /// `None` averages the channels that are in use; `Some(idx)` returns channel `idx` only.
     pub fn read_latest(&self, n_frames: usize, channel: Option<usize>) -> Option<Vec<f32>> {
         let mut buf = Vec::new();
         self.read_latest_into(n_frames, channel, &mut buf)
@@ -161,13 +206,8 @@ fn get_hann_window(n: usize) -> Arc<[f32]> {
 // --- Spectrum computation ---
 
 /// Log-spaced spectrum result returned by [`compute_spectrum`] and related functions.
-#[derive(Debug, serde::Serialize, PartialEq)]
-pub struct SpectrumData {
-    /// Center frequency of each output bin in Hz.
-    pub frequencies: Arc<[f32]>,
-    /// Per-bin peak magnitude in dBFS (0 dBFS = full-scale sine wave).
-    pub magnitudes: Vec<f32>,
-}
+/// Defined with the websocket protocol, which carries it.
+pub use camilladsp_schema::protocol::SpectrumData;
 
 type FreqCacheMap = Mutex<HashMap<(u64, u64, usize), Arc<[f32]>>>;
 static FREQ_CACHE: LazyLock<FreqCacheMap> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -502,6 +542,26 @@ mod tests {
         }
     }
 
+    /// A chunk shaped like the ones capture produces when the pipeline does not use
+    /// every capture channel: the used channels carry the sine, the others an empty
+    /// waveform.
+    fn make_chunk_with_unused(
+        freq: f64,
+        amplitude: f64,
+        samplerate: usize,
+        frames: usize,
+        used: &[bool],
+    ) -> AudioChunk {
+        let mut chunk = make_chunk_sine(freq, amplitude, samplerate, frames);
+        let waveform = chunk.waveforms.pop().unwrap();
+        chunk.channels = used.len();
+        chunk.waveforms = used
+            .iter()
+            .map(|u| if *u { waveform.clone() } else { Vec::new() })
+            .collect();
+        chunk
+    }
+
     #[test]
     fn full_scale_sine_is_zero_dbfs() {
         let samplerate = 48000;
@@ -575,5 +635,63 @@ mod tests {
         }
         assert_eq!(buf.channel_count(), 1);
         assert!(buf.read_latest(65536, None).is_some());
+    }
+
+    // Capture chunks have an empty waveform for each unused capture channel, and
+    // pushing one used to index out of bounds and take down the capture thread.
+    #[test]
+    fn unused_channel_is_stored_as_silence() {
+        let frames = 8192;
+        let chunk = make_chunk_with_unused(1000.0, 0.5, 48000, frames, &[true, false]);
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&chunk);
+        assert_eq!(buf.channel_count(), 2);
+        let unused = buf.read_latest(frames, Some(1)).unwrap();
+        assert!(unused.iter().all(|s| *s == 0.0));
+        let used = buf.read_latest(frames, Some(0)).unwrap();
+        let expected: Vec<f32> = chunk.waveforms[0].iter().map(|s| s.to_f32()).collect();
+        assert_eq!(used, expected);
+    }
+
+    #[test]
+    fn average_leaves_out_unused_channels() {
+        let frames = 8192;
+        let chunk = make_chunk_with_unused(1000.0, 0.5, 48000, frames, &[true, false]);
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&chunk);
+        // With the unused channel counted, the average would be half the signal.
+        let average = buf.read_latest(frames, None).unwrap();
+        let used = buf.read_latest(frames, Some(0)).unwrap();
+        assert_eq!(average, used);
+    }
+
+    #[test]
+    fn average_of_only_unused_channels_is_silence() {
+        let frames = 8192;
+        let chunk = make_chunk_with_unused(1000.0, 0.5, 48000, frames, &[false, false]);
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&chunk);
+        let average = buf.read_latest(frames, None).unwrap();
+        assert!(average.iter().all(|s| *s == 0.0));
+    }
+
+    // A config reload can start using a channel that was unused before.
+    #[test]
+    fn unused_channel_becoming_used() {
+        let frames = 8192;
+        let mut buf = AudioRingBuffer::new();
+        buf.push_chunk(&make_chunk_with_unused(
+            1000.0,
+            0.5,
+            48000,
+            frames,
+            &[true, false],
+        ));
+        let chunk = make_chunk_with_unused(1000.0, 0.5, 48000, frames, &[true, true]);
+        buf.push_chunk(&chunk);
+        let expected: Vec<f32> = chunk.waveforms[1].iter().map(|s| s.to_f32()).collect();
+        assert_eq!(buf.read_latest(frames, Some(1)).unwrap(), expected);
+        // Both channels carry the same signal, so their average equals either one.
+        assert_eq!(buf.read_latest(frames, None).unwrap(), expected);
     }
 }

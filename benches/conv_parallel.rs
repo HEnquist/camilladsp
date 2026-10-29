@@ -25,11 +25,11 @@ use rayon::prelude::*;
 use std::hint::black_box;
 use std::time::Duration;
 
-use camillalib::CamillaFloat;
-use camillalib::config;
-use camillalib::filters::Filter;
-use camillalib::filters::fftconv::{ConvCoeffCache, FftConv};
-use camillalib::processing::build_processing_threadpool;
+use camilladsp::CamillaFloat;
+use camilladsp::config;
+use camilladsp::filters::Filter;
+use camilladsp::filters::fftconv::{ConvCoeffCache, FftConv};
+use camilladsp::processing::build_processing_threadpool;
 
 const CHUNK: usize = 1024;
 const CHANNEL_COUNTS: [usize; 3] = [1, 2, 4];

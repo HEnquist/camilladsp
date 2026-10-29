@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::ProcessingParameters;
+use crate::config::{FiniteF32, NotFinite};
 
 /// Persistent state that is saved to and loaded from the state file across restarts.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -33,7 +34,34 @@ pub struct State {
     /// Mute status for each of the [`ProcessingParameters::NUM_FADERS`] faders.
     pub mute: [bool; 5],
     /// Volume (dB) for each of the [`ProcessingParameters::NUM_FADERS`] faders.
-    pub volume: [f32; 5],
+    ///
+    /// A hand-edited file can hold `.nan` or `.inf`, which would reach the volume filter,
+    /// so such a file fails to load like any other malformed one.
+    pub volume: [FiniteF32; 5],
+}
+
+impl State {
+    /// Build a [`State`] from runtime values, rejecting a non-finite volume.
+    pub fn new(
+        config_path: Option<String>,
+        mute: [bool; 5],
+        volume: [f32; 5],
+    ) -> Result<Self, NotFinite> {
+        let finite = volume.map(FiniteF32::new);
+        if finite.iter().any(Option::is_none) {
+            return Err(NotFinite);
+        }
+        Ok(State {
+            config_path,
+            mute,
+            volume: finite.map(Option::unwrap),
+        })
+    }
+
+    /// The fader volumes (dB) as plain numbers.
+    pub fn volumes(&self) -> [f32; 5] {
+        self.volume.map(f32::from)
+    }
 }
 
 /// Load a [`State`] from `filename`, returning `None` and logging a warning on any error.
@@ -72,10 +100,16 @@ pub fn save_state(
     params: &ProcessingParameters,
     unsaved_changes: &Arc<AtomicBool>,
 ) {
-    let state = State {
-        config_path: config_path.lock().as_ref().map(|s| s.to_string()),
-        volume: params.volumes(),
-        mute: params.mutes(),
+    let state = match State::new(
+        config_path.lock().as_ref().map(|s| s.to_string()),
+        params.mutes(),
+        params.volumes(),
+    ) {
+        Ok(state) => state,
+        Err(err) => {
+            error!("Not saving state to '{filename}', error: {err}");
+            return;
+        }
     };
     if save_state_to_file(filename, &state) {
         unsaved_changes.store(false, Ordering::Relaxed);
@@ -106,5 +140,37 @@ pub fn save_state_to_file(filename: &str, state: &State) -> bool {
             error!("Unable to open statefile {filename}, error: {openerr}");
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::State;
+
+    #[test]
+    fn roundtrip_finite_state() {
+        let state = State::new(
+            Some("config.yml".to_string()),
+            [false, true, false, false, false],
+            [-10.0, 0.0, 5.5, -150.0, 50.0],
+        )
+        .unwrap();
+        let yaml = yaml_serde::to_string(&state).unwrap();
+        let loaded: State = yaml_serde::from_str(&yaml).unwrap();
+        assert_eq!(loaded, state);
+        assert_eq!(loaded.volumes(), [-10.0, 0.0, 5.5, -150.0, 50.0]);
+    }
+
+    #[test]
+    fn reject_non_finite_volume() {
+        for bad in [".nan", ".inf", "-.inf"] {
+            let yaml = format!(
+                "config_path: null\nmute: [false, false, false, false, false]\n\
+                 volume: [{bad}, 0.0, 0.0, 0.0, 0.0]\n"
+            );
+            assert!(yaml_serde::from_str::<State>(&yaml).is_err(), "{bad}");
+        }
+        assert!(State::new(None, [false; 5], [0.0, f32::NAN, 0.0, 0.0, 0.0]).is_err());
+        assert!(State::new(None, [false; 5], [0.0, 0.0, 0.0, 0.0, f32::INFINITY]).is_err());
     }
 }

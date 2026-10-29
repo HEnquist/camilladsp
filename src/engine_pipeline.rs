@@ -19,10 +19,13 @@ use std::{
     thread,
 };
 
+use parking_lot::RwLock;
+
 use crate::filters::fftconv::{ConvCoeffCache, ImpulseCache};
+use crate::utils::stash;
 use crate::{
-    CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice, config,
-    processing,
+    ChannelMask, CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice,
+    config, processing,
 };
 
 /// Supervisory handles for the running capture/processing/playback threads.
@@ -37,6 +40,8 @@ pub struct EnginePipeline {
     cap_handle: Box<thread::JoinHandle<()>>,
     pb_ready: bool,
     cap_ready: bool,
+    /// Set to Inactive by `stop`, once both device threads are gone.
+    capture_status: Arc<RwLock<crate::CaptureStatus>>,
 }
 
 impl EnginePipeline {
@@ -56,6 +61,12 @@ impl EnginePipeline {
     /// Tell the capture thread to exit, release the startup barrier if we are
     /// still starting (so the device/processing threads unblock), then join the
     /// capture and playback threads.
+    ///
+    /// The state goes to Inactive here and nowhere else, after both joins. A
+    /// device thread that set it on its way out would publish it while the
+    /// other side was still closing its device, and before the supervisor had
+    /// recorded why the session stopped. Inactive means both devices are
+    /// released and the stop reason is in place.
     pub fn stop(self, is_starting: bool) {
         if self.tx_command_cap.send(CommandMessage::Exit).is_err() {
             debug!("Capture thread has already exited");
@@ -68,6 +79,7 @@ impl EnginePipeline {
         self.pb_handle.join().unwrap();
         trace!("Wait for capture thread to exit..");
         self.cap_handle.join().unwrap();
+        crate::set_capture_state(&self.capture_status, ProcessingState::Inactive);
     }
 
     /// Transform the convolution coefficients the change needs, then send it to
@@ -122,6 +134,8 @@ pub fn start_pipeline(
     active_config: &config::Configuration,
     status_structs: &StatusStructs,
 ) -> (EnginePipeline, crossbeam_channel::Receiver<StatusMessage>) {
+    // Before any audio thread exists, so that none of them has to allocate.
+    stash::prefill_for_config(active_config);
     let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
     let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
@@ -155,7 +169,7 @@ pub fn start_pipeline(
     {
         let mut capture_status = status_structs.capture.write();
         crate::update_capture_state(&mut capture_status, ProcessingState::Starting);
-        capture_status.used_channels = used_channels;
+        capture_status.used_channels = Arc::new(ChannelMask::new(&used_channels));
     }
 
     // Capture thread
@@ -179,6 +193,7 @@ pub fn start_pipeline(
         cap_handle,
         pb_ready: false,
         cap_ready: false,
+        capture_status: status_structs.capture.clone(),
     };
     (pipeline, rx_status)
 }
