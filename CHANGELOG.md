@@ -19,6 +19,7 @@ Changes:
 - Config errors list every problem found, each with its location in the config.
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.
+- Faster delay filtering and spectrum buffering.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.
