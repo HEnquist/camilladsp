@@ -17,7 +17,6 @@
 use crate::Res;
 use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::config::BinarySampleFormat;
 use crate::processors::Processor;
 use crate::utils::conversions::chunk_to_buffer_rawbytes_unlogged;
 use crate::utils::stash::{
@@ -29,14 +28,15 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread;
+
+pub use camilladsp_schema::processors::filewriter::{
+    TIMESTAMP_TOKEN, file_key, validate_file_writer,
+};
 
 // Minimum number of chunks the writer channel can hold
 const MIN_CHUNKS: usize = 4;
-
-/// Token in a FileWriter filename, replaced by the local time when the file is created.
-pub const TIMESTAMP_TOKEN: &str = "$timestamp$";
 
 pub struct FileWriter {
     name: String,
@@ -342,68 +342,13 @@ impl Processor for FileWriter {
     }
 }
 
-/// The key that identifies an output file: its canonical parent directory
-/// joined with the file name.
-///
-/// The file itself need not exist, but its directory must.
-pub fn file_key(filename: &str) -> std::io::Result<PathBuf> {
-    let path = Path::new(filename);
-    let name = path
-        .file_name()
-        .ok_or_else(|| std::io::Error::other("the path has no file name"))?;
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    Ok(std::fs::canonicalize(parent)?.join(name))
-}
-
-/// Validate the file writer config.
-pub fn validate_file_writer(config: &config::FileWriterParameters) -> Res<()> {
-    if config.channels == 0 {
-        return Err(config::ConfigError::new(
-            "FileWriter processor channels must be greater than zero.",
-        )
-        .into());
-    }
-    for ch in config.process_channels().iter() {
-        if *ch >= config.channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                config.channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    if config.filename.is_empty() {
-        return Err(
-            config::ConfigError::new("FileWriter processor filename must not be empty.").into(),
-        );
-    }
-    let in_directory = Path::new(&config.filename)
-        .parent()
-        .is_some_and(|dir| dir.to_string_lossy().contains(TIMESTAMP_TOKEN));
-    if in_directory {
-        return Err(config::ConfigError::new(
-            "FileWriter processor filename can only use $timestamp$ in the file name, not the directory.",
-        )
-        .into());
-    }
-    if config.wav_header() && config.format == BinarySampleFormat::S24_4_RJ_LE {
-        return Err(config::ConfigError::new(
-            "Wav files do not support the S24_4_RJ_LE sample format",
-        )
-        .into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CamillaFloat;
+    use crate::config::BinarySampleFormat;
     use std::fs;
+    use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -449,14 +394,6 @@ mod tests {
 
     fn f32_bytes(values: &[f32]) -> Vec<u8> {
         values.iter().flat_map(|v| v.to_le_bytes()).collect()
-    }
-
-    #[test]
-    fn validate_rejects_invalid_process_channel() {
-        let mut config = f32_config("test".to_string());
-        config.process_channels = Some(vec![2]);
-
-        assert!(validate_file_writer(&config).is_err());
     }
 
     #[test]
@@ -557,11 +494,6 @@ mod tests {
             "/tmp/cap_20260923-080503.wav"
         );
         assert_eq!(resolve_timestamp("/tmp/cap.wav", now), "/tmp/cap.wav");
-
-        let mut config = f32_config("/tmp/$timestamp$/cap.wav".to_string());
-        assert!(validate_file_writer(&config).is_err());
-        config.filename = "/tmp/cap_$timestamp$.wav".to_string();
-        assert!(validate_file_writer(&config).is_ok());
     }
 
     #[test]
@@ -670,18 +602,6 @@ mod tests {
     }
 
     #[test]
-    fn file_key_folds_the_parent_directory() {
-        let dir = std::env::temp_dir();
-        let plain = dir.join("capture.raw");
-        let dotted = dir.join(".").join("capture.raw");
-        assert_eq!(
-            file_key(plain.to_str().unwrap()).unwrap(),
-            file_key(dotted.to_str().unwrap()).unwrap()
-        );
-        assert!(file_key("/no/such/dir/capture.raw").is_err());
-    }
-
-    #[test]
     fn writes_wav_header_when_enabled() {
         let filename = unique_test_filename();
         let mut config = f32_config(filename.clone());
@@ -695,13 +615,5 @@ mod tests {
         assert!(data.starts_with(b"RIFF"));
         assert!(data.len() > 4 + 24 + 8);
         let _ = fs::remove_file(&filename);
-    }
-
-    #[test]
-    fn validate_rejects_right_justified_wav() {
-        let mut config = f32_config("test.wav".to_string());
-        config.format = BinarySampleFormat::S24_4_RJ_LE;
-        config.wav_header = Some(true);
-        assert!(validate_file_writer(&config).is_err());
     }
 }

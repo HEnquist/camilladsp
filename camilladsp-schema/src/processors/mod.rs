@@ -19,6 +19,8 @@ use crate::config::{Issues, issue_path};
 
 /// Dynamic range compressor processor.
 pub mod compressor;
+/// File writer processor.
+pub mod filewriter;
 /// Multichannel lookahead limiter processor.
 pub mod lookahead_limiter;
 /// Noise gate processor.
@@ -30,6 +32,7 @@ pub mod race;
 ///
 /// These are the monitored channels, where an empty list means all channels.
 /// RACE needs both of its channels, since each one feeds into the other.
+/// FileWriter reads the channels it writes.
 pub fn read_channels(processor: &config::Processor) -> Vec<usize> {
     let (channels, monitor_channels) = match processor {
         config::Processor::Compressor { parameters, .. } => {
@@ -43,6 +46,9 @@ pub fn read_channels(processor: &config::Processor) -> Vec<usize> {
         }
         config::Processor::RACE { parameters, .. } => {
             return vec![parameters.channel_a, parameters.channel_b];
+        }
+        config::Processor::FileWriter { parameters, .. } => {
+            (parameters.channels, parameters.process_channels())
         }
     };
     if monitor_channels.is_empty() {

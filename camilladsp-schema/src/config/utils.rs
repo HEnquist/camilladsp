@@ -21,6 +21,7 @@ use crate::filters::fftconv::ImpulseCache;
 use crate::mixer;
 use crate::processors;
 use crate::processors::compressor;
+use crate::processors::filewriter;
 use crate::processors::lookahead_limiter;
 use crate::processors::noisegate;
 use crate::processors::race;
@@ -542,7 +543,7 @@ pub fn config_diff(currentconf: &Configuration, newconf: &Configuration) -> Conf
             // The pipeline didn't change, any added processor isn't included and can be skipped
             if let Some(current_proc) = oldprocs.get(proc) {
                 match processor_parameters_changed(params, current_proc) {
-                    // A processor changed type, need to rebuild the pipeline
+                    // A processor changed type or can't be updated, need to rebuild the pipeline
                     None => return ConfigChange::Pipeline,
                     // Only parameters changed, ok to update
                     Some(true) => processors.push(proc.to_string()),
@@ -663,7 +664,7 @@ fn filter_parameters_changed(new: &Filter, current: &Filter) -> Option<bool> {
 }
 
 /// Whether the parameters of a processor changed, ignoring the description.
-/// `None` when the processor changed type.
+/// `None` when the processor changed type, or cannot update its parameters.
 fn processor_parameters_changed(new: &Processor, current: &Processor) -> Option<bool> {
     match (new, current) {
         (
@@ -681,6 +682,11 @@ fn processor_parameters_changed(new: &Processor, current: &Processor) -> Option<
         (Processor::RACE { parameters: a, .. }, Processor::RACE { parameters: b, .. }) => {
             Some(a != b)
         }
+        // A FileWriter cannot update its parameters, a change rebuilds the pipeline.
+        (
+            Processor::FileWriter { parameters: a, .. },
+            Processor::FileWriter { parameters: b, .. },
+        ) if a == b => Some(false),
         _ => None,
     }
 }
@@ -991,6 +997,8 @@ fn validate_pipeline(conf: &Configuration, impulses: &mut ImpulseCache, issues: 
     let mut checked_mixers = HashSet::new();
     let mut checked_filters = HashSet::new();
     let mut checked_processors = HashSet::new();
+    // FileWriter steps seen so far, by output file, to catch two writing one file.
+    let mut file_writers: HashMap<PathBuf, &str> = HashMap::new();
     if let Some(pipeline) = &conf.pipeline {
         for (idx, step) in pipeline.iter().enumerate() {
             match step {
@@ -1082,6 +1090,9 @@ fn validate_pipeline(conf: &Configuration, impulses: &mut ImpulseCache, issues: 
                         Processor::RACE { parameters, .. } => {
                             ("RACE processor", parameters.channels)
                         }
+                        Processor::FileWriter { parameters, .. } => {
+                            ("FileWriter processor", parameters.channels)
+                        }
                     };
                     if let Some(expected) = num_channels
                         && channels != expected
@@ -1090,6 +1101,23 @@ fn validate_pipeline(conf: &Configuration, impulses: &mut ImpulseCache, issues: 
                             "{kind} '{}' has wrong number of channels. Expected {}, found {}.",
                             step.name, expected, channels
                         );
+                        issues.invalid(issue_path!["pipeline", idx], msg);
+                    }
+                    if let Processor::FileWriter { parameters, .. } = procconf
+                        && let Ok(key) = filewriter::file_key(&parameters.filename)
+                        && let Some(other) = file_writers.insert(key, step.name.as_str())
+                    {
+                        let msg = if other == step.name {
+                            format!(
+                                "FileWriter processor '{}' is used more than once in the pipeline.",
+                                step.name
+                            )
+                        } else {
+                            format!(
+                                "FileWriter processors '{}' and '{}' write to the same file.",
+                                other, step.name
+                            )
+                        };
                         issues.invalid(issue_path!["pipeline", idx], msg);
                     }
                     if checked_processors.insert(&step.name) {
@@ -1122,6 +1150,7 @@ pub fn validate_processor(fs: usize, procconf: &Processor) -> Result<(), Issues>
             lookahead_limiter::validate_lookahead_limiter(parameters, fs)
         }
         Processor::RACE { parameters, .. } => race::validate_race(parameters),
+        Processor::FileWriter { parameters, .. } => filewriter::validate_file_writer(parameters),
     };
     let mut issues = Issues::new();
     issues.nest_result(issue_path!["parameters"], result);
