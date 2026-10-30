@@ -23,10 +23,9 @@ use num_complex::Complex;
 // [-1, 1] to get the correct subtract/add pattern, then use FMA:
 //   result = a_re * b + a_im * b_swap_signed
 //
-// For multiply_add (accumulate), the kernel computes the complex product first,
-// then adds the accumulator via a separate add:
-//   prod = a_re * b + a_im * b_swap_signed  (via vmulq + vfmaq)
-//   result = acc + prod                     (via vaddq)
+// For multiply_add (accumulate), the accumulator takes the place of the vmulq,
+// so both halves of the product are fused into it:
+//   result = acc + a_re * b + a_im * b_swap_signed  (via vfmaq + vfmaq)
 //
 // 4x-register unrolled main loop + 1x cleanup + scalar tail (f32 only).
 //
@@ -182,16 +181,16 @@ pub(super) unsafe fn multiply_add_elements_neon_f64(
             let b_sw2 = vmulq_f64(vextq_f64::<1>(b2, b2), sign);
             let b_sw3 = vmulq_f64(vextq_f64::<1>(b3, b3), sign);
 
-            // Compute product a*b, then add accumulator.
-            let prod0 = vfmaq_f64(vmulq_f64(a_re0, b0), a_im0, b_sw0);
-            let prod1 = vfmaq_f64(vmulq_f64(a_re1, b1), a_im1, b_sw1);
-            let prod2 = vfmaq_f64(vmulq_f64(a_re2, b2), a_im2, b_sw2);
-            let prod3 = vfmaq_f64(vmulq_f64(a_re3, b3), a_im3, b_sw3);
+            // Accumulate both halves of the product straight into acc.
+            let r0 = vfmaq_f64(vfmaq_f64(acc0, a_re0, b0), a_im0, b_sw0);
+            let r1 = vfmaq_f64(vfmaq_f64(acc1, a_re1, b1), a_im1, b_sw1);
+            let r2 = vfmaq_f64(vfmaq_f64(acc2, a_re2, b2), a_im2, b_sw2);
+            let r3 = vfmaq_f64(vfmaq_f64(acc3, a_re3, b3), a_im3, b_sw3);
 
-            vst1q_f64(r_ptr.add(off), vaddq_f64(acc0, prod0));
-            vst1q_f64(r_ptr.add(off + 2), vaddq_f64(acc1, prod1));
-            vst1q_f64(r_ptr.add(off + 4), vaddq_f64(acc2, prod2));
-            vst1q_f64(r_ptr.add(off + 6), vaddq_f64(acc3, prod3));
+            vst1q_f64(r_ptr.add(off), r0);
+            vst1q_f64(r_ptr.add(off + 2), r1);
+            vst1q_f64(r_ptr.add(off + 4), r2);
+            vst1q_f64(r_ptr.add(off + 6), r3);
         }
 
         // ---- 1x cleanup: 1 complex f64 per step ----
@@ -204,8 +203,10 @@ pub(super) unsafe fn multiply_add_elements_neon_f64(
             let a_re0 = vdupq_laneq_f64::<0>(a0);
             let a_im0 = vdupq_laneq_f64::<1>(a0);
             let b_sw0 = vmulq_f64(vextq_f64::<1>(b0, b0), sign);
-            let prod0 = vfmaq_f64(vmulq_f64(a_re0, b0), a_im0, b_sw0);
-            vst1q_f64(r_ptr.add(off), vaddq_f64(acc0, prod0));
+            vst1q_f64(
+                r_ptr.add(off),
+                vfmaq_f64(vfmaq_f64(acc0, a_re0, b0), a_im0, b_sw0),
+            );
         }
         // No scalar tail: each NEON register handles exactly 1 Complex<f64>.
     }
@@ -352,16 +353,16 @@ pub(super) unsafe fn multiply_add_elements_neon_f32(
             let b_sw2 = vmulq_f32(vrev64q_f32(b2), sign);
             let b_sw3 = vmulq_f32(vrev64q_f32(b3), sign);
 
-            // Compute product a*b, then add accumulator.
-            let prod0 = vfmaq_f32(vmulq_f32(a_re0, b0), a_im0, b_sw0);
-            let prod1 = vfmaq_f32(vmulq_f32(a_re1, b1), a_im1, b_sw1);
-            let prod2 = vfmaq_f32(vmulq_f32(a_re2, b2), a_im2, b_sw2);
-            let prod3 = vfmaq_f32(vmulq_f32(a_re3, b3), a_im3, b_sw3);
+            // Accumulate both halves of the product straight into acc.
+            let r0 = vfmaq_f32(vfmaq_f32(acc0, a_re0, b0), a_im0, b_sw0);
+            let r1 = vfmaq_f32(vfmaq_f32(acc1, a_re1, b1), a_im1, b_sw1);
+            let r2 = vfmaq_f32(vfmaq_f32(acc2, a_re2, b2), a_im2, b_sw2);
+            let r3 = vfmaq_f32(vfmaq_f32(acc3, a_re3, b3), a_im3, b_sw3);
 
-            vst1q_f32(r_ptr.add(off), vaddq_f32(acc0, prod0));
-            vst1q_f32(r_ptr.add(off + 4), vaddq_f32(acc1, prod1));
-            vst1q_f32(r_ptr.add(off + 8), vaddq_f32(acc2, prod2));
-            vst1q_f32(r_ptr.add(off + 12), vaddq_f32(acc3, prod3));
+            vst1q_f32(r_ptr.add(off), r0);
+            vst1q_f32(r_ptr.add(off + 4), r1);
+            vst1q_f32(r_ptr.add(off + 8), r2);
+            vst1q_f32(r_ptr.add(off + 12), r3);
         }
 
         // ---- 1x cleanup: 2 complex f32 per step ----
@@ -375,8 +376,10 @@ pub(super) unsafe fn multiply_add_elements_neon_f32(
             let a_re0 = vtrn1q_f32(a0, a0);
             let a_im0 = vtrn2q_f32(a0, a0);
             let b_sw0 = vmulq_f32(vrev64q_f32(b0), sign);
-            let prod0 = vfmaq_f32(vmulq_f32(a_re0, b0), a_im0, b_sw0);
-            vst1q_f32(r_ptr.add(off), vaddq_f32(acc0, prod0));
+            vst1q_f32(
+                r_ptr.add(off),
+                vfmaq_f32(vfmaq_f32(acc0, a_re0, b0), a_im0, b_sw0),
+            );
         }
 
         // ---- Scalar tail: 0-1 remaining Complex<f32> ----
