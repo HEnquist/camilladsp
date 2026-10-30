@@ -20,6 +20,7 @@ Changes:
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.
 - Faster delay filtering and spectrum buffering.
+- Reduce CPU use when calculating RMS and peak levels.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.
