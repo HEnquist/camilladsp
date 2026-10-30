@@ -19,7 +19,7 @@ use num_complex::Complex;
 // AVX + FMA SIMD kernels for complex multiply/multiply-add.
 // result.re = a.re*b.re - a.im*b.im, result.im = a.re*b.im + a.im*b.re
 // Uses _mm256_fmaddsub for the sign pattern; 4xYMM unrolled + 1xYMM cleanup + scalar tail.
-// multiply-add computes the product via fmaddsub, then adds the accumulator with _mm256_add.
+// multiply-add fuses the accumulator in with a second fmaddsub in place of the _mm256_mul.
 
 // Both precisions are always compiled, regardless of which one `CamillaFloat` is set
 // to. The unused one is dead code that the linker drops, and in exchange both
@@ -150,17 +150,16 @@ pub(super) unsafe fn multiply_add_elements_avx_fma_f64(
             let (b_sw0, b_sw1) = (_mm256_permute_pd(b0, 0x5), _mm256_permute_pd(b1, 0x5));
             let (b_sw2, b_sw3) = (_mm256_permute_pd(b2, 0x5), _mm256_permute_pd(b3, 0x5));
 
-            // Compute product a*b, then add accumulator.
-            // Note: _mm256_add_pd cannot be fused into fmaddsub (alternating sign pattern ≠ plain add).
-            let prod0 = _mm256_fmaddsub_pd(a_re0, b0, _mm256_mul_pd(a_im0, b_sw0));
-            let prod1 = _mm256_fmaddsub_pd(a_re1, b1, _mm256_mul_pd(a_im1, b_sw1));
-            let prod2 = _mm256_fmaddsub_pd(a_re2, b2, _mm256_mul_pd(a_im2, b_sw2));
-            let prod3 = _mm256_fmaddsub_pd(a_re3, b3, _mm256_mul_pd(a_im3, b_sw3));
+            // The inner fmaddsub negates acc.re, and the outer one negates it back.
+            let r0 = _mm256_fmaddsub_pd(a_re0, b0, _mm256_fmaddsub_pd(a_im0, b_sw0, acc0));
+            let r1 = _mm256_fmaddsub_pd(a_re1, b1, _mm256_fmaddsub_pd(a_im1, b_sw1, acc1));
+            let r2 = _mm256_fmaddsub_pd(a_re2, b2, _mm256_fmaddsub_pd(a_im2, b_sw2, acc2));
+            let r3 = _mm256_fmaddsub_pd(a_re3, b3, _mm256_fmaddsub_pd(a_im3, b_sw3, acc3));
 
-            _mm256_storeu_pd(r_ptr.add(off), _mm256_add_pd(acc0, prod0));
-            _mm256_storeu_pd(r_ptr.add(off + 4), _mm256_add_pd(acc1, prod1));
-            _mm256_storeu_pd(r_ptr.add(off + 8), _mm256_add_pd(acc2, prod2));
-            _mm256_storeu_pd(r_ptr.add(off + 12), _mm256_add_pd(acc3, prod3));
+            _mm256_storeu_pd(r_ptr.add(off), r0);
+            _mm256_storeu_pd(r_ptr.add(off + 4), r1);
+            _mm256_storeu_pd(r_ptr.add(off + 8), r2);
+            _mm256_storeu_pd(r_ptr.add(off + 12), r3);
         }
 
         // ---- 1xYMM cleanup: 2 complex f64 per step ----
@@ -174,8 +173,10 @@ pub(super) unsafe fn multiply_add_elements_avx_fma_f64(
             let a_re0 = _mm256_movedup_pd(a0);
             let a_im0 = _mm256_permute_pd(a0, 0xF); // 0xF=0b1111: select high double per lane -> broadcast im
             let b_sw0 = _mm256_permute_pd(b0, 0x5);
-            let prod0 = _mm256_fmaddsub_pd(a_re0, b0, _mm256_mul_pd(a_im0, b_sw0));
-            _mm256_storeu_pd(r_ptr.add(off), _mm256_add_pd(acc0, prod0));
+            _mm256_storeu_pd(
+                r_ptr.add(off),
+                _mm256_fmaddsub_pd(a_re0, b0, _mm256_fmaddsub_pd(a_im0, b_sw0, acc0)),
+            );
         }
 
         // ---- Scalar tail: 0-1 remaining Complex<f64> ----
@@ -308,17 +309,16 @@ pub(super) unsafe fn multiply_add_elements_avx_fma_f32(
             let (b_sw0, b_sw1) = (_mm256_permute_ps(b0, 0xB1), _mm256_permute_ps(b1, 0xB1));
             let (b_sw2, b_sw3) = (_mm256_permute_ps(b2, 0xB1), _mm256_permute_ps(b3, 0xB1));
 
-            // Compute product a*b, then add accumulator.
-            // Note: _mm256_add_ps cannot be fused into fmaddsub (alternating sign pattern ≠ plain add).
-            let prod0 = _mm256_fmaddsub_ps(a_re0, b0, _mm256_mul_ps(a_im0, b_sw0));
-            let prod1 = _mm256_fmaddsub_ps(a_re1, b1, _mm256_mul_ps(a_im1, b_sw1));
-            let prod2 = _mm256_fmaddsub_ps(a_re2, b2, _mm256_mul_ps(a_im2, b_sw2));
-            let prod3 = _mm256_fmaddsub_ps(a_re3, b3, _mm256_mul_ps(a_im3, b_sw3));
+            // The inner fmaddsub negates acc.re, and the outer one negates it back.
+            let r0 = _mm256_fmaddsub_ps(a_re0, b0, _mm256_fmaddsub_ps(a_im0, b_sw0, acc0));
+            let r1 = _mm256_fmaddsub_ps(a_re1, b1, _mm256_fmaddsub_ps(a_im1, b_sw1, acc1));
+            let r2 = _mm256_fmaddsub_ps(a_re2, b2, _mm256_fmaddsub_ps(a_im2, b_sw2, acc2));
+            let r3 = _mm256_fmaddsub_ps(a_re3, b3, _mm256_fmaddsub_ps(a_im3, b_sw3, acc3));
 
-            _mm256_storeu_ps(r_ptr.add(off), _mm256_add_ps(acc0, prod0));
-            _mm256_storeu_ps(r_ptr.add(off + 8), _mm256_add_ps(acc1, prod1));
-            _mm256_storeu_ps(r_ptr.add(off + 16), _mm256_add_ps(acc2, prod2));
-            _mm256_storeu_ps(r_ptr.add(off + 24), _mm256_add_ps(acc3, prod3));
+            _mm256_storeu_ps(r_ptr.add(off), r0);
+            _mm256_storeu_ps(r_ptr.add(off + 8), r1);
+            _mm256_storeu_ps(r_ptr.add(off + 16), r2);
+            _mm256_storeu_ps(r_ptr.add(off + 24), r3);
         }
 
         // ---- 1xYMM cleanup: 4 complex f32 per step ----
@@ -332,8 +332,10 @@ pub(super) unsafe fn multiply_add_elements_avx_fma_f32(
             let a_re0 = _mm256_moveldup_ps(a0);
             let a_im0 = _mm256_movehdup_ps(a0);
             let b_sw0 = _mm256_permute_ps(b0, 0xB1);
-            let prod0 = _mm256_fmaddsub_ps(a_re0, b0, _mm256_mul_ps(a_im0, b_sw0));
-            _mm256_storeu_ps(r_ptr.add(off), _mm256_add_ps(acc0, prod0));
+            _mm256_storeu_ps(
+                r_ptr.add(off),
+                _mm256_fmaddsub_ps(a_re0, b0, _mm256_fmaddsub_ps(a_im0, b_sw0, acc0)),
+            );
         }
 
         // ---- Scalar tail: 0-3 remaining Complex<f32> ----

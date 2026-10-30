@@ -76,6 +76,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   helps most with `multithreaded` enabled, where the copies would otherwise compete for memory
   bandwidth at the same moment. Without it the gain is smaller, and limited to filters large
   enough to crowd the cache but small enough that a single copy still fits.
+- The NEON and AVX convolution kernels fold the accumulation into their fused multiply-adds,
+  instead of adding each product to the sum separately. About 5% faster with long filters on
+  aarch64. Results can differ from 4.1.3 in the last few bits.
 - Config validation already reads and checks every coefficient file, so what it read is now kept
   and reused when the config is applied, rather than being thrown away and read a second time.
   Applying a config with large FIR filters no longer reads or transforms anything on the processing
