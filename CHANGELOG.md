@@ -24,6 +24,7 @@ Changes:
 - Reduce CPU use when finding input sample levels.
 - Reduce CPU use for dithering and noise shaping.
 - Reduce lookahead limiter CPU use with fewer release calculations and contiguous history reads.
+- Reuse convolution work buffers and avoid per-partition history index calculations.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.
