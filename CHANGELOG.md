@@ -26,6 +26,7 @@ Changes:
 - Reduce lookahead limiter CPU use with fewer release calculations and contiguous history reads.
 - Reuse convolution work buffers and avoid per-partition history index calculations.
 - Combine adjacent biquad filter steps on the same channels.
+- Skip unity gain processing and reuse settled fader gains.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.

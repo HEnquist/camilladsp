@@ -90,6 +90,7 @@ impl Volume {
     /// Apply the gain to all channels of `chunk`.
     pub fn process_chunk(&mut self, chunk: &mut AudioChunk) {
         match self.levels.gain(self.fader) {
+            FaderGain::Constant(1.0) => {}
             FaderGain::Constant(gain) => {
                 xtrace!("Vol: applying linear gain {}", gain);
                 for waveform in chunk.waveforms.iter_mut() {
@@ -117,6 +118,7 @@ impl Filter for Volume {
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
         match self.levels.gain(self.fader) {
+            FaderGain::Constant(1.0) => {}
             FaderGain::Constant(gain) => {
                 for item in waveform.iter_mut() {
                     *item *= gain;
@@ -173,8 +175,10 @@ impl Filter for Gain {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        for item in waveform.iter_mut() {
-            *item *= self.gain;
+        if self.gain != 1.0 {
+            for item in waveform.iter_mut() {
+                *item *= self.gain;
+            }
         }
     }
 
@@ -577,6 +581,73 @@ mod tests {
         let mut chunk1 = vec![1.0; VOL_CHUNKSIZE];
         filter.process(&mut chunk1);
         assert!(chunk1.iter().all(|s| (s - gain_at(-20.0)).abs() < 1e-6));
+    }
+
+    #[test]
+    fn gain_and_volume_follow_changes_to_and_from_unity() {
+        use crate::ToCamillaFloat;
+        use crate::audiochunk::AudioChunk;
+        use crate::config::{Filter, GainParameters, finite};
+
+        let params = Arc::new(ProcessingParameters::default());
+        let mut volume = make_volume(&params, 0.0);
+        let mut gain = Gain::new("gain", 0.0, false, false, false);
+        let source: Vec<_> = (0..VOL_CHUNKSIZE)
+            .map(|i| (0.7 * (i as f64 * 0.13).sin()).to_camilla_float())
+            .collect();
+        for (level, mute) in [
+            (0.0, false),
+            (-20.0, false),
+            (0.0, false),
+            (0.0, true),
+            (0.0, false),
+        ] {
+            params.set_target_volume(0, level);
+            params.set_mute(0, mute);
+            volume.faders.prepare_chunk();
+            gain.update_parameters(Filter::Gain {
+                description: None,
+                parameters: GainParameters {
+                    gain: finite!(level as f64),
+                    inverted: None,
+                    mute: Some(mute),
+                    scale: None,
+                },
+            });
+            let factor = if mute {
+                0.0
+            } else {
+                (10.0_f64.powf(level as f64 / 20.0)).to_camilla_float()
+            };
+            let expected: Vec<_> = source.iter().map(|sample| sample * factor).collect();
+            for filter in [&mut gain as &mut dyn super::Filter, &mut volume.filter] {
+                let mut waveform = source.clone();
+                filter.process_waveform(&mut waveform);
+                assert!(
+                    waveform
+                        .iter()
+                        .zip(&expected)
+                        .all(|(sample, expected)| sample.to_bits() == expected.to_bits())
+                );
+            }
+            let mut chunk = AudioChunk::new(
+                vec![source.clone(), Vec::new(), source.clone()],
+                1.0,
+                -1.0,
+                VOL_CHUNKSIZE,
+                VOL_CHUNKSIZE,
+            );
+            volume.filter.process_chunk(&mut chunk);
+            assert!(chunk.waveforms[1].is_empty());
+            for channel in [0, 2] {
+                assert!(
+                    chunk.waveforms[channel]
+                        .iter()
+                        .zip(&expected)
+                        .all(|(sample, expected)| sample.to_bits() == expected.to_bits())
+                );
+            }
+        }
     }
 
     /// A mute toggled while paused is applied directly on resume, like a volume change.
