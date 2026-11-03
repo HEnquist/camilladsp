@@ -224,14 +224,13 @@ fn biquad_runs(
     runs
 }
 
-/// A run of biquad-based filters from one config filter step, compiled into
-/// one cascade per channel.
+/// Adjacent biquad-based filters on the same channels, compiled into one
+/// cascade per channel.
 ///
 /// A config filter step applies one `names` list to every channel it reaches,
 /// so every channel here has the same shape and the same number of stages. That
-/// rectangle is what lets the kernel take several channels at once, and it is
-/// why compiling happens per config step rather than after the steps have been
-/// merged.
+/// rectangle is what lets the kernel take several channels at once. Adjacent
+/// runs can share a cascade when their channel lists match.
 ///
 /// The cascade runs across the filter boundaries inside the run, so eight
 /// one-biquad filters reach the same depth as one eight stage combo.
@@ -490,12 +489,24 @@ impl Pipeline {
                         for run in biquad_runs(&step.names, filter_configs) {
                             let names = &step.names[run.names.clone()];
                             if run.biquads {
-                                steps.push(PipelineStep::BiquadStep(BiquadStep::from_config(
+                                let mut biquads = BiquadStep::from_config(
                                     &channels,
                                     names,
                                     filter_configs,
                                     conf.devices.samplerate(),
-                                )));
+                                );
+                                if let Some(PipelineStep::BiquadStep(previous)) = steps.last_mut()
+                                    && previous.channel_of == biquads.channel_of
+                                {
+                                    for (cascade, next) in
+                                        previous.cascades.iter_mut().zip(biquads.cascades)
+                                    {
+                                        cascade.extend(next);
+                                    }
+                                    previous.sections.append(&mut biquads.sections);
+                                } else {
+                                    steps.push(PipelineStep::BiquadStep(biquads));
+                                }
                                 continue;
                             }
                             for &channel in &channels {
@@ -899,6 +910,80 @@ pipeline:
             }
         }
         assert_bit_equal(&out.waveforms, &want, "compiled against sequential");
+    }
+
+    #[test]
+    fn adjacent_biquad_steps_preserve_audio_and_reload() {
+        const FRAMES: usize = 256;
+        let mut split_conf = config_with(
+            "pipeline:
+  - type: Filter
+    channels: [2, 0]
+    names: [bq_a, combo]
+  - type: Filter
+    channels: [2, 0]
+    names: [geq]
+  - type: Filter
+    channels: [2, 0]
+    names: [bq_b, bq_c]
+",
+            3,
+            FRAMES,
+        );
+        let mut joined_conf = config_with(
+            "pipeline:
+  - type: Filter
+    channels: [2, 0]
+    names: [bq_a, combo, geq, bq_b, bq_c]
+",
+            3,
+            FRAMES,
+        );
+        let mut split = Pipeline::from_config(
+            split_conf.clone(),
+            Arc::new(ProcessingParameters::default()),
+            None,
+            &mut ConvCoeffCache::new(),
+        );
+        let mut joined = Pipeline::from_config(
+            joined_conf.clone(),
+            Arc::new(ProcessingParameters::default()),
+            None,
+            &mut ConvCoeffCache::new(),
+        );
+        assert_eq!(split.steps.len(), 1);
+        for block in 0..6 {
+            if block == 3 {
+                let updated: crate::config::Filter = yaml_serde::from_str(
+                    "type: BiquadCombo
+parameters:
+  type: GraphicEqualizer
+  gains: [1.0, 2.0, -2.0, -1.0, 3.0]
+",
+                )
+                .unwrap();
+                for (conf, pipeline) in [
+                    (&mut split_conf, &mut split),
+                    (&mut joined_conf, &mut joined),
+                ] {
+                    conf.filters
+                        .as_mut()
+                        .unwrap()
+                        .insert("geq".to_string(), updated.clone());
+                    pipeline.update_parameters(
+                        conf.clone(),
+                        &["geq".to_string()],
+                        &[],
+                        &mut ConvCoeffCache::new(),
+                    );
+                }
+            }
+            let waves: Vec<_> = (0..3).map(|ch| test_signal(FRAMES, ch + block)).collect();
+            let expected =
+                joined.process_chunk(AudioChunk::new(waves.clone(), 1.0, -1.0, FRAMES, FRAMES));
+            let actual = split.process_chunk(AudioChunk::new(waves, 1.0, -1.0, FRAMES, FRAMES));
+            assert_bit_equal(&actual.waveforms, &expected.waveforms, "adjacent steps");
+        }
     }
 
     /// A channel the capture step does not use arrives as an empty waveform.
