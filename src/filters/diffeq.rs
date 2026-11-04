@@ -29,9 +29,9 @@ pub use camilladsp_schema::filters::diffeq::validate_config;
 pub struct DiffEq {
     /// Filter state, one value per filter order.
     s: Vec<CamillaFloat>,
-    /// Feedback coefficients, scaled so that a0 is unity, zero padded to the length of b.
+    /// Feedback coefficients, normalized and zero padded, or empty when feedback can be skipped.
     a: Vec<CamillaFloat>,
-    /// Feedforward coefficients, scaled by the same factor as a, zero padded to the length of a.
+    /// Feedforward coefficients, normalized and zero padded to one more than the filter order.
     b: Vec<CamillaFloat>,
     pub name: String,
 }
@@ -52,14 +52,18 @@ impl DiffEq {
             b_scaled.iter_mut().for_each(|v| *v /= a0);
         }
 
-        // Zero pad the shorter set, so that both have one coefficient per state value.
+        // Preserve the filter order even when all feedback coefficients are zero.
         let len = a_scaled.len().max(b_scaled.len());
-        a_scaled.resize(len, 0.0);
         b_scaled.resize(len, 0.0);
 
         // Coefficients arrive from the config in f64 and cross into the
         // processing precision once, here.
-        let a: Vec<CamillaFloat> = a_scaled.into_iter().map(|v| v.to_camilla_float()).collect();
+        let a = if len > 9 || a_scaled[1..].iter().any(|&value| value != 0.0) {
+            a_scaled.resize(len, 0.0);
+            a_scaled.into_iter().map(|v| v.to_camilla_float()).collect()
+        } else {
+            Vec::new()
+        };
 
         let b: Vec<CamillaFloat> = b_scaled.into_iter().map(|v| v.to_camilla_float()).collect();
 
@@ -80,11 +84,16 @@ impl DiffEq {
     /// Process a block of samples, with the filter order known at compile time.
     /// The state and the coefficients then stay in registers for the whole block.
     #[inline(always)]
-    fn process_block<const ORDER: usize>(&mut self, waveform: &mut [CamillaFloat]) {
+    fn process_block<const ORDER: usize, const FEEDBACK: bool>(
+        &mut self,
+        waveform: &mut [CamillaFloat],
+    ) {
         let mut s = [0.0; ORDER];
         s.copy_from_slice(&self.s);
         let mut a = [0.0; ORDER];
-        a.copy_from_slice(&self.a[1..=ORDER]);
+        if FEEDBACK {
+            a.copy_from_slice(&self.a[1..=ORDER]);
+        }
         let mut b = [0.0; ORDER];
         b.copy_from_slice(&self.b[1..=ORDER]);
         let b0 = self.b[0];
@@ -92,9 +101,13 @@ impl DiffEq {
             let input = *item;
             let out = b0 * input + s[0];
             for n in 0..ORDER - 1 {
-                s[n] = b[n] * input - a[n] * out + s[n + 1];
+                let value = b[n] * input;
+                let feedback = if FEEDBACK { a[n] * out } else { 0.0 };
+                s[n] = value - feedback + s[n + 1];
             }
-            s[ORDER - 1] = b[ORDER - 1] * input - a[ORDER - 1] * out;
+            let value = b[ORDER - 1] * input;
+            let feedback = if FEEDBACK { a[ORDER - 1] * out } else { 0.0 };
+            s[ORDER - 1] = value - feedback;
             *item = out;
         }
         self.s.copy_from_slice(&s);
@@ -119,6 +132,26 @@ impl DiffEq {
         }
     }
 
+    // Keep FIR and IIR register allocation independent.
+    #[inline(never)]
+    fn process_block_dispatch<const FEEDBACK: bool>(&mut self, waveform: &mut [CamillaFloat]) {
+        // The filter is a direct form 2 transposed structure, the same form the
+        // Biquad filter uses, generalized to any order. The low orders get a
+        // version with the order known at compile time, which is where nearly
+        // all real filters land.
+        match self.s.len() {
+            1 => self.process_block::<1, FEEDBACK>(waveform),
+            2 => self.process_block::<2, FEEDBACK>(waveform),
+            3 => self.process_block::<3, FEEDBACK>(waveform),
+            4 => self.process_block::<4, FEEDBACK>(waveform),
+            5 => self.process_block::<5, FEEDBACK>(waveform),
+            6 => self.process_block::<6, FEEDBACK>(waveform),
+            7 => self.process_block::<7, FEEDBACK>(waveform),
+            8 => self.process_block::<8, FEEDBACK>(waveform),
+            _ => self.process_block_any_order(waveform),
+        }
+    }
+
     /// Flush stored subnormal numbers to zero.
     fn flush_subnormals(&mut self) {
         for (n, s) in self.s.iter_mut().enumerate() {
@@ -139,25 +172,15 @@ impl Filter for DiffEq {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        // The filter is a direct form 2 transposed structure, the same form the
-        // Biquad filter uses, generalized to any order. The low orders get a
-        // version with the order known at compile time, which is where nearly
-        // all real filters land.
-        match self.s.len() {
-            0 => {
-                // No state, this is a plain gain.
-                let b0 = self.b[0];
-                waveform.iter_mut().for_each(|item| *item *= b0);
-            }
-            1 => self.process_block::<1>(waveform),
-            2 => self.process_block::<2>(waveform),
-            3 => self.process_block::<3>(waveform),
-            4 => self.process_block::<4>(waveform),
-            5 => self.process_block::<5>(waveform),
-            6 => self.process_block::<6>(waveform),
-            7 => self.process_block::<7>(waveform),
-            8 => self.process_block::<8>(waveform),
-            _ => self.process_block_any_order(waveform),
+        if self.s.is_empty() {
+            let b0 = self.b[0];
+            waveform.iter_mut().for_each(|item| *item *= b0);
+            return;
+        }
+        if self.a.is_empty() {
+            self.process_block_dispatch::<false>(waveform);
+        } else {
+            self.process_block_dispatch::<true>(waveform);
         }
         self.flush_subnormals();
     }
@@ -346,6 +369,64 @@ mod tests {
         config::DiffEqParameters {
             a: Some(a.into_iter().map(|value| finite!(value)).collect()),
             b: Some(b.into_iter().map(|value| finite!(value)).collect()),
+        }
+    }
+
+    #[test]
+    fn fir_matches_convolution_across_chunks_and_updates() {
+        use crate::ToCamillaFloat;
+
+        for taps in (1..=10).chain([16, 33]) {
+            let coefficients: Vec<_> = (0..taps)
+                .map(|i| (i as f64 * 0.23).cos() / taps as f64)
+                .collect();
+            for scale in [1.0, 2.0] {
+                let mut filter = DiffEq::from_config("test", parameters(vec![1.0], vec![1.0]));
+                let a = if scale == 1.0 {
+                    Vec::new()
+                } else {
+                    let mut a = vec![0.0; taps + 3];
+                    a[0] = scale;
+                    a
+                };
+                let fir = config::Filter::DiffEq {
+                    description: None,
+                    parameters: parameters(a, coefficients.iter().map(|v| v * scale).collect()),
+                };
+                for _ in 0..2 {
+                    filter.update_parameters(fir.clone());
+                    let mut input = Vec::new();
+                    for (block, frames) in [1, 7, 64, 257, 7, 64].into_iter().enumerate() {
+                        let start = input.len();
+                        let mut wave: Vec<_> = (start..start + frames)
+                            .map(|i| {
+                                if block < 3 {
+                                    (0.7 * (i as f64 * 0.13 + 0.31).sin()).to_camilla_float()
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .collect();
+                        input.extend_from_slice(&wave);
+                        let expected: Vec<_> = (start..start + frames)
+                            .map(|n| {
+                                (0..taps.min(n + 1)).rev().fold(0.0, |sum, k| {
+                                    coefficients[k].to_camilla_float() * input[n - k] + sum
+                                })
+                            })
+                            .collect();
+                        filter.process_waveform(&mut wave);
+                        assert_eq!(wave, expected, "taps {taps}, scale {scale}, block {block}");
+                    }
+                    filter.update_parameters(config::Filter::DiffEq {
+                        description: None,
+                        parameters: parameters(vec![1.0, -0.5], vec![0.5]),
+                    });
+                    let mut impulse = [1.0, 0.0, 0.0, 0.0];
+                    filter.process_waveform(&mut impulse);
+                    assert_eq!(impulse, [0.5, 0.25, 0.125, 0.0625]);
+                }
+            }
         }
     }
 
