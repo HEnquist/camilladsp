@@ -83,21 +83,40 @@ impl Mixer {
     pub fn process_chunk(&mut self, input: AudioChunk) -> AudioChunk {
         let mut waveforms = container_from_stash(self.channels_out);
         for out_chan in 0..self.channels_out {
-            let v = vec_from_stash(input.frames);
-            waveforms.push(v);
-            for source in 0..self.mapping[out_chan].len() {
-                let source_chan = self.mapping[out_chan][source].channel;
-                if !input.waveforms[source_chan].is_empty() {
-                    let gain = self.mapping[out_chan][source].gain;
-                    for (out_val, in_val) in waveforms[out_chan]
-                        .iter_mut()
-                        .zip(input.waveforms[source_chan].iter())
-                        .take(input.frames)
-                    {
-                        *out_val += gain * in_val;
+            let mut output = vec_from_stash(input.frames);
+            for sources in self.mapping[out_chan].chunks(2) {
+                if let [a, b] = sources {
+                    let input_a = &input.waveforms[a.channel];
+                    let input_b = &input.waveforms[b.channel];
+                    if input_a.len() == input_b.len() {
+                        if input_a.is_empty() {
+                            continue;
+                        }
+                        let gain_a = a.gain;
+                        let gain_b = b.gain;
+                        for ((out, x), y) in output
+                            .iter_mut()
+                            .zip(input_a)
+                            .zip(input_b)
+                            .take(input.frames)
+                        {
+                            *out = (*out + gain_a * x) + gain_b * y;
+                        }
+                        continue;
+                    }
+                }
+                for source in sources {
+                    let input_waveform = &input.waveforms[source.channel];
+                    if input_waveform.is_empty() {
+                        continue;
+                    }
+                    let gain = source.gain;
+                    for (out, sample) in output.iter_mut().zip(input_waveform).take(input.frames) {
+                        *out += gain * sample;
                     }
                 }
             }
+            waveforms.push(output);
         }
 
         let new_chunk = AudioChunk::from(&input, waveforms);
@@ -108,11 +127,65 @@ impl Mixer {
 
 #[cfg(test)]
 mod tests {
+    use crate::audiochunk::AudioChunk;
     use crate::config::finite;
     use crate::config::{Mixer, MixerChannels, MixerMapping, MixerSource};
     use crate::mixer;
     use crate::mixer::used_input_channels;
     use std::num::NonZeroUsize;
+
+    #[test]
+    fn mix_channels_when_a_source_disappears_and_returns() {
+        let conf = yaml_serde::from_str(
+            "channels: {in: 3, out: 4}
+mapping:
+  - dest: 0
+    sources:
+      - {channel: 0, gain: 0.5, scale: linear}
+      - {channel: 1, inverted: true}
+      - {channel: 2, gain: 0.25, scale: linear}
+  - dest: 1
+    sources:
+      - {channel: 2, gain: 0.5, scale: linear}
+      - {channel: 0, gain: 0.5, scale: linear}
+  - dest: 2
+    sources: [{channel: 1, gain: 0.5, scale: linear}]
+",
+        )
+        .unwrap();
+        let mut mix = mixer::Mixer::from_config("mix".to_owned(), conf);
+        for (frames, missing) in [(64, false), (65, true), (64, false)] {
+            let input = AudioChunk::new(
+                vec![
+                    vec![0.5; frames],
+                    vec![-0.25; frames],
+                    if missing {
+                        Vec::new()
+                    } else {
+                        vec![1.0; frames]
+                    },
+                ],
+                1.0,
+                -1.0,
+                frames,
+                frames - 1,
+            );
+            let timestamp = input.timestamp;
+            let output = mix.process_chunk(input);
+            assert_eq!((output.frames, output.valid_frames), (frames, frames - 1));
+            assert_eq!(output.timestamp, timestamp);
+            assert_eq!(
+                output.waveforms,
+                vec![
+                    vec![if missing { 0.5 } else { 0.75 }; frames],
+                    vec![if missing { 0.25 } else { 0.75 }; frames],
+                    vec![-0.125; frames],
+                    vec![0.0; frames],
+                ]
+            );
+            crate::utils::stash::recycle_chunk(output);
+        }
+    }
 
     #[test]
     fn check_all_used() {
