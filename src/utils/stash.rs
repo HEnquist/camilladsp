@@ -70,7 +70,7 @@ fn container_from_queue(
                 vector.capacity(),
                 capacity
             );
-            vector.reserve_exact(capacity - vector.capacity());
+            vector.reserve_exact(capacity);
         }
         vector
     } else {
@@ -229,9 +229,9 @@ mod tests {
 
         recycle_container_to_queue(&container_queue, &vector_queue, container);
 
-        let reused = container_from_queue(&container_queue, 2);
+        let reused = container_from_queue(&container_queue, 3);
         assert!(reused.is_empty());
-        assert!(reused.capacity() >= 2);
+        assert!(reused.capacity() >= 3);
 
         let first = vec_from_queue(&vector_queue, 2);
         let second = vec_from_queue(&vector_queue, 1);
