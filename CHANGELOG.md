@@ -31,6 +31,7 @@ Changes:
 - Remove unused mutexes and wakeups when publishing capture and playback levels.
 - Reduce buffer passes when mixing multiple input channels.
 - Reserve enough channel slots when growing recycled audio buffers.
+- Reduce compressor CPU use for blocks below the compression threshold.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.
