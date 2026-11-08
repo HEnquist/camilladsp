@@ -287,6 +287,28 @@ impl Delay {
         }
         value
     }
+
+    pub(crate) fn flush_subnormals(&mut self, frames: usize) {
+        let (before, after) = self.queue.split_at_mut(self.index);
+        // Only entries written during this chunk can contain new subnormals.
+        let first = before.len().saturating_sub(frames);
+        let second = after
+            .len()
+            .saturating_sub(frames.saturating_sub(before.len()));
+        for samples in [&mut before[first..], &mut after[second..]] {
+            for value in samples {
+                // Zero and subnormal values share an all-zero exponent.
+                *value = if value.to_bits() & CamillaFloat::INFINITY.to_bits() == 0 {
+                    CamillaFloat::copysign(0.0, *value)
+                } else {
+                    *value
+                };
+            }
+        }
+        if let Some(bq) = &mut self.biquad {
+            bq.flush_subnormals();
+        }
+    }
 }
 
 impl Filter for Delay {
