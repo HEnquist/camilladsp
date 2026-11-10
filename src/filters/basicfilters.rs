@@ -292,6 +292,19 @@ impl Delay {
         }
         value
     }
+
+    pub(crate) fn flush_subnormals(&mut self) {
+        if let Some(queue) = &mut self.queue {
+            for value in queue.iter_mut() {
+                if value.is_subnormal() {
+                    *value = 0.0;
+                }
+            }
+        }
+        if let Some(bq) = &mut self.biquad {
+            bq.flush_subnormals();
+        }
+    }
 }
 
 impl Filter for Delay {

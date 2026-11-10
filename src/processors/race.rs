@@ -129,17 +129,30 @@ impl Processor for RACE {
         if channel_a.is_empty() || channel_b.is_empty() {
             return;
         }
+        let mut feedback_a = self.feedback_a;
+        let mut feedback_b = self.feedback_b;
         for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
-            // todo math
-            let added_a = *value_a + self.feedback_b;
-            let added_b = *value_b + self.feedback_a;
-            self.feedback_a = self.delay_a.process_single(added_a);
-            self.feedback_b = self.delay_b.process_single(added_b);
-            self.feedback_a = self.gain.process_single(self.feedback_a);
-            self.feedback_b = self.gain.process_single(self.feedback_b);
+            let added_a = *value_a + feedback_b;
+            let added_b = *value_b + feedback_a;
+            feedback_a = self.delay_a.process_single(added_a);
+            feedback_b = self.delay_b.process_single(added_b);
+            feedback_a = self.gain.process_single(feedback_a);
+            feedback_b = self.gain.process_single(feedback_b);
             *value_a = added_a;
             *value_b = added_b;
         }
+        self.feedback_a = if feedback_a.is_subnormal() {
+            0.0
+        } else {
+            feedback_a
+        };
+        self.feedback_b = if feedback_b.is_subnormal() {
+            0.0
+        } else {
+            feedback_b
+        };
+        self.delay_a.flush_subnormals();
+        self.delay_b.flush_subnormals();
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -182,6 +195,58 @@ impl Processor for RACE {
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RACE;
+    use crate::audiochunk::AudioChunk;
+    use crate::config::{DelayUnit, RACEParameters, finite};
+    use crate::processors::Processor;
+
+    #[test]
+    fn impulse_decay_reaches_silence() {
+        for (frames, delay, subsample) in [
+            (128, 5.0, false),
+            (128, 4.8, true),
+            (16, 65.0, false),
+            (16, 65.8, true),
+        ] {
+            let mut race = RACE::from_config(
+                "race",
+                RACEParameters {
+                    channels: 4,
+                    channel_a: 3,
+                    channel_b: 1,
+                    delay: finite!(delay),
+                    delay_unit: DelayUnit::Samples,
+                    subsample_delay: Some(subsample),
+                    attenuation: finite!(3.0),
+                },
+                48000,
+            );
+            let mut chunk = AudioChunk::new(vec![vec![0.0; frames]; 4], 0.5, -0.25, frames, frames);
+            chunk.waveforms[1][0] = 0.5;
+            chunk.waveforms[3][0] = -0.25;
+            race.process_chunk(&mut chunk);
+            assert_eq!(chunk.waveforms[1][0], 0.5);
+            assert_eq!(chunk.waveforms[3][0], -0.25);
+            for _ in 0..(4096 * delay.ceil() as usize).div_ceil(frames) {
+                chunk.waveforms[1].fill(0.0);
+                chunk.waveforms[3].fill(0.0);
+                race.process_chunk(&mut chunk);
+            }
+            assert!(
+                chunk
+                    .waveforms
+                    .iter()
+                    .flatten()
+                    .all(|&sample| sample == 0.0)
+            );
+            assert_eq!(race.feedback_a, 0.0);
+            assert_eq!(race.feedback_b, 0.0);
         }
     }
 }

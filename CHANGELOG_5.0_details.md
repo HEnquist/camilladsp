@@ -161,6 +161,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   The new descriptions are still stored and returned by `GetConfig`.
 
 ### DSP
+- RACE clears subnormal feedback and delay state after each chunk, so an impulse that decays
+  to silence no longer leaves it spending CPU time on inaudibly small values.
+- Growing a recycled channel container now reserves the requested capacity. Since 4.0, it
+  subtracted the old capacity even though `reserve_exact` counts from the empty container's
+  length, allowing allocation while processing a chunk.
 - The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
   coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong
   gain compared to the documented transfer function.
