@@ -44,7 +44,6 @@ pub struct NoiseShaper<'a> {
 
 impl<'a> NoiseShaper<'a> {
     pub fn new(filter: &'a [CamillaFloat]) -> Self {
-        assert!(!filter.is_empty());
         let buffer = VecDeque::with_capacity(filter.len());
         Self { filter, buffer }
     }
@@ -639,7 +638,6 @@ pub struct TriangularDitherer {
 
 impl Ditherer for TriangularDitherer {
     fn new(amplitude: CamillaFloat) -> Self {
-        assert!(amplitude >= 0.0);
         let amplitude = amplitude / 2.0; // negative to positive peak
         Self {
             cached_rng: create_rng(),

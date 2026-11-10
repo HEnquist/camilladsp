@@ -19,20 +19,7 @@ Changes:
 - Config errors list every problem found, each with its location in the config.
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.
-- Faster delay filtering and spectrum buffering.
-- Reduce CPU use when calculating RMS and peak levels.
-- Reduce CPU use when finding input sample levels.
-- Reduce CPU use for dithering and noise shaping.
-- Reduce lookahead limiter CPU use with fewer release calculations and contiguous history reads.
-- Reuse convolution work buffers and avoid per-partition history index calculations.
-- Combine adjacent biquad filter steps on the same channels.
-- Skip unity gain processing and reuse settled fader gains.
-- Skip zero feedback calculations and storage in short FIR difference equation filters.
-- Remove unused mutexes and wakeups when publishing capture and playback levels.
-- Reduce buffer passes when mixing multiple input channels.
-- Reserve enough channel slots when growing recycled audio buffers.
-- Reduce compressor CPU use for blocks below the compression threshold.
-- Skip audio buffer writes while the noise gate stays open.
+- Lower CPU use in most filters and processors.
 - Applying a config with large FIR filters no longer stalls the audio.
 - ASIO no longer uses the Steinberg SDK and is included in all Windows builds.
   The separate ASIO download is gone.
@@ -44,6 +31,7 @@ Changes:
 
 Bugfixes:
 - Prevent high RACE CPU use when its output decays to silence.
+- Reserve enough channel slots when growing recycled audio buffers.
 - Changing biquad parameters on the fly no longer produces a loud transient.
 - `DiffEq` filters with an `a0` other than 1.0 now get the correct gain.
 - PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.

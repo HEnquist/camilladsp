@@ -152,6 +152,7 @@ impl AudioRingBuffer {
                     return true;
                 }
                 let n = n_live as f32;
+                // Start at -0.0 to preserve the sign when all channel samples are -0.0.
                 buf.fill(-0.0);
                 for (ch, live) in self.channels.iter().zip(&self.live) {
                     if !live {

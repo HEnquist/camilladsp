@@ -355,6 +355,15 @@ fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
     )
 }
 
+fn process_chunk(pipeline: &mut Pipeline, source: &AudioChunk, chunk: &mut Option<AudioChunk>) {
+    let mut input = chunk.take().unwrap();
+    for (wave, src) in input.waveforms.iter_mut().zip(&source.waveforms) {
+        wave.copy_from_slice(src);
+    }
+    *chunk = Some(pipeline.process_chunk(input));
+    black_box(&*chunk);
+}
+
 fn bench_complete_pipeline(c: &mut Criterion) {
     let variants = [
         ("biquad_single", false, Conv::None),
@@ -431,14 +440,7 @@ fn bench_biquad_steps(c: &mut Criterion) {
             group.bench_function(
                 BenchmarkId::new(format!("{channels}ch_{frames}"), bands_per_step),
                 |b| {
-                    b.iter(|| {
-                        let mut input = chunk.take().unwrap();
-                        for (wave, src) in input.waveforms.iter_mut().zip(&source.waveforms) {
-                            wave.copy_from_slice(src);
-                        }
-                        chunk = Some(pipeline.process_chunk(input));
-                        black_box(&chunk);
-                    });
+                    b.iter(|| process_chunk(&mut pipeline, &source, &mut chunk));
                 },
             );
         }
@@ -540,6 +542,11 @@ fn bench_processing_paths(c: &mut Criterion) {
             "RACE",
             json!({"channel_a": 0, "channel_b": 1, "delay": 100.0, "delay_unit": "us", "attenuation": 6.0}),
         ),
+        (
+            "race_decay",
+            "RACE",
+            json!({"channel_a": 0, "channel_b": 1, "delay": 4.8, "delay_unit": "samples", "subsample_delay": true, "attenuation": 3.0}),
+        ),
     ];
     let mut group = c.benchmark_group("processing_paths");
     for (channels, frames) in [(2, 64), (2, 1024), (8, 1024)] {
@@ -574,8 +581,22 @@ fn bench_processing_paths(c: &mut Criterion) {
                     None,
                     &mut ConvCoeffCache::new(),
                 );
-                let source = make_chunk(channels, frames);
-                let mut chunk = Some(make_chunk(channels, frames));
+                let mut source = make_chunk(channels, frames);
+                let mut chunk = make_chunk(channels, frames);
+                if *name == "race_decay" {
+                    for wave in source.waveforms.iter_mut().chain(&mut chunk.waveforms) {
+                        wave.fill(0.0);
+                    }
+                    chunk.waveforms[0][0] = 1.0;
+                    // Let an impulse decay before measuring silent input.
+                    for _ in 0..(4096_usize * 5).div_ceil(frames) {
+                        chunk = pipeline.process_chunk(chunk);
+                        for wave in &mut chunk.waveforms {
+                            wave.fill(0.0);
+                        }
+                    }
+                }
+                let mut chunk = Some(chunk);
                 let mut ramp_up = false;
                 group.bench_function(
                     BenchmarkId::new(*name, format!("{channels}ch_{frames}")),
@@ -585,17 +606,98 @@ fn bench_processing_paths(c: &mut Criterion) {
                                 params.set_target_volume(1, if ramp_up { -20.0 } else { -21.0 });
                                 ramp_up = !ramp_up;
                             }
-                            let mut input = chunk.take().unwrap();
-                            for (wave, src) in input.waveforms.iter_mut().zip(&source.waveforms) {
-                                wave.copy_from_slice(src);
-                            }
-                            chunk = Some(pipeline.process_chunk(input));
-                            black_box(&chunk);
+                            process_chunk(&mut pipeline, &source, &mut chunk);
                         });
                     },
                 );
             }
         }
+    }
+    group.finish();
+}
+
+fn bench_combined_chains(c: &mut Criterion) {
+    use serde_json::json;
+
+    let names: Vec<_> = (0..16).map(|i| format!("peq_{i}")).collect();
+    let filters: HashMap<_, _> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            (
+                name.clone(),
+                json!({"type": "Biquad", "parameters": {
+                    "type": "Peaking", "freq": 120.0 + i as f64 * 400.0, "q": 0.8, "gain": -1.5
+                }}),
+            )
+        })
+        .collect();
+    let mut group = c.benchmark_group("combined_chains");
+    for (name, channels, frames) in [
+        ("playback", 2, 64),
+        ("playback", 2, 1024),
+        ("multichannel", 8, 1024),
+    ] {
+        let mut steps: Vec<_> = names
+            .iter()
+            .map(|name| json!({"type": "Filter", "names": [name]}))
+            .collect();
+        let mut conf = json!({
+            "devices": {
+                "samplerate": 48000, "chunksize": frames,
+                "capture": {"type": "Stdin", "channels": channels, "format": "F32_LE"},
+                "playback": {"type": "Stdout", "channels": channels, "format": "F32_LE"}
+            },
+            "filters": filters,
+            "processors": {"limiter": {"type": "LookaheadLimiter", "parameters": {
+                "channels": channels, "limit": -6.0, "attack": 5.0, "attack_unit": "ms",
+                "release": 100.0, "release_unit": "ms"
+            }}}
+        });
+        if channels == 2 {
+            conf["filters"]["delay"] = json!({"type": "Delay", "parameters": {
+                "delay": 480.0, "delay_unit": "samples"
+            }});
+            conf["filters"]["dither"] = json!({"type": "Dither", "parameters": {
+                "type": "Flat", "bits": 16, "amplitude": 2.0
+            }});
+            steps.push(json!({"type": "Filter", "names": ["delay"]}));
+        } else {
+            let mapping: Vec<_> = (0..channels)
+                .map(|dest| {
+                    let sources: Vec<_> = (0..channels)
+                        .map(|channel| {
+                            json!({"channel": channel, "gain": 1.0 / channels as f64, "scale": "linear"})
+                        })
+                        .collect();
+                    json!({"dest": dest, "sources": sources})
+                })
+                .collect();
+            conf["mixers"] = json!({"mix": {
+                "channels": {"in": channels, "out": channels}, "mapping": mapping
+            }});
+            conf["filters"]["conv"] = serde_json::to_value(build_conv_filter(16384)).unwrap();
+            steps.push(json!({"type": "Mixer", "name": "mix"}));
+            steps.push(json!({"type": "Filter", "names": ["conv"]}));
+        }
+        steps.push(json!({"type": "Processor", "name": "limiter"}));
+        if channels == 2 {
+            steps.push(json!({"type": "Filter", "names": ["dither"]}));
+        }
+        conf["pipeline"] = json!(steps);
+        let mut conf: config::Configuration = serde_json::from_value(conf).unwrap();
+        config::validate_config(&mut conf, None).unwrap();
+        let mut pipeline = Pipeline::from_config(
+            conf,
+            Arc::new(ProcessingParameters::default()),
+            None,
+            &mut ConvCoeffCache::new(),
+        );
+        let source = make_chunk(channels, frames);
+        let mut chunk = Some(make_chunk(channels, frames));
+        group.bench_function(BenchmarkId::new(name, frames), |b| {
+            b.iter(|| process_chunk(&mut pipeline, &source, &mut chunk));
+        });
     }
     group.finish();
 }
@@ -652,67 +754,6 @@ fn bench_metering(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_resampling(c: &mut Criterion) {
-    use camilladsp::utils::resampling::new_resampler;
-    use camilladsp::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
-
-    let mut variants = vec![
-        ("sync", config::Resampler::Synchronous),
-        ("slip", config::Resampler::Slip),
-    ];
-    for (name, profile) in [
-        ("sinc_veryfast", config::AsyncSincProfile::VeryFast),
-        ("sinc_fast", config::AsyncSincProfile::Fast),
-        ("sinc_balanced", config::AsyncSincProfile::Balanced),
-        ("sinc_accurate", config::AsyncSincProfile::Accurate),
-    ] {
-        variants.push((
-            name,
-            config::Resampler::AsyncSinc(config::AsyncSincParameters::Profile { profile }),
-        ));
-    }
-    for (name, interpolation) in [
-        ("poly_linear", config::AsyncPolyInterpolation::Linear),
-        ("poly_cubic", config::AsyncPolyInterpolation::Cubic),
-        ("poly_quintic", config::AsyncPolyInterpolation::Quintic),
-        ("poly_septic", config::AsyncPolyInterpolation::Septic),
-    ] {
-        variants.push((name, config::Resampler::AsyncPoly { interpolation }));
-    }
-    let mut group = c.benchmark_group("resampling");
-    for channels in [2, 8] {
-        for (name, conf) in &variants {
-            let rate_in = if *name == "slip" { 48000 } else { 44100 };
-            let mut resampler = new_resampler(
-                &Some(*conf),
-                channels,
-                48000,
-                rate_in,
-                CHUNK_SIZE,
-                Arc::new(ProcessingParameters::default()),
-            )
-            .unwrap();
-            let source = make_chunk(channels, resampler.resampler.input_frames_max());
-            group.bench_function(BenchmarkId::new(*name, channels), |b| {
-                b.iter(|| {
-                    let frames = resampler.resampler.input_frames_next();
-                    let mut waves = container_from_stash(channels);
-                    for src in &source.waveforms {
-                        let mut wave = vec_from_stash(frames);
-                        wave.copy_from_slice(&src[..frames]);
-                        waves.push(wave);
-                    }
-                    let mut chunk = AudioChunk::new(waves, 1.0, -1.0, frames, frames);
-                    resampler.resample_chunk(&mut chunk, CHUNK_SIZE, channels);
-                    black_box(&chunk);
-                    recycle_chunk(chunk);
-                })
-            });
-        }
-    }
-    group.finish();
-}
-
 /// One chunk through this pipeline takes between 90 us and 6 ms, so criterion's
 /// default 3 s warm-up and 5 s measurement spend nearly all of their time
 /// repeating a reading that stabilised immediately. Criterion budgets by wall
@@ -737,6 +778,6 @@ fn config() -> Criterion {
 criterion_group! {
     name = benches;
     config = config();
-    targets = bench_complete_pipeline, bench_biquad_steps, bench_processing_paths, bench_metering, bench_resampling
+    targets = bench_complete_pipeline, bench_biquad_steps, bench_processing_paths, bench_metering, bench_combined_chains
 }
 criterion_main!(benches);

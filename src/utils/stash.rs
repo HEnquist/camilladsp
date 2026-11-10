@@ -70,6 +70,7 @@ fn container_from_queue(
                 vector.capacity(),
                 capacity
             );
+            // reserve_exact counts from len, which is zero for a recycled container.
             vector.reserve_exact(capacity);
         }
         vector

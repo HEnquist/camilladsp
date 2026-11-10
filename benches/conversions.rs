@@ -1,6 +1,5 @@
 use camilladsp::utils::stash::{recycle_chunk, vec_from_stash};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use camilladsp::audiochunk::AudioChunk;
 use camilladsp::config::BinarySampleFormat;
@@ -78,68 +77,12 @@ fn bench_to_bytes_small(c: &mut Criterion) {
     });
 }
 
-fn bench_formats(c: &mut Criterion) {
-    use camilladsp::ToCamillaFloat;
-    use camilladsp::utils::stash::container_from_stash;
-
-    let mut group = c.benchmark_group("sample_formats");
-    for format in [
-        BinarySampleFormat::S16_LE,
-        BinarySampleFormat::S24_3_LE,
-        BinarySampleFormat::S24_4_RJ_LE,
-        BinarySampleFormat::S24_4_LJ_LE,
-        BinarySampleFormat::S32_LE,
-        BinarySampleFormat::F32_LE,
-        BinarySampleFormat::F64_LE,
-    ] {
-        for (channels, frames) in [(2, 64), (2, 1024), (16, 4096)] {
-            let source: Vec<_> = (0..frames)
-                .map(|i| (0.9 * (i as f64 * 0.1).sin()).to_camilla_float())
-                .collect();
-            let mask = vec![true; channels];
-            let mut data = vec![0; channels * frames * format.bytes_per_sample()];
-            let input = AudioChunk::new(vec![source.clone(); channels], 0.9, -0.9, frames, frames);
-            chunk_to_buffer_rawbytes(input, &mut data, &format);
-            let label = format!("{format:?}_{channels}ch_{frames}");
-            group.bench_function(BenchmarkId::new("capture", &label), |b| {
-                b.iter(|| {
-                    let chunk = buffer_to_chunk_rawbytes(
-                        black_box(&data),
-                        channels,
-                        &format,
-                        data.len(),
-                        &mask,
-                        true,
-                    );
-                    black_box(&chunk);
-                    recycle_chunk(chunk);
-                })
-            });
-            group.bench_function(BenchmarkId::new("playback", &label), |b| {
-                b.iter(|| {
-                    let mut waves = container_from_stash(channels);
-                    for _ in 0..channels {
-                        let mut wave = vec_from_stash(frames);
-                        wave.copy_from_slice(&source);
-                        waves.push(wave);
-                    }
-                    let chunk = AudioChunk::new(waves, 0.9, -0.9, frames, frames);
-                    black_box(chunk_to_buffer_rawbytes(chunk, &mut data, &format));
-                    black_box(&data);
-                })
-            });
-        }
-    }
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_to_chunk_small,
     bench_to_chunk_large,
     bench_to_bytes_small,
-    bench_to_bytes_large,
-    bench_formats
+    bench_to_bytes_large
 );
 
 criterion_main!(benches);

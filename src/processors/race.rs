@@ -114,28 +114,6 @@ impl RACE {
             feedback_b: 0.0,
         }
     }
-    // Keep block cleanup from preventing coefficient hoisting in the sample loop.
-    #[inline(never)]
-    fn process_waveforms(
-        &mut self,
-        channel_a: &mut [CamillaFloat],
-        channel_b: &mut [CamillaFloat],
-    ) {
-        let mut feedback_a = self.feedback_a;
-        let mut feedback_b = self.feedback_b;
-        for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
-            let added_a = *value_a + feedback_b;
-            let added_b = *value_b + feedback_a;
-            feedback_a = self.delay_a.process_single(added_a);
-            feedback_b = self.delay_b.process_single(added_b);
-            feedback_a = self.gain.process_single(feedback_a);
-            feedback_b = self.gain.process_single(feedback_b);
-            *value_a = added_a;
-            *value_b = added_b;
-        }
-        self.feedback_a = feedback_a;
-        self.feedback_b = feedback_b;
-    }
 }
 
 impl Processor for RACE {
@@ -151,16 +129,30 @@ impl Processor for RACE {
         if channel_a.is_empty() || channel_b.is_empty() {
             return;
         }
-        let frames = channel_a.len().min(channel_b.len());
-        self.process_waveforms(channel_a, channel_b);
-        if self.feedback_a.is_subnormal() {
-            self.feedback_a = 0.0;
+        let mut feedback_a = self.feedback_a;
+        let mut feedback_b = self.feedback_b;
+        for (value_a, value_b) in channel_a.iter_mut().zip(channel_b.iter_mut()) {
+            let added_a = *value_a + feedback_b;
+            let added_b = *value_b + feedback_a;
+            feedback_a = self.delay_a.process_single(added_a);
+            feedback_b = self.delay_b.process_single(added_b);
+            feedback_a = self.gain.process_single(feedback_a);
+            feedback_b = self.gain.process_single(feedback_b);
+            *value_a = added_a;
+            *value_b = added_b;
         }
-        if self.feedback_b.is_subnormal() {
-            self.feedback_b = 0.0;
-        }
-        self.delay_a.flush_subnormals(frames);
-        self.delay_b.flush_subnormals(frames);
+        self.feedback_a = if feedback_a.is_subnormal() {
+            0.0
+        } else {
+            feedback_a
+        };
+        self.feedback_b = if feedback_b.is_subnormal() {
+            0.0
+        } else {
+            feedback_b
+        };
+        self.delay_a.flush_subnormals();
+        self.delay_b.flush_subnormals();
     }
 
     fn update_parameters(&mut self, config: config::Processor) {

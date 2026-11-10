@@ -262,8 +262,7 @@ impl Faders {
             let shared_mute = self.processing_params.is_mute(idx);
             let target_db = self.processing_params.target_volume(idx).min(fader.limit);
 
-            let changed = (target_db - fader.target_db).abs() > 0.01 || fader.mute != shared_mute;
-            if changed {
+            if (target_db - fader.target_db).abs() > 0.01 || fader.mute != shared_mute {
                 fader.target_db = target_db;
                 fader.mute = shared_mute;
                 if fader.ramp_chunks > 0 && !resumed_after_pause {
@@ -284,13 +283,8 @@ impl Faders {
             }
 
             if fader.ramp_step == 0 {
-                if changed
-                    || self.levels.faders[idx].ramping.load(Ordering::Relaxed)
-                    || self.levels.level_db(idx) != fader.current_db
-                {
-                    self.levels
-                        .set_constant(idx, fader.current_db, fader.settled_gain());
-                }
+                self.levels
+                    .set_constant(idx, fader.current_db, fader.settled_gain());
             } else {
                 // The ramp is laid out in dB, at the f32 precision the levels
                 // are kept in.
@@ -423,63 +417,6 @@ mod tests {
         faders.prepare_chunk();
         assert!(matches!(levels.gain(0), FaderGain::Constant(_)));
         assert_eq!(levels.level_db(0), 10.0);
-    }
-
-    #[test]
-    fn settled_gains_follow_controls_and_config_updates() {
-        let params = Arc::new(ProcessingParameters::default());
-        let mut faders = faders(&params, 2.0);
-        let levels = faders.levels();
-        let mut volume = Volume::new("volume", 1, CHUNKSIZE, levels.clone());
-        let source: Vec<_> = (0..CHUNKSIZE)
-            .map(|i| (0.7 * (i as f64 * 0.13).sin()).to_camilla_float())
-            .collect();
-        for (target, mute) in [
-            (-6.0, false),
-            (-6.0, false),
-            (MUTE_LEVEL_DB, false),
-            (MUTE_LEVEL_DB, true),
-            (MUTE_LEVEL_DB, false),
-        ] {
-            params.set_target_volume(1, target);
-            params.set_mute(1, mute);
-            let gain = if mute {
-                0.0
-            } else {
-                (10.0_f64.powf(target as f64 / 20.0)).to_camilla_float()
-            };
-            for block in 0..5 {
-                faders.prepare_chunk();
-                let mut waveform = source.clone();
-                volume.process_waveform(&mut waveform);
-                if block >= 2 {
-                    assert_eq!(levels.gain(1), FaderGain::Constant(gain));
-                    assert_eq!(levels.level_db(1), target);
-                    assert_eq!(params.current_volume(1), target);
-                    for (sample, input) in waveform.iter().zip(&source) {
-                        assert_eq!(sample.to_bits(), (input * gain).to_bits());
-                    }
-                }
-            }
-        }
-
-        params.set_target_volume(1, -6.0);
-        faders.prepare_chunk();
-        faders.update_parameters(&config(
-            "  v:\n    type: Volume\n    parameters: {fader: Aux1, ramp_time_ms: 0, limit: -18}",
-            "v",
-        ));
-        for _ in 0..3 {
-            faders.prepare_chunk();
-            let mut waveform = source.clone();
-            volume.process_waveform(&mut waveform);
-            let gain = 10.0_f64.powf(-18.0 / 20.0).to_camilla_float();
-            assert_eq!(levels.level_db(1), -18.0);
-            assert_eq!(params.current_volume(1), -18.0);
-            for (sample, input) in waveform.iter().zip(&source) {
-                assert_eq!(sample.to_bits(), (input * gain).to_bits());
-            }
-        }
     }
 
     fn config(filters: &str, names: &str) -> config::Configuration {

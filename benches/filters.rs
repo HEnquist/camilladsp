@@ -29,8 +29,8 @@ fn run_conv(b: &mut Bencher, len: usize, chunksize: usize) {
 /// Run all convolution benches
 fn bench_conv(c: &mut Criterion) {
     let mut group = c.benchmark_group("Conv");
-    for chunksize in [64, 256, 1024, 4096] {
-        for filterlen in [8, 64, 1024, 16384, 65536] {
+    for chunksize in [1024, 4096] {
+        for filterlen in [1024, 65536, 524288] {
             group.bench_with_input(
                 BenchmarkId::new(format!("FftConv_{chunksize}"), filterlen),
                 &filterlen,
@@ -100,19 +100,6 @@ fn bench_diffeq(c: &mut Criterion) {
         let mut de = DiffEq::new("test", a, b_coeffs);
         let mut waveform = input.clone();
         group.bench_function(BenchmarkId::new("order", order), |b| {
-            b.iter(|| {
-                waveform.copy_from_slice(&input);
-                de.process_waveform(black_box(&mut waveform));
-            })
-        });
-    }
-    for taps in [4, 8, 16, 32] {
-        let coefficients = (0..taps)
-            .map(|i| (i as f64 * 0.23).cos() / taps as f64)
-            .collect();
-        let mut de = DiffEq::new("test", vec![1.0], coefficients);
-        let mut waveform = input.clone();
-        group.bench_function(BenchmarkId::new("fir_taps", taps), |b| {
             b.iter(|| {
                 waveform.copy_from_slice(&input);
                 de.process_waveform(black_box(&mut waveform));
