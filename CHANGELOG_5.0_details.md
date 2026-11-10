@@ -55,6 +55,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   on four channels followed by 16 more on two went from 249 to 39 us, sixteen channels of three
   biquads went from 128 to 28 us, and a mixed pipeline of biquads and FIR filters went from 707
   to 481 us. Results are bit-identical to running the filters one at a time.
+  Adjacent biquad filter steps on the same channels are now merged, so biquads configured as
+  separate steps also benefit from running as one cascade.
 - Biquad filters are no longer sent to the thread pool when `multithreaded` is enabled, since
   running them several at a time already keeps the processor busy. The same biquad pipeline
   measured 39 us on the main thread against 222 us on the thread pool.
@@ -64,8 +66,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   instead of two ring buffers addressed with modulo. Orders up to eight keep their state in
   registers for a whole chunk. About 1.4 times faster at second order and 3.4 times at eighth
   order. The new form rounds differently, so results can differ from 4.1.3 in the last few bits.
-- Faster convolution setup and processing, and lower memory use. Three changes: convolution
-  filters share one FFT planner instead of each building and discarding its own, channels that use
+- Faster convolution setup and processing, and lower memory use. Convolution filters
+  share one FFT planner instead of each building and discarding its own, channels that use
   the same filter share one copy of its transformed coefficients instead of each keeping a copy,
   and the segmented spectra are held in one contiguous allocation rather than one block per
   segment. Reloading eight 16384 tap filters at a chunksize of 16384 went from about 3.0 ms to
@@ -76,6 +78,21 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   helps most with `multithreaded` enabled, where the copies would otherwise compete for memory
   bandwidth at the same moment. Without it the gain is smaller, and limited to filters large
   enough to crowd the cache but small enough that a single copy still fits.
+  Coefficient preparation now reuses one padding buffer for all segments. Processing reuses
+  the FFT input buffer for the output and shares scratch storage between the forward and inverse
+  transforms. The output buffer saving is 16 KiB per channel at a chunksize of 1024 in f64,
+  or 8 KiB in f32. The input spectra are visited in two contiguous spans, avoiding a modulo
+  calculation for every segment.
+- Delay filters exchange whole slices with their history buffer instead of pushing and popping
+  individual samples through a ring buffer.
+- Lookahead limiters reuse release calculations and read contiguous portions of their history,
+  reducing the work both during gain reduction and while the signal stays below the limit.
+- Compressors reuse a constant gain for blocks below the threshold, and noise gates skip gain
+  application while fully open. Gain and Volume filters skip multiplication by unity.
+- Dithering chooses the shaped or unshaped loop once per chunk. Flat triangular dither uses the
+  difference of two uniform samples, and noise shaping uses contiguous history storage.
+- RMS, peak and capture level scans use independent accumulators that the compiler can vectorize.
+  Capture and playback level notifications use counters without unused mutexes or wakeups.
 - The NEON and AVX convolution kernels fold the accumulation into their fused multiply-adds,
   instead of adding each product to the sum separately. About 5% faster with long filters on
   aarch64. Results can differ from 4.1.3 in the last few bits.
@@ -99,6 +116,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   accumulated, typically well under a tenth of a second.
 - Spectrum analysis is done in 32-bit float, which halves the memory used by its audio buffer.
   The numerical noise floor stays far below the displayed range.
+  History writes and reads now work on contiguous slices, including reads averaged over channels.
 - CoreAudio and WASAPI playback copy the audio data as whole slices instead of one byte at a time,
   which lowers the CPU load of the real-time playback thread.
 - The module names in log messages start with `camilladsp::` instead of `camillalib::`, following
@@ -161,6 +179,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   The new descriptions are still stored and returned by `GetConfig`.
 
 ### DSP
+- RACE clears subnormal feedback and delay state after each chunk, so an impulse that decays
+  to silence no longer leaves it spending CPU time on inaudibly small values.
+- Growing a recycled channel container now reserves the requested capacity. Since 4.0, it
+  subtracted the old capacity even though `reserve_exact` counts from the empty container's
+  length, allowing allocation while processing a chunk.
 - The `DiffEq` filter now scales its coefficients so that a0 becomes unity. The first `a`
   coefficient was previously ignored, so any value other than 1.0 gave a filter with the wrong
   gain compared to the documented transfer function.
