@@ -3,6 +3,7 @@ This is the short version. See [CHANGELOG_5.0_details.md](CHANGELOG_5.0_details.
 list of changes, with background and measurements.
 
 New features:
+- Add optional `monitor_mode: Sum | Max | Rms` to Compressor, NoiseGate and the LookaheadLimiter processor.
 - Add lookahead limiter, as a filter and as a multichannel processor.
 - Add `Slip` resampler for cheap rate adjust between clocks at the same nominal rate.
 - Websocket commands for streaming signal levels and state change events.

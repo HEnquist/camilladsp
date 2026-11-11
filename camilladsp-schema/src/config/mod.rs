@@ -1631,6 +1631,19 @@ pub enum Processor {
     },
 }
 
+/// How simultaneous samples on selected monitor channels are combined.
+///
+/// Defaults are processor-specific: Sum for Compressor/NoiseGate and Max for
+/// LookaheadLimiter. Rms is across channels, not a time-windowed RMS detector.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum MonitorMode {
+    Sum,
+    Max,
+    Rms,
+}
+
 /// Parameters for the dynamic range compressor processor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1639,6 +1652,8 @@ pub struct CompressorParameters {
     pub channels: usize,
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
+    #[serde(default)]
+    pub monitor_mode: Option<MonitorMode>,
     #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: FiniteF64,
@@ -1656,6 +1671,10 @@ pub struct CompressorParameters {
 }
 
 impl CompressorParameters {
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Sum)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }
@@ -1682,6 +1701,8 @@ pub struct NoiseGateParameters {
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
+    pub monitor_mode: Option<MonitorMode>,
+    #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     pub attack: FiniteF64,
     pub attack_unit: TimeUnit,
@@ -1692,6 +1713,10 @@ pub struct NoiseGateParameters {
 }
 
 impl NoiseGateParameters {
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Sum)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }
@@ -1710,6 +1735,8 @@ pub struct LookaheadLimiterProcessorParameters {
     #[serde(default)]
     pub monitor_channels: Option<Vec<usize>>,
     #[serde(default)]
+    pub monitor_mode: Option<MonitorMode>,
+    #[serde(default)]
     pub process_channels: Option<Vec<usize>>,
     #[serde(default)]
     pub limit: FiniteF64,
@@ -1722,6 +1749,10 @@ pub struct LookaheadLimiterProcessorParameters {
 }
 
 impl LookaheadLimiterProcessorParameters {
+    pub fn monitor_mode(&self) -> MonitorMode {
+        self.monitor_mode.unwrap_or(MonitorMode::Max)
+    }
+
     pub fn monitor_channels(&self) -> Vec<usize> {
         self.monitor_channels.clone().unwrap_or_default()
     }

@@ -20,6 +20,7 @@ use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::filters::clipper::Clipper;
 use crate::processors::Processor;
+use crate::processors::monitor::aggregate_monitor_channels;
 use crate::utils::decibels::db_to_linear;
 use crate::utils::time::time_to_samples;
 
@@ -31,6 +32,7 @@ pub struct Compressor {
     pub name: String,
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
+    pub monitor_mode: config::MonitorMode,
     pub process_channels: Vec<usize>,
     pub attack: CamillaFloat,
     pub release: CamillaFloat,
@@ -75,11 +77,12 @@ impl Compressor {
         let scratch = vec![0.0; chunksize];
 
         debug!(
-            "Creating compressor '{}', channels: {}, monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+            "Creating compressor '{}', channels: {}, monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
             name,
             channels,
-            process_channels,
             monitor_channels,
+            config.monitor_mode(),
+            process_channels,
             attack,
             release,
             config.threshold,
@@ -102,6 +105,7 @@ impl Compressor {
             name,
             channels,
             monitor_channels,
+            monitor_mode: config.monitor_mode(),
             process_channels,
             attack,
             release,
@@ -112,17 +116,6 @@ impl Compressor {
             samplerate,
             scratch,
             prev_loudness: -100.0,
-        }
-    }
-
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
-    /// A channel that was not captured is empty, and counts as silence.
-    fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        self.scratch.fill(0.0);
-        for ch in self.monitor_channels.iter() {
-            for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
-                *acc += *val;
-            }
         }
     }
 
@@ -173,7 +166,12 @@ impl Processor for Compressor {
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
     fn process_chunk(&mut self, input: &mut AudioChunk) {
-        self.sum_monitor_channels(input);
+        aggregate_monitor_channels(
+            input,
+            &self.monitor_channels,
+            self.monitor_mode,
+            &mut self.scratch,
+        );
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
@@ -220,6 +218,7 @@ impl Processor for Compressor {
             };
 
             self.monitor_channels = monitor_channels;
+            self.monitor_mode = config.monitor_mode();
             self.process_channels = process_channels;
             self.attack = attack.to_camilla_float();
             self.release = release.to_camilla_float();
@@ -229,10 +228,11 @@ impl Processor for Compressor {
             self.clipper = clipper;
 
             debug!(
-                "Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
+                "Updated compressor '{}', monitor_channels: {:?}, monitor_mode: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
                 self.name,
-                self.process_channels,
                 self.monitor_channels,
+                self.monitor_mode,
+                self.process_channels,
                 attack,
                 release,
                 config.threshold,
@@ -258,6 +258,7 @@ mod tests {
         let config = config::CompressorParameters {
             channels: 2,
             monitor_channels: None,
+            monitor_mode: None,
             process_channels: Some(vec![1]),
             attack: finite!(1.0),
             attack_unit: TimeUnit::Samples,
@@ -283,5 +284,41 @@ mod tests {
         assert!(empty.waveforms[0].is_empty());
         assert_eq!(empty.waveforms[1], silent.waveforms[1]);
         assert_ne!(empty.waveforms[1], waveform);
+    }
+
+    #[test]
+    fn test_default_and_mode_change_preserves_loudness() {
+        let mut parameters: config::CompressorParameters = yaml_serde::from_str(
+            "channels: 2
+attack: 3
+attack_unit: samples
+release: 19
+release_unit: samples
+threshold: -20
+factor: 2
+",
+        )
+        .unwrap();
+        let mut processor = Compressor::from_config("test", parameters.clone(), 48000, 8);
+        assert_eq!(processor.monitor_mode, config::MonitorMode::Sum);
+        let initial_loudness = processor.prev_loudness;
+        let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.25; 8]], 1.0, -1.0, 8, 8);
+        processor.process_chunk(&mut input);
+        assert_ne!(processor.prev_loudness, initial_loudness);
+        let mut unchanged = processor.clone();
+
+        parameters.monitor_mode = Some(config::MonitorMode::Rms);
+        processor.update_parameters(config::Processor::Compressor {
+            description: None,
+            parameters,
+        });
+        assert_eq!(processor.prev_loudness, unchanged.prev_loudness);
+        assert_eq!(processor.monitor_mode, config::MonitorMode::Rms);
+
+        let mut input = AudioChunk::new(vec![vec![0.5; 8], vec![-0.5; 8]], 1.0, -1.0, 8, 8);
+        let mut reference = AudioChunk::from(&input, input.waveforms.clone());
+        unchanged.process_chunk(&mut reference);
+        processor.process_chunk(&mut input);
+        assert!(processor.prev_loudness > unchanged.prev_loudness);
     }
 }

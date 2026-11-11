@@ -21,6 +21,7 @@ use crate::config;
 pub mod compressor;
 /// Multichannel lookahead limiter processor.
 pub mod lookahead_limiter;
+mod monitor;
 /// Noise gate processor.
 pub mod noisegate;
 /// RACE (Recursive Ambiophonic Crosstalk Elimination) processor.
