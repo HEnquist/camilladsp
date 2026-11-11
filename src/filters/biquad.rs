@@ -200,7 +200,7 @@ impl Biquad {
     }
 
     /// Flush stored subnormal numbers to zero.
-    fn flush_subnormals(&mut self) {
+    pub(crate) fn flush_subnormals(&mut self) {
         if self.s1.is_subnormal() {
             trace!("Biquad filter '{}', flushing subnormal s1", self.name);
             self.s1 = 0.0;
