@@ -83,7 +83,7 @@ The benchmarks in `benches/` use the `criterion` framework.
 | `conversions` | Converting between raw sample bytes and audio chunks. |
 | `conv_parallel` | How a convolution filter scales over channels, serial and on the thread pool, with shared or separate coefficients. |
 | `biquad_canon` | The interleaved biquad kernel, for choosing how many channels and stages to run side by side. |
-| `pipeline` | One chunk through complete pipelines of different shapes. |
+| `pipeline` | Complete pipelines, filter and processor families, RMS/peak and spectrum. |
 | `pipeline_build` | Building a pipeline, and updating the filter parameters of an existing one, as happens on a config reload. |
 | `fftconv_kernels` | The complex multiply kernels of the FFT convolution, scalar against NEON on `aarch64` and AVX+FMA on `x86_64`. |
 
@@ -98,6 +98,13 @@ and a plain `cargo bench` skips it:
 ```sh
 cargo bench --features bench --bench fftconv_kernels
 ```
+
+The `pipeline` groups `processing_paths`, `biquad_steps`, `combined_chains` and `metering` use
+nonzero signals, except `race_decay`, which measures silence after an impulse has decayed.
+Processing inputs are restored each iteration so repeated filtering cannot turn the benchmark
+into silence or overflow. Buffer refills and recycling are included where used. Spectrum reads
+cover both individual channels and channel averages, including a full history buffer.
+Run one group with, for example, `cargo bench --bench pipeline -- metering`.
 
 ### Getting stable results
 

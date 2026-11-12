@@ -9,6 +9,7 @@ use camilladsp::config::FiniteF64;
 use camilladsp::filters::fftconv::ConvCoeffCache;
 use camilladsp::pipeline::Pipeline;
 use std::collections::HashMap;
+use std::hint::black_box;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -354,6 +355,15 @@ fn make_chunk(channels: usize, frames: usize) -> AudioChunk {
     )
 }
 
+fn process_chunk(pipeline: &mut Pipeline, source: &AudioChunk, chunk: &mut Option<AudioChunk>) {
+    let mut input = chunk.take().unwrap();
+    for (wave, src) in input.waveforms.iter_mut().zip(&source.waveforms) {
+        wave.copy_from_slice(src);
+    }
+    *chunk = Some(pipeline.process_chunk(input));
+    black_box(&*chunk);
+}
+
 fn bench_complete_pipeline(c: &mut Criterion) {
     let variants = [
         ("biquad_single", false, Conv::None),
@@ -395,6 +405,355 @@ fn bench_complete_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_biquad_steps(c: &mut Criterion) {
+    use serde_json::json;
+
+    let names: Vec<_> = (0..16).map(|i| format!("peq_{i}")).collect();
+    let filters: HashMap<_, _> = names
+        .iter()
+        .zip(PRE_BIQUAD_PARAMS)
+        .map(|(name, (freq, q))| (name.clone(), build_biquad_filter(freq, q)))
+        .collect();
+    let mut group = c.benchmark_group("biquad_steps");
+    for (channels, frames) in [(2, 64), (2, 1024), (8, 1024)] {
+        for bands_per_step in [1, 4, 16] {
+            let steps: Vec<_> = names
+                .chunks(bands_per_step)
+                .map(|names| json!({"type": "Filter", "names": names}))
+                .collect();
+            let conf = json!({
+                "devices": {
+                    "samplerate": 48000, "chunksize": frames,
+                    "capture": {"type": "Stdin", "channels": channels, "format": "F32_LE"},
+                    "playback": {"type": "Stdout", "channels": channels, "format": "F32_LE"}
+                },
+                "filters": filters, "pipeline": steps
+            });
+            let mut pipeline = Pipeline::from_config(
+                serde_json::from_value(conf).unwrap(),
+                Arc::new(ProcessingParameters::default()),
+                None,
+                &mut ConvCoeffCache::new(),
+            );
+            let source = make_chunk(channels, frames);
+            let mut chunk = Some(make_chunk(channels, frames));
+            group.bench_function(
+                BenchmarkId::new(format!("{channels}ch_{frames}"), bands_per_step),
+                |b| {
+                    b.iter(|| process_chunk(&mut pipeline, &source, &mut chunk));
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+fn bench_processing_paths(c: &mut Criterion) {
+    use serde_json::json;
+
+    let filters = [
+        ("gain", "Gain", json!({"gain": -6.0})),
+        ("delay", "Delay", json!({"delay": 10.0, "delay_unit": "ms"})),
+        (
+            "delay_short",
+            "Delay",
+            json!({"delay": 1.0, "delay_unit": "samples"}),
+        ),
+        (
+            "delay_long",
+            "Delay",
+            json!({"delay": 100.0, "delay_unit": "ms"}),
+        ),
+        (
+            "fractional_delay",
+            "Delay",
+            json!({"delay": 10.01, "delay_unit": "ms", "subsample": true}),
+        ),
+        ("volume", "Volume", json!({"fader": "Aux1"})),
+        ("volume_unity", "Volume", json!({"fader": "Aux2"})),
+        ("gain_unity", "Gain", json!({"gain": 0.0})),
+        ("volume_ramp", "Volume", json!({"fader": "Aux1"})),
+        (
+            "loudness",
+            "Loudness",
+            json!({"reference_level": 0.0, "fader": "Aux1"}),
+        ),
+        ("hard_clip", "Clipper", json!({"clip_limit": -6.0})),
+        (
+            "soft_clip",
+            "Clipper",
+            json!({"clip_limit": -6.0, "soft_clip": true}),
+        ),
+        (
+            "dither",
+            "Dither",
+            json!({"type": "Flat", "bits": 16, "amplitude": 2.0}),
+        ),
+        (
+            "dither_shaped",
+            "Dither",
+            json!({"type": "Shibata48", "bits": 16}),
+        ),
+        (
+            "dither_long",
+            "Dither",
+            json!({"type": "FweightedLong441", "bits": 16}),
+        ),
+        (
+            "dither_highpass",
+            "Dither",
+            json!({"type": "Highpass", "bits": 16}),
+        ),
+        ("diffeq", "DiffEq", json!({"a": [1.0, -0.5], "b": [0.5]})),
+        (
+            "combo",
+            "BiquadCombo",
+            json!({"type": "LinkwitzRileyLowpass", "freq": 2000.0, "order": 8}),
+        ),
+        (
+            "limiter",
+            "LookaheadLimiter",
+            json!({"limit": -6.0, "attack": 5.0, "attack_unit": "ms", "release": 100.0, "release_unit": "ms"}),
+        ),
+        (
+            "limiter_idle",
+            "LookaheadLimiter",
+            json!({"limit": 0.0, "attack": 5.0, "attack_unit": "ms", "release": 100.0, "release_unit": "ms"}),
+        ),
+    ];
+    let processors = [
+        (
+            "compressor",
+            "Compressor",
+            json!({"threshold": -20.0, "factor": 4.0, "attack": 5.0, "attack_unit": "ms", "release": 100.0, "release_unit": "ms"}),
+        ),
+        (
+            "noisegate",
+            "NoiseGate",
+            json!({"threshold": -40.0, "attenuation": 60.0, "attack": 5.0, "attack_unit": "ms", "release": 100.0, "release_unit": "ms"}),
+        ),
+        (
+            "linked_limiter",
+            "LookaheadLimiter",
+            json!({"limit": -6.0, "attack": 5.0, "attack_unit": "ms", "release": 100.0, "release_unit": "ms"}),
+        ),
+        (
+            "race",
+            "RACE",
+            json!({"channel_a": 0, "channel_b": 1, "delay": 100.0, "delay_unit": "us", "attenuation": 6.0}),
+        ),
+        (
+            "race_decay",
+            "RACE",
+            json!({"channel_a": 0, "channel_b": 1, "delay": 4.8, "delay_unit": "samples", "subsample_delay": true, "attenuation": 3.0}),
+        ),
+    ];
+    let mut group = c.benchmark_group("processing_paths");
+    for (channels, frames) in [(2, 64), (2, 1024), (8, 1024)] {
+        for (kind, variants) in [
+            ("Filter", filters.as_slice()),
+            ("Processor", processors.as_slice()),
+        ] {
+            for (name, typ, parameters) in variants {
+                let mut parameters = parameters.clone();
+                let mut conf = json!({
+                    "devices": {
+                        "samplerate": 48000, "chunksize": frames,
+                        "capture": {"type": "Stdin", "channels": channels, "format": "F32_LE"},
+                        "playback": {"type": "Stdout", "channels": channels, "format": "F32_LE"}
+                    }
+                });
+                if kind == "Filter" {
+                    conf["filters"] = json!({"test": {"type": typ, "parameters": parameters}});
+                    conf["pipeline"] = json!([{"type": kind, "names": ["test"]}]);
+                } else {
+                    parameters["channels"] = json!(channels);
+                    conf["processors"] = json!({"test": {"type": typ, "parameters": parameters}});
+                    conf["pipeline"] = json!([{"type": kind, "name": "test"}]);
+                }
+                let params = Arc::new(ProcessingParameters::new(
+                    &[0.0, -20.0, 0.0, 0.0, 0.0],
+                    &[false; 5],
+                ));
+                let mut pipeline = Pipeline::from_config(
+                    serde_json::from_value(conf).unwrap(),
+                    params.clone(),
+                    None,
+                    &mut ConvCoeffCache::new(),
+                );
+                let mut source = make_chunk(channels, frames);
+                let mut chunk = make_chunk(channels, frames);
+                if *name == "race_decay" {
+                    for wave in source.waveforms.iter_mut().chain(&mut chunk.waveforms) {
+                        wave.fill(0.0);
+                    }
+                    chunk.waveforms[0][0] = 1.0;
+                    // Let an impulse decay before measuring silent input.
+                    for _ in 0..(4096_usize * 5).div_ceil(frames) {
+                        chunk = pipeline.process_chunk(chunk);
+                        for wave in &mut chunk.waveforms {
+                            wave.fill(0.0);
+                        }
+                    }
+                }
+                let mut chunk = Some(chunk);
+                let mut ramp_up = false;
+                group.bench_function(
+                    BenchmarkId::new(*name, format!("{channels}ch_{frames}")),
+                    |b| {
+                        b.iter(|| {
+                            if *name == "volume_ramp" {
+                                params.set_target_volume(1, if ramp_up { -20.0 } else { -21.0 });
+                                ramp_up = !ramp_up;
+                            }
+                            process_chunk(&mut pipeline, &source, &mut chunk);
+                        });
+                    },
+                );
+            }
+        }
+    }
+    group.finish();
+}
+
+fn bench_combined_chains(c: &mut Criterion) {
+    use serde_json::json;
+
+    let names: Vec<_> = (0..16).map(|i| format!("peq_{i}")).collect();
+    let filters: HashMap<_, _> = names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            (
+                name.clone(),
+                json!({"type": "Biquad", "parameters": {
+                    "type": "Peaking", "freq": 120.0 + i as f64 * 400.0, "q": 0.8, "gain": -1.5
+                }}),
+            )
+        })
+        .collect();
+    let mut group = c.benchmark_group("combined_chains");
+    for (name, channels, frames) in [
+        ("playback", 2, 64),
+        ("playback", 2, 1024),
+        ("multichannel", 8, 1024),
+    ] {
+        let mut steps: Vec<_> = names
+            .iter()
+            .map(|name| json!({"type": "Filter", "names": [name]}))
+            .collect();
+        let mut conf = json!({
+            "devices": {
+                "samplerate": 48000, "chunksize": frames,
+                "capture": {"type": "Stdin", "channels": channels, "format": "F32_LE"},
+                "playback": {"type": "Stdout", "channels": channels, "format": "F32_LE"}
+            },
+            "filters": filters,
+            "processors": {"limiter": {"type": "LookaheadLimiter", "parameters": {
+                "channels": channels, "limit": -6.0, "attack": 5.0, "attack_unit": "ms",
+                "release": 100.0, "release_unit": "ms"
+            }}}
+        });
+        if channels == 2 {
+            conf["filters"]["delay"] = json!({"type": "Delay", "parameters": {
+                "delay": 480.0, "delay_unit": "samples"
+            }});
+            conf["filters"]["dither"] = json!({"type": "Dither", "parameters": {
+                "type": "Flat", "bits": 16, "amplitude": 2.0
+            }});
+            steps.push(json!({"type": "Filter", "names": ["delay"]}));
+        } else {
+            let mapping: Vec<_> = (0..channels)
+                .map(|dest| {
+                    let sources: Vec<_> = (0..channels)
+                        .map(|channel| {
+                            json!({"channel": channel, "gain": 1.0 / channels as f64, "scale": "linear"})
+                        })
+                        .collect();
+                    json!({"dest": dest, "sources": sources})
+                })
+                .collect();
+            conf["mixers"] = json!({"mix": {
+                "channels": {"in": channels, "out": channels}, "mapping": mapping
+            }});
+            conf["filters"]["conv"] = serde_json::to_value(build_conv_filter(16384)).unwrap();
+            steps.push(json!({"type": "Mixer", "name": "mix"}));
+            steps.push(json!({"type": "Filter", "names": ["conv"]}));
+        }
+        steps.push(json!({"type": "Processor", "name": "limiter"}));
+        if channels == 2 {
+            steps.push(json!({"type": "Filter", "names": ["dither"]}));
+        }
+        conf["pipeline"] = json!(steps);
+        let mut conf: config::Configuration = serde_json::from_value(conf).unwrap();
+        config::validate_config(&mut conf, None).unwrap();
+        let mut pipeline = Pipeline::from_config(
+            conf,
+            Arc::new(ProcessingParameters::default()),
+            None,
+            &mut ConvCoeffCache::new(),
+        );
+        let source = make_chunk(channels, frames);
+        let mut chunk = Some(make_chunk(channels, frames));
+        group.bench_function(BenchmarkId::new(name, frames), |b| {
+            b.iter(|| process_chunk(&mut pipeline, &source, &mut chunk));
+        });
+    }
+    group.finish();
+}
+
+fn bench_metering(c: &mut Criterion) {
+    use camilladsp::spectrum::{AudioRingBuffer, RING_BUFFER_CAPACITY, SpectrumComputer};
+
+    let mut group = c.benchmark_group("metering");
+    for (channels, frames) in [(2, 64), (2, 1024), (16, 1024), (16, 4096)] {
+        let chunk = make_chunk(channels, frames);
+        let mut stats = chunk.stats();
+        let mut ring = AudioRingBuffer::new();
+        for _ in 0..RING_BUFFER_CAPACITY / frames + 1 {
+            ring.push_chunk(&chunk);
+        }
+        let shape = format!("{channels}ch_{frames}");
+        group.bench_function(BenchmarkId::new("rms_peak", &shape), |b| {
+            b.iter(|| {
+                chunk.update_stats(&mut stats);
+                black_box(&stats);
+            })
+        });
+        group.bench_function(BenchmarkId::new("push", &shape), |b| {
+            b.iter(|| ring.push_chunk(black_box(&chunk)))
+        });
+        for fft_len in [4096, RING_BUFFER_CAPACITY] {
+            for channel in [Some(0), None] {
+                let mut buf = Vec::with_capacity(fft_len);
+                let name = if channel.is_some() {
+                    "read_channel"
+                } else {
+                    "read_average"
+                };
+                group.bench_function(BenchmarkId::new(name, format!("{shape}_{fft_len}")), |b| {
+                    b.iter(|| {
+                        assert!(ring.read_latest_into(fft_len, channel, &mut buf));
+                        black_box(&buf);
+                    })
+                });
+            }
+        }
+    }
+    for fft_len in [4096, 65536, RING_BUFFER_CAPACITY] {
+        let mut ring = AudioRingBuffer::new();
+        ring.push_chunk(&make_chunk(2, fft_len));
+        let mut computer = SpectrumComputer::new(fft_len, 256, 20.0, 20000.0, 48000);
+        group.bench_function(BenchmarkId::new("spectrum", fft_len), |b| {
+            b.iter(|| {
+                assert!(computer.fill_from_buffer(&ring, None));
+                black_box(computer.compute_from_windowed().unwrap());
+            })
+        });
+    }
+    group.finish();
+}
+
 /// One chunk through this pipeline takes between 90 us and 6 ms, so criterion's
 /// default 3 s warm-up and 5 s measurement spend nearly all of their time
 /// repeating a reading that stabilised immediately. Criterion budgets by wall
@@ -419,6 +778,6 @@ fn config() -> Criterion {
 criterion_group! {
     name = benches;
     config = config();
-    targets = bench_complete_pipeline
+    targets = bench_complete_pipeline, bench_biquad_steps, bench_processing_paths, bench_metering, bench_combined_chains
 }
 criterion_main!(benches);

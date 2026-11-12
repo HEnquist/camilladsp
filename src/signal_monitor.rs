@@ -57,25 +57,26 @@ impl EventCounter {
 
 #[derive(Debug)]
 struct SignalMonitor {
-    playback: EventCounter,
-    capture: EventCounter,
+    // Level subscriptions poll these counters; only state changes have waiters.
+    playback: AtomicU64,
+    capture: AtomicU64,
     state: EventCounter,
 }
 
 static SIGNAL_MONITOR: LazyLock<SignalMonitor> = LazyLock::new(|| SignalMonitor {
-    playback: EventCounter::new(),
-    capture: EventCounter::new(),
+    playback: AtomicU64::new(0),
+    capture: AtomicU64::new(0),
     state: EventCounter::new(),
 });
 
-/// Notify waiters that new playback signal levels are available.
+/// Publish that new playback signal levels are available.
 pub fn mark_playback_updated() {
-    SIGNAL_MONITOR.playback.mark_updated();
+    SIGNAL_MONITOR.playback.fetch_add(1, Ordering::Release);
 }
 
-/// Notify waiters that new capture signal levels are available.
+/// Publish that new capture signal levels are available.
 pub fn mark_capture_updated() {
-    SIGNAL_MONITOR.capture.mark_updated();
+    SIGNAL_MONITOR.capture.fetch_add(1, Ordering::Release);
 }
 
 /// Notify waiters that the processing state has changed.
@@ -86,8 +87,8 @@ pub fn mark_state_updated() {
 /// Return the current event generation counter for the given side.
 pub fn generation(side: SignalLevelSide) -> u64 {
     match side {
-        SignalLevelSide::Playback => SIGNAL_MONITOR.playback.generation(),
-        SignalLevelSide::Capture => SIGNAL_MONITOR.capture.generation(),
+        SignalLevelSide::Playback => SIGNAL_MONITOR.playback.load(Ordering::Acquire),
+        SignalLevelSide::Capture => SIGNAL_MONITOR.capture.load(Ordering::Acquire),
     }
 }
 
@@ -103,11 +104,31 @@ pub fn wait_for_state_change(last_seen: u64, timeout: Duration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{mark_state_updated, state_generation, wait_for_state_change};
+    use super::{
+        SignalLevelSide, generation, mark_capture_updated, mark_playback_updated,
+        mark_state_updated, state_generation, wait_for_state_change,
+    };
     use std::sync::Arc;
     use std::sync::Barrier;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn level_generations_track_updates_on_both_sides() {
+        let capture = generation(SignalLevelSide::Capture);
+        let playback = generation(SignalLevelSide::Playback);
+        let producer = thread::spawn(|| {
+            for _ in 0..128 {
+                mark_playback_updated();
+            }
+        });
+        for _ in 0..256 {
+            mark_capture_updated();
+        }
+        producer.join().unwrap();
+        assert_eq!(generation(SignalLevelSide::Capture), capture + 256);
+        assert!(generation(SignalLevelSide::Playback) >= playback + 128);
+    }
 
     #[test]
     fn state_waiters_are_woken_by_generation_change() {

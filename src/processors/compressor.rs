@@ -142,6 +142,10 @@ impl Compressor {
 
     /// Calculate linear gain, store result in self.scratch
     fn calculate_linear_gain(&mut self) {
+        if self.scratch.iter().all(|val| *val <= self.threshold) {
+            self.scratch.fill(db_to_linear(self.makeup_gain));
+            return;
+        }
         for val in self.scratch.iter_mut() {
             if *val > self.threshold {
                 *val = -(*val - self.threshold) * (self.factor - 1.0) / self.factor;
@@ -254,8 +258,8 @@ mod tests {
     use crate::config::TimeUnit;
     use crate::config::finite;
 
-    fn compressor() -> Compressor {
-        let config = config::CompressorParameters {
+    fn parameters() -> config::CompressorParameters {
+        config::CompressorParameters {
             channels: 2,
             monitor_channels: None,
             process_channels: Some(vec![1]),
@@ -268,8 +272,28 @@ mod tests {
             makeup_gain: None,
             soft_clip: None,
             clip_limit: None,
-        };
-        Compressor::from_config("test", config, 48000, 4)
+        }
+    }
+
+    #[test]
+    fn test_makeup_gain_below_threshold_after_update() {
+        let mut params = parameters();
+        let mut compressor = Compressor::from_config("test", params.clone(), 48000, 4);
+        let waveforms = vec![vec![0.001, -0.002, 0.003, -0.004]; 2];
+        for gain in [6.0, -6.0, 0.0] {
+            params.makeup_gain = Some(finite!(gain));
+            compressor.update_parameters(config::Processor::Compressor {
+                description: None,
+                parameters: params.clone(),
+            });
+            let mut chunk = AudioChunk::new(waveforms.clone(), 0.004, -0.004, 4, 4);
+            compressor.process_chunk(&mut chunk);
+            assert_eq!(chunk.waveforms[0], waveforms[0]);
+            let linear_gain = 10.0_f64.powf(gain / 20.0).to_camilla_float();
+            for (input, output) in waveforms[1].iter().zip(&chunk.waveforms[1]) {
+                assert!((output - input * linear_gain).abs() < 1.0e-8);
+            }
+        }
     }
 
     /// A monitored channel that was not captured is empty, and acts like a silent one.
@@ -278,8 +302,8 @@ mod tests {
         let waveform = vec![1.0, -1.0, 1.0, -1.0];
         let mut empty = AudioChunk::new(vec![vec![], waveform.clone()], 1.0, -1.0, 4, 4);
         let mut silent = AudioChunk::new(vec![vec![0.0; 4], waveform.clone()], 1.0, -1.0, 4, 4);
-        compressor().process_chunk(&mut empty);
-        compressor().process_chunk(&mut silent);
+        Compressor::from_config("test", parameters(), 48000, 4).process_chunk(&mut empty);
+        Compressor::from_config("test", parameters(), 48000, 4).process_chunk(&mut silent);
         assert!(empty.waveforms[0].is_empty());
         assert_eq!(empty.waveforms[1], silent.waveforms[1]);
         assert_ne!(empty.waveforms[1], waveform);

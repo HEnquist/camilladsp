@@ -124,14 +124,17 @@ impl NoiseGate {
     }
 
     /// Calculate linear gain, store result in self.scratch
-    fn calculate_linear_gain(&mut self) {
+    fn calculate_linear_gain(&mut self) -> bool {
+        let mut all_open = true;
         for val in self.scratch.iter_mut() {
             if *val < self.threshold {
                 *val = self.factor;
+                all_open = false;
             } else {
                 *val = 1.0;
             }
         }
+        all_open
     }
 
     fn apply_gain(&self, input: &mut [CamillaFloat]) {
@@ -150,7 +153,9 @@ impl Processor for NoiseGate {
     fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
-        self.calculate_linear_gain();
+        if self.calculate_linear_gain() {
+            return;
+        }
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
         }
@@ -202,6 +207,53 @@ impl Processor for NoiseGate {
         } else {
             // This should never happen unless there is a bug somewhere else
             panic!("Invalid config change!");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{TimeUnit, finite};
+
+    #[test]
+    fn test_open_gate_tracks_envelope_and_updates() {
+        for channels in [2, 8, 32] {
+            let mut params = config::NoiseGateParameters {
+                channels,
+                monitor_channels: Some(vec![0]),
+                process_channels: Some((1..channels).collect()),
+                attack: finite!(1.0),
+                attack_unit: TimeUnit::Samples,
+                release: finite!(1.0),
+                release_unit: TimeUnit::Samples,
+                threshold: finite!(-20.0),
+                attenuation: finite!(40.0),
+            };
+            let mut gate = NoiseGate::from_config("test", params.clone(), 48000, 4);
+            let signal = [0.25, -0.5, 0.125, -0.25];
+            for (level, attenuation, gain) in
+                [(0.5, 40.0, 1.0), (0.001, 40.0, 0.01), (0.001, 20.0, 0.1)]
+            {
+                params.attenuation = finite!(attenuation);
+                gate.update_parameters(config::Processor::NoiseGate {
+                    description: None,
+                    parameters: params.clone(),
+                });
+                let mut waveforms = vec![signal.to_vec(); channels];
+                waveforms[0].fill(level);
+                let mut chunk = AudioChunk::new(waveforms, 0.5, -0.5, 4, 4);
+                gate.process_chunk(&mut chunk);
+                assert_eq!(chunk.waveforms[0], vec![level; 4]);
+                if gain == 1.0 {
+                    assert!(gate.prev_loudness < -5.0);
+                }
+                for waveform in chunk.waveforms.iter().skip(1) {
+                    for (output, input) in waveform.iter().zip(signal) {
+                        assert!((output - input * gain).abs() < 1.0e-8);
+                    }
+                }
+            }
         }
     }
 }

@@ -45,47 +45,20 @@ pub fn limiter_parameters(
     (limit, attack_samples, release_coeff)
 }
 
-/// A view of the lookahead window, the `attack_samples` newest samples of the
-/// history buffer followed by the samples of the current chunk.
-/// Index 0 is the sample that is due to leave the limiter first.
-struct LookaheadWindow<'a> {
-    first: &'a [CamillaFloat],
-    second: &'a [CamillaFloat],
-    start: usize,
+/// The `attack_samples` newest history samples, followed by the current chunk.
+/// Oldest samples come first.
+fn lookahead_window<'a>(
+    history: &'a LocalRb<Heap<CamillaFloat>>,
     attack_samples: usize,
     current: &'a [CamillaFloat],
-}
-
-impl<'a> LookaheadWindow<'a> {
-    fn new(
-        history: &'a LocalRb<Heap<CamillaFloat>>,
-        attack_samples: usize,
-        current: &'a [CamillaFloat],
-    ) -> Self {
-        let start = history.occupied_len() - attack_samples;
-        let (first, second) = history.as_slices();
-        LookaheadWindow {
-            first,
-            second,
-            start,
-            attack_samples,
-            current,
-        }
-    }
-
-    #[inline]
-    fn get(&self, index: usize) -> CamillaFloat {
-        if index < self.attack_samples {
-            let idx = self.start + index;
-            if idx < self.first.len() {
-                self.first[idx]
-            } else {
-                self.second[idx - self.first.len()]
-            }
-        } else {
-            self.current[index - self.attack_samples]
-        }
-    }
+) -> [&'a [CamillaFloat]; 3] {
+    let start = history.occupied_len() - attack_samples;
+    let (first, second) = history.as_slices();
+    [
+        &first[start.min(first.len())..],
+        &second[start.saturating_sub(first.len())..],
+        current,
+    ]
 }
 
 /// The lookahead limiter algorithm, shared by the `LookaheadLimiter` filter
@@ -158,41 +131,45 @@ impl LookaheadGain {
 
         // Backward pass turning peaks into linear ramps.
         {
-            let window = LookaheadWindow::new(&self.history, attack_samples, detection);
+            let window = lookahead_window(&self.history, attack_samples, detection);
             let mut peak = 1.0;
             let mut samples_since_peak = attack_samples + 1;
+            let mut i = attack_samples + len;
 
-            for i in (0..(attack_samples + len)).rev() {
-                // Get sample amplitude
-                let amplitude = window.get(i).abs();
+            for samples in window.into_iter().rev() {
+                for sample in samples.iter().rev() {
+                    i -= 1;
+                    // Get sample amplitude
+                    let amplitude = sample.abs();
 
-                // Compute reduction gain for current sample
-                let mut gain = if amplitude > limit {
-                    limit / amplitude
-                } else {
-                    1.0
-                };
+                    // Compute reduction gain for current sample
+                    let mut gain = if amplitude > limit {
+                        limit / amplitude
+                    } else {
+                        1.0
+                    };
 
-                // Compute ramp
-                let mut ramp_gain = 1.0;
-                if samples_since_peak <= attack_samples {
-                    let ramp = (attack_samples - samples_since_peak) as CamillaFloat
-                        / attack_samples.max(1) as CamillaFloat;
-                    ramp_gain = 1.0 - (ramp * (1.0 - peak));
-                    samples_since_peak += 1;
-                }
+                    // Compute ramp
+                    let mut ramp_gain = 1.0;
+                    if samples_since_peak <= attack_samples {
+                        let ramp = (attack_samples - samples_since_peak) as CamillaFloat
+                            / attack_samples.max(1) as CamillaFloat;
+                        ramp_gain = 1.0 - (ramp * (1.0 - peak));
+                        samples_since_peak += 1;
+                    }
 
-                // Peak found, start new ramp
-                if gain < ramp_gain {
-                    peak = gain;
-                    samples_since_peak = 1;
-                } else {
-                    gain = ramp_gain;
-                }
+                    // Peak found, start new ramp
+                    if gain < ramp_gain {
+                        peak = gain;
+                        samples_since_peak = 1;
+                    } else {
+                        gain = ramp_gain;
+                    }
 
-                // Save gain envelope
-                if i < self.gain.len() {
-                    self.gain[i] = gain;
+                    // Save gain envelope
+                    if i < self.gain.len() {
+                        self.gain[i] = gain;
+                    }
                 }
             }
         }
@@ -201,7 +178,10 @@ impl LookaheadGain {
         // Release uses the same 1/e time constant coefficient as Compressor.
         // They are not exactly equal because Compressor works in the dB domain and has 1e-6 bias.
         for i in 0..len {
-            self.release_gain = self.release_gain.powf(self.release_coeff);
+            // Release only raises the gain, so an equal or lower attack gain wins without it.
+            if self.gain[i] > self.release_gain {
+                self.release_gain = self.release_gain.powf(self.release_coeff);
+            }
             if self.gain[i] < self.release_gain {
                 self.release_gain = self.gain[i];
             } else {
@@ -236,9 +216,12 @@ impl LookaheadGain {
         // Apply gain reduction to delayed samples
         {
             let attack_samples = self.attack_samples;
-            let window = LookaheadWindow::new(&self.history, attack_samples, waveform);
-            for (i, gain) in self.gain[..len].iter_mut().enumerate() {
-                *gain *= window.get(i);
+            let window = lookahead_window(&self.history, attack_samples, waveform);
+            let mut gains = self.gain[..len].iter_mut();
+            for samples in window {
+                for (sample, gain) in samples.iter().zip(gains.by_ref()) {
+                    *gain *= sample;
+                }
             }
         }
 
@@ -500,6 +483,83 @@ mod tests {
         ];
         limiter.process_waveform(&mut buf2);
         assert_close(&buf2, &expected2, 1e-6);
+    }
+
+    #[test]
+    fn attack_ramps_and_delayed_audio_survive_history_wraps() {
+        let attack = 48;
+        let input: Vec<CamillaFloat> = (0..96017)
+            .map(|i| {
+                let amplitude = if i % 257 == 128 { 2.0 } else { 0.25 };
+                if i / 64 % 2 == 0 {
+                    amplitude
+                } else {
+                    -amplitude
+                }
+            })
+            .collect();
+        for frames in [16, 257] {
+            let config = config::LookaheadLimiterParameters {
+                limit: finite!(0.0),
+                attack: finite!(48.0),
+                attack_unit: TimeUnit::Samples,
+                release: finite!(0.0),
+                release_unit: TimeUnit::Samples,
+            };
+            let mut limiter = LookaheadLimiter::from_config("test", config, 48000, frames);
+            for (block, source) in input.chunks(frames).enumerate() {
+                let mut waveform = source.to_vec();
+                limiter.process_waveform(&mut waveform);
+                for (offset, output) in waveform.iter().enumerate() {
+                    let index = block * frames + offset;
+                    let expected = if index < attack {
+                        0.0
+                    } else {
+                        let delayed = index - attack;
+                        let distance = (128 + 257 - delayed % 257) % 257;
+                        let gain = if distance <= attack {
+                            1.0 - (attack - distance) as f64 / attack as f64 * 0.5
+                        } else {
+                            1.0
+                        };
+                        input[delayed] * gain.to_camilla_float()
+                    };
+                    assert!((output - expected).abs() < 1e-6, "sample {index}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn release_matches_reference_when_limiting_starts_and_stops() {
+        for release in [0.0, 1.0, 4800.0] {
+            let config = config::LookaheadLimiterParameters {
+                limit: finite!(0.0),
+                attack: finite!(0.0),
+                attack_unit: TimeUnit::Samples,
+                release: config::FiniteF64::expect_finite(release),
+                release_unit: TimeUnit::Samples,
+            };
+            let mut limiter = LookaheadLimiter::from_config("test", config, 48000, 64);
+            let coefficient = limiter.gain.release_coeff;
+            let mut gain: CamillaFloat = 1.0;
+            for amplitude in [0.25, 2.0, 2.0, -4.0, 1.0, 0.0, -2.0, 0.25] {
+                let mut waveform: Vec<CamillaFloat> = vec![amplitude; 64];
+                let expected: Vec<_> = waveform
+                    .iter()
+                    .map(|sample| {
+                        gain = gain.powf(coefficient).min(if sample.abs() > 1.0 {
+                            1.0 / sample.abs()
+                        } else {
+                            1.0
+                        });
+                        sample * gain
+                    })
+                    .collect();
+                limiter.process_waveform(&mut waveform);
+                assert_eq!(waveform, expected);
+            }
+        }
     }
 
     #[test]

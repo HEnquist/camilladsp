@@ -82,30 +82,33 @@ where
             let mut wf = vec_from_stash(num_frames);
             let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
-                let (mavx, minv) = if check_for_nan {
-                    let mut maxv = 0.0;
-                    let mut minv = 0.0;
+                if check_for_nan {
                     let mut invalid_values = 0;
                     for value in wf.iter_mut() {
                         if !value.is_finite() {
                             invalid_values += 1;
                             *value = 0.0;
                         }
-                        if *value > maxv {
-                            maxv = *value;
-                        } else if *value < minv {
-                            minv = *value;
-                        }
                     }
                     if invalid_values > 0 {
                         warn!("Ignored {invalid_values} infinite or NaN values in channel {ch}");
                     }
-                    (maxv, minv)
-                } else {
-                    wf.iter().fold((0.0, 0.0), |(max, min), x| {
-                        (CamillaFloat::max(max, *x), CamillaFloat::min(min, *x))
-                    })
-                };
+                }
+                let mut maxima: [CamillaFloat; 4] = [0.0; 4];
+                let mut minima: [CamillaFloat; 4] = [0.0; 4];
+                let (blocks, remainder) = wf.as_chunks::<4>();
+                for block in blocks {
+                    for i in 0..4 {
+                        maxima[i] = maxima[i].max(block[i]);
+                        minima[i] = minima[i].min(block[i]);
+                    }
+                }
+                let mut mavx = maxima.into_iter().fold(0.0, CamillaFloat::max);
+                let mut minv = minima.into_iter().fold(0.0, CamillaFloat::min);
+                for value in remainder {
+                    mavx = mavx.max(*value);
+                    minv = minv.min(*value);
+                }
                 if mavx > maxvalue {
                     maxvalue = mavx;
                 }
@@ -284,9 +287,66 @@ pub fn buffer_to_chunk_rawbytes(
 
 #[cfg(test)]
 mod tests {
+    use crate::ToF32;
     use crate::audiochunk::AudioChunk;
     use crate::config::BinarySampleFormat;
     use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+
+    #[test]
+    fn capture_levels_preserve_mask_padding_and_invalid_sample_cleanup() {
+        for (format, frames) in [
+            (BinarySampleFormat::F32_LE, 1025),
+            (BinarySampleFormat::F32_LE, 1041),
+            (BinarySampleFormat::F64_LE, 1025),
+            (BinarySampleFormat::F64_LE, 1041),
+        ] {
+            let valid_frames = 1025;
+            let mut data = Vec::new();
+            for frame in 0..frames {
+                let first = if frame == valid_frames - 1 {
+                    -0.875
+                } else {
+                    0.25
+                };
+                let third = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.75][frame % 4];
+                for value in [first, 2.0, third] {
+                    let value = if frame < valid_frames { value } else { 9.0 };
+                    match format {
+                        BinarySampleFormat::F32_LE => data.extend(value.to_f32().to_le_bytes()),
+                        BinarySampleFormat::F64_LE => data.extend(value.to_le_bytes()),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let chunk = buffer_to_chunk_rawbytes(
+                &data,
+                3,
+                &format,
+                valid_frames * 3 * format.bytes_per_sample(),
+                &[true, false, true],
+                true,
+            );
+            assert_eq!((chunk.frames, chunk.valid_frames), (frames, valid_frames));
+            assert_eq!((chunk.minval, chunk.maxval), (-0.875, 0.75));
+            assert!(chunk.waveforms[1].is_empty());
+            for frame in 0..frames {
+                let first = if frame >= valid_frames {
+                    0.0
+                } else if frame == valid_frames - 1 {
+                    -0.875
+                } else {
+                    0.25
+                };
+                let third = if frame < valid_frames && frame % 4 == 3 {
+                    0.75
+                } else {
+                    0.0
+                };
+                assert_eq!(chunk.waveforms[0][frame], first);
+                assert_eq!(chunk.waveforms[2][frame], third);
+            }
+        }
+    }
 
     #[test]
     fn to_buffer_int16() {

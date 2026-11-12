@@ -16,11 +16,9 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use rand::{SeedableRng, rngs::SmallRng};
-use rand_distr::{Distribution, Triangular, Uniform};
-use ringbuf::LocalRb;
-use ringbuf::storage::Heap;
-use ringbuf::traits::*;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand_distr::{Distribution, Uniform};
+use std::collections::VecDeque;
 
 use crate::{CamillaFloat, ToCamillaFloat, config, filters::Filter};
 
@@ -41,12 +39,12 @@ pub struct NoiseShaper<'a> {
     // optimization: lifetime allows taking coefficients
     // from an array instead of allocating a `Vec`.
     filter: &'a [CamillaFloat],
-    buffer: LocalRb<Heap<CamillaFloat>>,
+    buffer: VecDeque<CamillaFloat>,
 }
 
 impl<'a> NoiseShaper<'a> {
     pub fn new(filter: &'a [CamillaFloat]) -> Self {
-        let buffer = LocalRb::new(filter.len());
+        let buffer = VecDeque::with_capacity(filter.len());
         Self { filter, buffer }
     }
 
@@ -458,6 +456,7 @@ impl<'a> NoiseShaper<'a> {
         ])
     }
 
+    #[inline]
     pub fn process(&mut self, scaled: CamillaFloat, dither: CamillaFloat) -> CamillaFloat {
         let mut filt_buf = 0.0;
         for (item, coeff) in self.buffer.iter().zip(self.filter.iter().rev()) {
@@ -468,7 +467,10 @@ impl<'a> NoiseShaper<'a> {
         let result = scaled_plus_err + dither;
         let result_r = result.round(); // away from zero
 
-        self.buffer.push_overwrite(scaled_plus_err - result_r);
+        if self.buffer.len() == self.filter.len() {
+            self.buffer.pop_front();
+        }
+        self.buffer.push_back(scaled_plus_err - result_r);
 
         result_r
     }
@@ -579,18 +581,19 @@ impl Filter for Dither<'_> {
     }
 
     fn process_waveform(&mut self, waveform: &mut [CamillaFloat]) {
-        for item in waveform.iter_mut() {
-            let scaled = *item * self.scalefact;
-            let dither = self.ditherer.sample();
-
-            let result_r = if let Some(shaper) = &mut self.shaper {
-                shaper.process(scaled, dither)
-            } else {
-                let result = scaled + dither;
-                result.round()
-            };
-
-            *item = result_r / self.scalefact;
+        let scalefact = self.scalefact;
+        if let Some(shaper) = &mut self.shaper {
+            for item in waveform.iter_mut() {
+                let scaled = *item * scalefact;
+                let dither = self.ditherer.sample();
+                *item = shaper.process(scaled, dither) / scalefact;
+            }
+        } else {
+            for item in waveform.iter_mut() {
+                let scaled = *item * scalefact;
+                let dither = self.ditherer.sample();
+                *item = (scaled + dither).round() / scalefact;
+            }
         }
     }
 
@@ -630,7 +633,7 @@ fn create_rng() -> SmallRng {
 #[derive(Clone, Debug)]
 pub struct TriangularDitherer {
     cached_rng: SmallRng,
-    distribution: Triangular<CamillaFloat>,
+    amplitude: CamillaFloat,
 }
 
 impl Ditherer for TriangularDitherer {
@@ -638,12 +641,14 @@ impl Ditherer for TriangularDitherer {
         let amplitude = amplitude / 2.0; // negative to positive peak
         Self {
             cached_rng: create_rng(),
-            distribution: Triangular::new(-amplitude, amplitude, 0.0).unwrap(),
+            amplitude,
         }
     }
 
     fn sample(&mut self) -> CamillaFloat {
-        self.distribution.sample(&mut self.cached_rng)
+        // Two independent uniforms give symmetric TPDF without a square root.
+        (self.cached_rng.random::<CamillaFloat>() - self.cached_rng.random::<CamillaFloat>())
+            * self.amplitude
     }
 }
 
@@ -723,8 +728,13 @@ impl Default for NoopDitherer {
 
 #[cfg(test)]
 mod tests {
+    use super::{Ditherer, NoiseShaper, TriangularDitherer};
     use crate::config::finite;
-    use crate::{CamillaFloat, config::DitherParameters, filters::Filter, filters::dither::Dither};
+    use crate::{
+        CamillaFloat, ToCamillaFloat, config::DitherParameters, filters::Filter,
+        filters::dither::Dither,
+    };
+    use rand::{SeedableRng, rngs::SmallRng};
 
     fn is_close(left: CamillaFloat, right: CamillaFloat, maxdiff: CamillaFloat) -> bool {
         println!("{left} - {right}");
@@ -778,6 +788,34 @@ mod tests {
     }
 
     #[test]
+    fn flat_dither_preserves_noise_level_across_input_values() {
+        for level in [-0.375, 0.0, 0.25, 0.5] {
+            let ditherer = TriangularDitherer {
+                cached_rng: SmallRng::seed_from_u64(42),
+                ..TriangularDitherer::default()
+            };
+            let mut filter = Dither::new("test", 16, ditherer, None);
+            let mut waveform = vec![0.0; 1024];
+            let mut sum = 0.0;
+            let mut sum_squared = 0.0;
+            for _ in 0..256 {
+                waveform.fill(level / 32768.0);
+                filter.process_waveform(&mut waveform);
+                for sample in &waveform {
+                    let quantized = sample * 32768.0;
+                    assert_eq!(quantized, quantized.round());
+                    let error = quantized - level;
+                    sum += error;
+                    sum_squared += error * error;
+                }
+            }
+            let count = (256.0 * waveform.len() as f64).to_camilla_float();
+            assert!((sum / count).abs() < 0.004);
+            assert!((sum_squared / count - 0.25).abs() < 0.004);
+        }
+    }
+
+    #[test]
     fn test_high_pass() {
         let mut waveform = vec![-1.0, -0.5, -1.0 / 3.0, 0.0, 1.0 / 3.0, 0.5, 1.0];
         let waveform2 = waveform.clone();
@@ -805,5 +843,62 @@ mod tests {
             128.0 * waveform[2],
             1e-9
         ));
+    }
+
+    #[test]
+    fn shaped_dither_preserves_feedback_across_blocks() {
+        for shaper in [
+            NoiseShaper::fweighted_441(),
+            NoiseShaper::fweighted_long_441(),
+            NoiseShaper::fweighted_short_441(),
+            NoiseShaper::gesemann_441(),
+            NoiseShaper::gesemann_48(),
+            NoiseShaper::lipshitz_441(),
+            NoiseShaper::lipshitz_long_441(),
+            NoiseShaper::shibata_441(),
+            NoiseShaper::shibata_high_441(),
+            NoiseShaper::shibata_low_441(),
+            NoiseShaper::shibata_48(),
+            NoiseShaper::shibata_high_48(),
+            NoiseShaper::shibata_low_48(),
+            NoiseShaper::shibata_882(),
+            NoiseShaper::shibata_low_882(),
+            NoiseShaper::shibata_96(),
+            NoiseShaper::shibata_low_96(),
+            NoiseShaper::shibata_192(),
+            NoiseShaper::shibata_low_192(),
+        ] {
+            let coefficients = shaper.filter;
+            let ditherer = TriangularDitherer {
+                cached_rng: SmallRng::seed_from_u64(42),
+                ..TriangularDitherer::default()
+            };
+            let mut reference_ditherer = ditherer.clone();
+            let mut filter = Dither::new("test", 16, ditherer, Some(shaper));
+            let mut errors = Vec::new();
+            for frames in [1, 7, 64, 1024, 31] {
+                let mut waveform: Vec<_> = (0..frames)
+                    .map(|i| (0.7 * (i as f64 * 0.13).sin()).to_camilla_float())
+                    .collect();
+                let expected: Vec<_> = waveform
+                    .iter()
+                    .map(|sample| {
+                        let mut feedback = 0.0;
+                        for (error, coeff) in errors.iter().zip(coefficients.iter().rev()) {
+                            feedback += coeff * error;
+                        }
+                        let scaled = sample * 32768.0 + feedback;
+                        let quantized = (scaled + reference_ditherer.sample()).round();
+                        if errors.len() == coefficients.len() {
+                            errors.remove(0);
+                        }
+                        errors.push(scaled - quantized);
+                        quantized / 32768.0
+                    })
+                    .collect();
+                filter.process_waveform(&mut waveform);
+                assert_eq!(waveform, expected);
+            }
+        }
     }
 }

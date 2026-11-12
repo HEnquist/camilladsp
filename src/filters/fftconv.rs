@@ -431,13 +431,14 @@ fn transform_coeffs(
     // `validate_config` rejecting empty coefficients, but the constructors are
     // public.
     let nsegments = coeffs.len().div_ceil(data_length).max(1);
-    let mut coeffs_padded = vec![vec![0.0; 2 * data_length]; nsegments];
+    let mut coeffs_padded = vec![0.0; 2 * data_length];
     let mut coeffs_f = SegmentedSpectrum::zeroed(nsegments, data_length + 1);
-    for (n, coeff) in coeffs.iter().enumerate() {
-        coeffs_padded[n / data_length][n % data_length] = coeff / (2 * data_length) as CamillaFloat;
-    }
-    for (n, segment) in coeffs_padded.iter_mut().enumerate() {
-        fft.process_with_scratch(segment, coeffs_f.segment_mut(n), scratch)
+    for (n, segment) in coeffs.chunks(data_length).enumerate() {
+        coeffs_padded.fill(0.0);
+        for (padded, coeff) in coeffs_padded.iter_mut().zip(segment) {
+            *padded = coeff / (2 * data_length) as CamillaFloat;
+        }
+        fft.process_with_scratch(&mut coeffs_padded, coeffs_f.segment_mut(n), scratch)
             .unwrap();
     }
     Arc::new(coeffs_f)
@@ -451,12 +452,10 @@ pub struct FftConv {
     coeffs_f: Arc<ConvCoeffs>,
     fft: Arc<dyn RealToComplex<CamillaFloat>>,
     ifft: Arc<dyn ComplexToReal<CamillaFloat>>,
-    scratch_fw: Vec<Complex<CamillaFloat>>,
-    scratch_inv: Vec<Complex<CamillaFloat>>,
+    scratch: Vec<Complex<CamillaFloat>>,
     input_buf: Vec<CamillaFloat>,
     input_f: SegmentedSpectrum,
     temp_buf: Vec<Complex<CamillaFloat>>,
-    output_buf: Vec<CamillaFloat>,
     index: usize,
 }
 
@@ -476,8 +475,7 @@ impl FftConv {
     /// to stays private to this filter.
     pub fn with_coeffs(name: &str, data_length: usize, coeffs_f: Arc<ConvCoeffs>) -> Self {
         let (fft, ifft) = plan_transforms(data_length);
-        let scratch_fw = fft.make_scratch_vec();
-        let scratch_inv = ifft.make_scratch_vec();
+        let scratch_len = fft.get_scratch_len().max(ifft.get_scratch_len());
         let nsegments = coeffs_f.len();
         debug!("Conv {name} is using {nsegments} segments");
         FftConv {
@@ -488,12 +486,10 @@ impl FftConv {
             coeffs_f,
             fft,
             ifft,
-            scratch_fw,
-            scratch_inv,
+            scratch: vec![Complex::zero(); scratch_len],
             input_f: SegmentedSpectrum::zeroed(nsegments, data_length + 1),
             input_buf: vec![0.0; 2 * data_length],
             temp_buf: vec![Complex::zero(); data_length + 1],
-            output_buf: vec![0.0; 2 * data_length],
             index: 0,
         }
     }
@@ -539,45 +535,40 @@ impl Filter for FftConv {
         }
 
         // FFT and store result in history, update index
-        self.index = (self.index + 1) % self.nsegments;
+        self.index += 1;
+        if self.index == self.nsegments {
+            self.index = 0;
+        }
         self.fft
             .process_with_scratch(
                 &mut self.input_buf,
                 self.input_f.segment_mut(self.index),
-                &mut self.scratch_fw,
+                &mut self.scratch,
             )
             .unwrap();
 
         // Loop through history of input FTs, multiply with filter FTs, accumulate result
-        let segm = 0;
-        let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-        CamillaFloat::multiply_elements(
-            &mut self.temp_buf,
-            self.input_f.segment(hist_idx),
-            self.coeffs_f.segment(segm),
-        );
-        for segm in 1..self.nsegments {
-            let hist_idx = (self.index + self.nsegments - segm) % self.nsegments;
-            CamillaFloat::multiply_add_elements(
-                &mut self.temp_buf,
-                self.input_f.segment(hist_idx),
-                self.coeffs_f.segment(segm),
-            );
+        let seg_len = self.npoints + 1;
+        let (head, tail) = self.input_f.data.split_at((self.index + 1) * seg_len);
+        let history = head
+            .rchunks_exact(seg_len)
+            .chain(tail.rchunks_exact(seg_len));
+        let mut segments = history.zip(self.coeffs_f.data.chunks_exact(seg_len));
+        let (input, coeffs) = segments.next().unwrap();
+        CamillaFloat::multiply_elements(&mut self.temp_buf, input, coeffs);
+        for (input, coeffs) in segments {
+            CamillaFloat::multiply_add_elements(&mut self.temp_buf, input, coeffs);
         }
 
         // IFFT result, store result and overlap
         self.ifft
-            .process_with_scratch(
-                &mut self.temp_buf,
-                &mut self.output_buf,
-                &mut self.scratch_inv,
-            )
+            .process_with_scratch(&mut self.temp_buf, &mut self.input_buf, &mut self.scratch)
             .unwrap();
         for (n, item) in waveform.iter_mut().enumerate().take(self.npoints) {
-            *item = self.output_buf[n] + self.overlap[n];
+            *item = self.input_buf[n] + self.overlap[n];
         }
         self.overlap
-            .copy_from_slice(&self.output_buf[self.npoints..]);
+            .copy_from_slice(&self.input_buf[self.npoints..]);
     }
 
     fn update_parameters(&mut self, conf: config::Filter) {
@@ -600,7 +591,7 @@ impl Filter for FftConv {
                 // `ConvCoeffCache::transformed` neither happens here at all.
                 let coeffs = coeffs_for_pass(&self.name, &conf);
                 let coeffs_f =
-                    transform_coeffs(&coeffs, self.npoints, &*self.fft, &mut self.scratch_fw);
+                    transform_coeffs(&coeffs, self.npoints, &*self.fft, &mut self.scratch);
                 cache.insert(&self.name, self.npoints, &coeffs_f);
                 coeffs_f
             }
@@ -612,6 +603,7 @@ impl Filter for FftConv {
             // Length changed, so the history no longer lines up. Clear it.
             self.nsegments = nsegments;
             self.input_f = SegmentedSpectrum::zeroed(nsegments, self.npoints + 1);
+            self.index = 0;
         }
         self.coeffs_f = coeffs_f;
     }
@@ -875,10 +867,15 @@ mod tests {
     /// with per-filter history left alone.
     #[test]
     fn cached_update_shares_coeffs() {
-        let initial: Vec<CamillaFloat> = vec![1.0, 0.0, 0.0, 0.0];
+        let mut initial: Vec<CamillaFloat> = vec![0.0; 20];
+        initial[0] = 1.0;
         let mut left = FftConv::new("conv", 4, &initial);
         let mut right = FftConv::new("conv", 4, &initial);
         assert!(!Arc::ptr_eq(&left.coeffs_f, &right.coeffs_f));
+        for _ in 0..3 {
+            left.process_waveform(&mut [0.25, -0.5, 0.75, 0.0]);
+            right.process_waveform(&mut [0.0; 4]);
+        }
 
         let conf = config::Filter::Conv {
             description: None,
@@ -931,6 +928,61 @@ mod tests {
         assert!(compare_waveforms(wave3, exp3, 1e-5));
         assert!(compare_waveforms(wave4, exp4, 1e-5));
         assert!(compare_waveforms(wave5, exp5, 1e-5));
+    }
+
+    #[test]
+    fn partial_last_segment_is_zero_padded() {
+        use crate::ToCamillaFloat;
+
+        let coeffs: Vec<_> = (0..173)
+            .map(|i| (0.1 * (i as f64 * 0.2).sin()).to_camilla_float())
+            .collect();
+        let mut filter = FftConv::new("test", 64, &coeffs);
+        for block in 0..5 {
+            let mut wave = vec![0.0; 64];
+            if block == 0 {
+                wave[0] = 1.0;
+            }
+            filter.process_waveform(&mut wave);
+            for (i, value) in wave.iter().enumerate() {
+                let expected = coeffs.get(block * 64 + i).copied().unwrap_or(0.0);
+                assert!((value - expected).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn continuous_audio_matches_direct_convolution_across_history_wraps() {
+        for frames in [16, 63, 64, 96, 257, 1024] {
+            for taps in [1, frames - 1, 3 * frames + 5] {
+                let values: Vec<_> = (0..taps)
+                    .map(|i| finite!((i as f64 * 0.13).cos() / taps as f64))
+                    .collect();
+                let coeffs: Vec<_> = values.iter().map(|v| v.get().to_camilla_float()).collect();
+                let mut filter =
+                    FftConv::from_config("test", frames, ConvParameters::Values { values });
+                let input: Vec<_> = (0..9 * frames)
+                    .map(|i| (0.5 * (i as f64 * 0.017).sin()).to_camilla_float())
+                    .collect();
+                for (block, source) in input.chunks(frames).enumerate() {
+                    let mut waveform = source.to_vec();
+                    filter.process_waveform(&mut waveform);
+                    for (i, sample) in waveform.iter().enumerate() {
+                        let index = block * frames + i;
+                        let expected: CamillaFloat = coeffs
+                            .iter()
+                            .take(index + 1)
+                            .enumerate()
+                            .map(|(k, coeff)| coeff * input[index - k])
+                            .sum();
+                        assert!(
+                            (sample - expected).abs() < ROUNDTRIP_TOL,
+                            "frames={frames}, taps={taps}, sample={index}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // FMA rounds differently from scalar; SIMD results may differ by a few ULPs.
