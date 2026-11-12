@@ -1,0 +1,66 @@
+[package]
+name = "camilladsp-schema"
+version.workspace = true
+authors = ["Henrik Enquist <henrik.enquist@gmail.com>"]
+edition = "2024"
+description = "Config and websocket protocol types, config validation and coefficient file reading for CamillaDSP"
+rust-version = "1.90"
+license = "GPL-3.0-only OR MPL-2.0"
+readme = "README.md"
+repository = "https://github.com/HEnquist/camilladsp"
+homepage = "https://camilladsp.com"
+keywords = ["audio", "dsp", "camilladsp", "config", "websocket"]
+categories = ["multimedia::audio", "config"]
+# An allow-list. tests/ is included because the [[test]] entry needs its file, otherwise
+# cargo package warns. The ws_docs test reads websocket.md from outside the crate, and skips
+# the check when it is not there.
+include = [
+    "/src",
+    "/tests",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE_GPLv3.txt",
+    "/LICENSE_MPL2.0.txt",
+]
+
+# The features only add device types and OpenAPI schemas, so document them all.
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+# These only decide which device types the config accepts. The camilladsp
+# features of the same names enable them.
+pipewire-backend = []
+dummy-backend = []
+# OpenAPI schemas for the config types and the protocol types a client passes
+# on, for the GUI's API spec. camilladsp does not enable it.
+utoipa = ["dep:utoipa"]
+
+# The sample precision is a raw rustc cfg, see CamillaFloat. RUSTFLAGS applies to
+# every crate in the build, so this crate always agrees with camilladsp on it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(camillafloat_f32)'] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive", "rc"] }
+yaml_serde = "0.10.3"
+serde_path_to_error = "0.1"
+log = "0.4.14"
+parking_lot = "0.12.1"
+audioadapter = "5.0.0"
+audioadapter-sample = "5.1.0"
+waveadapter = "0.3.0"
+serde_json = "1.0"
+# preserve_order keeps the properties in declaration order, which the generated
+# websocket.md relies on.
+utoipa = { version = "6.0.0", optional = true, features = ["preserve_order"] }
+
+[dev-dependencies]
+minijinja = { version = "3.0.0", features = ["serde"] }
+# preserve_order keeps the schema properties in declaration order, which the generated
+# websocket.md relies on.
+serde_json = { version = "1.0", features = ["preserve_order"] }
+
+[[test]]
+name = "ws_docs"
+required-features = ["utoipa"]

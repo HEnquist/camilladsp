@@ -14,12 +14,16 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
-use crate::Res;
+use crate::CamillaFloat;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
 use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
+use crate::utils::time::time_to_samples;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::noisegate::validate_noise_gate;
 
 #[derive(Clone, Debug)]
 pub struct NoiseGate {
@@ -27,13 +31,13 @@ pub struct NoiseGate {
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
     pub process_channels: Vec<usize>,
-    pub attack: PrcFmt,
-    pub release: PrcFmt,
-    pub threshold: PrcFmt,
-    pub factor: PrcFmt,
+    pub attack: CamillaFloat,
+    pub release: CamillaFloat,
+    pub threshold: CamillaFloat,
+    pub factor: CamillaFloat,
     pub samplerate: usize,
-    pub scratch: Vec<PrcFmt>,
-    pub prev_loudness: PrcFmt,
+    pub scratch: Vec<CamillaFloat>,
+    pub prev_loudness: CamillaFloat,
 }
 
 impl NoiseGate {
@@ -46,7 +50,6 @@ impl NoiseGate {
     ) -> Self {
         let name = name.to_string();
         let channels = config.channels;
-        let srate = samplerate as PrcFmt;
         let mut monitor_channels = config.monitor_channels();
         if monitor_channels.is_empty() {
             for n in 0..channels {
@@ -59,8 +62,11 @@ impl NoiseGate {
                 process_channels.push(n);
             }
         }
-        let attack = (-1.0 / srate / config.attack).exp();
-        let release = (-1.0 / srate / config.release).exp();
+        let attack_samples = time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+        let release_samples =
+            time_to_samples(config.release.get(), config.release_unit, samplerate);
+        let attack = (-1.0 / attack_samples).exp();
+        let release = (-1.0 / release_samples).exp();
         let scratch = vec![0.0; chunksize];
 
         debug!(
@@ -75,16 +81,16 @@ impl NoiseGate {
             config.attenuation
         );
 
-        let factor = db_to_linear(-config.attenuation);
+        let factor = db_to_linear(-config.attenuation.get()).to_camilla_float();
 
         NoiseGate {
             name,
             channels,
             monitor_channels,
             process_channels,
-            attack,
-            release,
-            threshold: config.threshold,
+            attack: attack.to_camilla_float(),
+            release: release.to_camilla_float(),
+            threshold: config.threshold.to_camilla_float(),
             factor,
             samplerate,
             scratch,
@@ -92,11 +98,11 @@ impl NoiseGate {
         }
     }
 
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
+    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
+    /// A channel that was not captured is empty, and counts as silence.
     fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        self.scratch.copy_from_slice(&input.waveforms[ch]);
-        for ch in self.monitor_channels.iter().skip(1) {
+        self.scratch.fill(0.0);
+        for ch in self.monitor_channels.iter() {
             for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
                 *acc += *val;
             }
@@ -118,17 +124,20 @@ impl NoiseGate {
     }
 
     /// Calculate linear gain, store result in self.scratch
-    fn calculate_linear_gain(&mut self) {
+    fn calculate_linear_gain(&mut self) -> bool {
+        let mut all_open = true;
         for val in self.scratch.iter_mut() {
             if *val < self.threshold {
                 *val = self.factor;
+                all_open = false;
             } else {
                 *val = 1.0;
             }
         }
+        all_open
     }
 
-    fn apply_gain(&self, input: &mut [PrcFmt]) {
+    fn apply_gain(&self, input: &mut [CamillaFloat]) {
         for (val, gain) in input.iter_mut().zip(self.scratch.iter()) {
             *val *= gain;
         }
@@ -141,14 +150,15 @@ impl Processor for NoiseGate {
     }
 
     /// Apply a NoiseGate to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
-        self.calculate_linear_gain();
+        if self.calculate_linear_gain() {
+            return;
+        }
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -157,7 +167,7 @@ impl Processor for NoiseGate {
         } = config
         {
             let channels = config.channels;
-            let srate = self.samplerate as PrcFmt;
+            let samplerate = self.samplerate;
             let mut monitor_channels = config.monitor_channels();
             if monitor_channels.is_empty() {
                 for n in 0..channels {
@@ -170,15 +180,19 @@ impl Processor for NoiseGate {
                     process_channels.push(n);
                 }
             }
-            let attack = (-1.0 / srate / config.attack).exp();
-            let release = (-1.0 / srate / config.release).exp();
+            let attack_samples =
+                time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+            let release_samples =
+                time_to_samples(config.release.get(), config.release_unit, samplerate);
+            let attack = (-1.0 / attack_samples).exp();
+            let release = (-1.0 / release_samples).exp();
 
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
-            self.attack = attack;
-            self.release = release;
-            self.threshold = config.threshold;
-            self.factor = db_to_linear(-config.attenuation);
+            self.attack = attack.to_camilla_float();
+            self.release = release.to_camilla_float();
+            self.threshold = config.threshold.get().to_camilla_float();
+            self.factor = db_to_linear(-config.attenuation.get()).to_camilla_float();
 
             debug!(
                 "Updated noise gate '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, attenuation: {}",
@@ -197,36 +211,49 @@ impl Processor for NoiseGate {
     }
 }
 
-/// Validate the noise gate config, to give a helpful message intead of a panic.
-pub fn validate_noise_gate(config: &config::NoiseGateParameters) -> Res<()> {
-    let channels = config.channels;
-    if config.attack <= 0.0 {
-        let msg = "Attack value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.release <= 0.0 {
-        let msg = "Release value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{TimeUnit, finite};
+
+    #[test]
+    fn test_open_gate_tracks_envelope_and_updates() {
+        for channels in [2, 8, 32] {
+            let mut params = config::NoiseGateParameters {
+                channels,
+                monitor_channels: Some(vec![0]),
+                process_channels: Some((1..channels).collect()),
+                attack: finite!(1.0),
+                attack_unit: TimeUnit::Samples,
+                release: finite!(1.0),
+                release_unit: TimeUnit::Samples,
+                threshold: finite!(-20.0),
+                attenuation: finite!(40.0),
+            };
+            let mut gate = NoiseGate::from_config("test", params.clone(), 48000, 4);
+            let signal = [0.25, -0.5, 0.125, -0.25];
+            for (level, attenuation, gain) in
+                [(0.5, 40.0, 1.0), (0.001, 40.0, 0.01), (0.001, 20.0, 0.1)]
+            {
+                params.attenuation = finite!(attenuation);
+                gate.update_parameters(config::Processor::NoiseGate {
+                    description: None,
+                    parameters: params.clone(),
+                });
+                let mut waveforms = vec![signal.to_vec(); channels];
+                waveforms[0].fill(level);
+                let mut chunk = AudioChunk::new(waveforms, 0.5, -0.5, 4, 4);
+                gate.process_chunk(&mut chunk);
+                assert_eq!(chunk.waveforms[0], vec![level; 4]);
+                if gain == 1.0 {
+                    assert!(gate.prev_loudness < -5.0);
+                }
+                for waveform in chunk.waveforms.iter().skip(1) {
+                    for (output, input) in waveform.iter().zip(signal) {
+                        assert!((output - input * gain).abs() < 1.0e-8);
+                    }
+                }
+            }
         }
     }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
-        }
-    }
-    Ok(())
 }

@@ -14,40 +14,36 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config::BinarySampleFormat;
 use crate::utils::stash::{container_from_stash, recycle_chunk, vec_from_stash};
 use audioadapter::{Adapter, AdapterMut};
 use audioadapter_buffers::number_to_float::InterleavedNumbers;
 use audioadapter_sample::sample::{F32_LE, F64_LE, I16_LE, I24_4LJ_LE, I24_4RJ_LE, I24_LE, I32_LE};
-#[cfg(feature = "cpal-backend")]
-use num_traits;
-#[cfg(feature = "cpal-backend")]
-use std::collections::VecDeque;
 
-fn chunk_to_buffer_with_adapter<'a, A>(
+fn chunk_to_buffer_with_adapter<A>(
     chunk: AudioChunk,
-    adapter: &'a mut A,
+    adapter: &mut A,
     bytes_per_sample: usize,
 ) -> (usize, usize)
 where
-    A: AdapterMut<'a, PrcFmt>,
+    A: AdapterMut<CamillaFloat>,
 {
     let mut clipped = 0;
-    let mut peak: PrcFmt = 0.0;
+    let mut peak: CamillaFloat = 0.0;
     let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
-    for chan in 0..chunk.channels {
-        if chunk.waveforms[chan].is_empty() {
+    for (chan, waveform) in chunk.waveforms.iter().enumerate().take(chunk.channels) {
+        if waveform.is_empty() {
             adapter.fill_channel_with(chan, &0.0);
         } else {
-            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
+            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, waveform);
             clipped += clp;
             if clp > 0 && nbr > 0 {
-                let pk = chunk.waveforms[chan]
+                let pk = waveform
                     .iter()
                     .map(|x| x.abs())
-                    .fold(0.0, PrcFmt::max);
+                    .fold(0.0, CamillaFloat::max);
                 if pk > peak {
                     peak = pk;
                 }
@@ -67,8 +63,8 @@ where
     (num_valid_bytes, clipped)
 }
 
-fn buffer_to_chunk_with_adapter<'a, A>(
-    adapter: &'a A,
+fn buffer_to_chunk_with_adapter<A>(
+    adapter: &A,
     channels: usize,
     num_frames: usize,
     num_valid_frames: usize,
@@ -76,40 +72,43 @@ fn buffer_to_chunk_with_adapter<'a, A>(
     check_for_nan: bool,
 ) -> AudioChunk
 where
-    A: Adapter<'a, PrcFmt>,
+    A: Adapter<CamillaFloat>,
 {
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
+    let mut maxvalue: CamillaFloat = 0.0;
+    let mut minvalue: CamillaFloat = 0.0;
     let mut wfs = container_from_stash(channels);
     for (ch, used) in used_channels.iter().enumerate() {
         if *used {
             let mut wf = vec_from_stash(num_frames);
             let nbr = adapter.copy_from_channel_to_slice(ch, 0, &mut wf[0..num_valid_frames]);
             if nbr > 0 {
-                let (mavx, minv) = if check_for_nan {
-                    let mut maxv = 0.0;
-                    let mut minv = 0.0;
+                if check_for_nan {
                     let mut invalid_values = 0;
                     for value in wf.iter_mut() {
                         if !value.is_finite() {
                             invalid_values += 1;
                             *value = 0.0;
                         }
-                        if *value > maxv {
-                            maxv = *value;
-                        } else if *value < minv {
-                            minv = *value;
-                        }
                     }
                     if invalid_values > 0 {
                         warn!("Ignored {invalid_values} infinite or NaN values in channel {ch}");
                     }
-                    (maxv, minv)
-                } else {
-                    wf.iter().fold((0.0, 0.0), |(max, min), x| {
-                        (PrcFmt::max(max, *x), PrcFmt::min(min, *x))
-                    })
-                };
+                }
+                let mut maxima: [CamillaFloat; 4] = [0.0; 4];
+                let mut minima: [CamillaFloat; 4] = [0.0; 4];
+                let (blocks, remainder) = wf.as_chunks::<4>();
+                for block in blocks {
+                    for i in 0..4 {
+                        maxima[i] = maxima[i].max(block[i]);
+                        minima[i] = minima[i].min(block[i]);
+                    }
+                }
+                let mut mavx = maxima.into_iter().fold(0.0, CamillaFloat::max);
+                let mut minv = minima.into_iter().fold(0.0, CamillaFloat::min);
+                for value in remainder {
+                    mavx = mavx.max(*value);
+                    minv = minv.min(*value);
+                }
                 if mavx > maxvalue {
                     maxvalue = mavx;
                 }
@@ -137,7 +136,7 @@ pub fn chunk_to_buffer_rawbytes(
     match *sample_format {
         BinarySampleFormat::S16_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I16_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I16_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -145,7 +144,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_3_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -153,7 +152,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_4_RJ_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_4RJ_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_4RJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -161,7 +160,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S24_4_LJ_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I24_4LJ_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I24_4LJ_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -169,7 +168,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::S32_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [I32_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [I32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -177,7 +176,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::F32_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [F32_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [F32_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -185,7 +184,7 @@ pub fn chunk_to_buffer_rawbytes(
         ),
         BinarySampleFormat::F64_LE => chunk_to_buffer_with_adapter(
             chunk,
-            &mut InterleavedNumbers::<&mut [F64_LE], PrcFmt>::new_from_bytes_mut(
+            &mut InterleavedNumbers::<&mut [F64_LE], CamillaFloat>::new_from_bytes_mut(
                 buf, channels, frames,
             )
             .unwrap(),
@@ -207,8 +206,10 @@ pub fn buffer_to_chunk_rawbytes(
     let num_valid_frames = valid_bytes / sample_format.bytes_per_sample() / channels;
     match *sample_format {
         BinarySampleFormat::S16_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I16_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I16_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -216,8 +217,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_3_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I24_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -225,7 +228,7 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_4_RJ_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_4RJ_LE], PrcFmt>::new_from_bytes(
+            &InterleavedNumbers::<&[I24_4RJ_LE], CamillaFloat>::new_from_bytes(
                 buffer, channels, num_frames,
             )
             .unwrap(),
@@ -236,7 +239,7 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S24_4_LJ_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I24_4LJ_LE], PrcFmt>::new_from_bytes(
+            &InterleavedNumbers::<&[I24_4LJ_LE], CamillaFloat>::new_from_bytes(
                 buffer, channels, num_frames,
             )
             .unwrap(),
@@ -247,8 +250,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::S32_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[I32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[I32_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -256,8 +261,10 @@ pub fn buffer_to_chunk_rawbytes(
             false,
         ),
         BinarySampleFormat::F32_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[F32_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[F32_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -265,8 +272,10 @@ pub fn buffer_to_chunk_rawbytes(
             check_for_nan,
         ),
         BinarySampleFormat::F64_LE => buffer_to_chunk_with_adapter(
-            &InterleavedNumbers::<&[F64_LE], PrcFmt>::new_from_bytes(buffer, channels, num_frames)
-                .unwrap(),
+            &InterleavedNumbers::<&[F64_LE], CamillaFloat>::new_from_bytes(
+                buffer, channels, num_frames,
+            )
+            .unwrap(),
             channels,
             num_frames,
             num_valid_frames,
@@ -276,191 +285,68 @@ pub fn buffer_to_chunk_rawbytes(
     }
 }
 
-/// Convert an AudioChunk to an interleaved queue of ints, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn chunk_to_queue_int<T: num_traits::cast::NumCast>(
-    chunk: &AudioChunk,
-    queue: &mut VecDeque<T>,
-    scalefactor: PrcFmt,
-) -> usize {
-    let _num_samples = chunk.channels * chunk.frames;
-    let mut value: T;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = if (scalefactor >= 2_147_483_648.0) && cfg!(feature = "32bit") {
-        (scalefactor - 128.0) / scalefactor
-    } else {
-        (scalefactor - 1.0) / scalefactor
-    };
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = if chunk.waveforms[chan].is_empty() {
-                0.0
-            } else {
-                chunk.waveforms[chan][frame]
-            };
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val * scalefactor) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float {}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            queue.push_back(value);
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
-            clipped,
-            20.0 * peak.log10(),
-            peak * 100.0
-        );
-    }
-    clipped
-}
-
-/// Convert a buffer of interleaved ints to an AudioChunk, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn queue_to_chunk_int<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    queue: &mut VecDeque<T>,
-    num_frames: usize,
-    channels: usize,
-    scalefactor: PrcFmt,
-) -> AudioChunk {
-    let mut value: PrcFmt;
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
-    for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
-    }
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = queue.pop_front().unwrap().as_();
-            value /= scalefactor;
-            if value > maxvalue {
-                maxvalue = value;
-            }
-            if value < minvalue {
-                minvalue = value;
-            }
-            wf.push(value);
-        }
-    }
-    AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_frames)
-}
-
-/// Convert an AudioChunk to an interleaved buffer of floats, only used by cpal backend.
-#[cfg(feature = "cpal-backend")]
-pub fn chunk_to_queue_float<T: num_traits::cast::NumCast>(
-    chunk: &AudioChunk,
-    queue: &mut VecDeque<T>,
-) -> usize {
-    let _num_samples = chunk.channels * chunk.frames;
-    //let mut buf = Vec::with_capacity(num_samples);
-    let mut value: T;
-    let mut clipped = 0;
-    let mut peak = 0.0;
-    let maxval = 1.0;
-    let minval = -1.0;
-    for frame in 0..chunk.frames {
-        for chan in 0..chunk.channels {
-            let mut float_val = if chunk.waveforms[chan].is_empty() {
-                0.0
-            } else {
-                chunk.waveforms[chan][frame]
-            };
-            if float_val > maxval {
-                clipped += 1;
-                if float_val > peak {
-                    peak = float_val;
-                }
-                float_val = maxval;
-            } else if float_val < minval {
-                clipped += 1;
-                if -float_val > peak {
-                    peak = -float_val;
-                }
-                float_val = minval;
-            }
-            value = match num_traits::cast(float_val) {
-                Some(val) => val,
-                None => {
-                    debug!("bad float{}", float_val);
-                    num_traits::cast(0.0).unwrap()
-                }
-            };
-            queue.push_back(value);
-        }
-    }
-    if clipped > 0 {
-        warn!(
-            "Clipping detected, {} samples clipped, peak +{:.2} dB ({:.1}%)",
-            clipped,
-            20.0 * peak.log10(),
-            peak * 100.0
-        );
-    }
-    clipped
-}
-
-/// Convert a buffer of interleaved floats to an AudioChunk, only used by CPAL backend.
-#[cfg(feature = "cpal-backend")]
-pub fn queue_to_chunk_float<T: num_traits::cast::AsPrimitive<PrcFmt>>(
-    queue: &mut VecDeque<T>,
-    num_frames: usize,
-    channels: usize,
-) -> AudioChunk {
-    let mut value: PrcFmt;
-    let mut maxvalue: PrcFmt = 0.0;
-    let mut minvalue: PrcFmt = 0.0;
-    let mut wfs = Vec::with_capacity(channels);
-    for _chan in 0..channels {
-        wfs.push(Vec::with_capacity(num_frames));
-    }
-    for _frame in 0..num_frames {
-        for wf in wfs.iter_mut().take(channels) {
-            value = queue.pop_front().unwrap().as_();
-            if value > maxvalue {
-                maxvalue = value;
-            }
-            if value < minvalue {
-                minvalue = value;
-            }
-            wf.push(value);
-        }
-    }
-    AudioChunk::new(wfs, maxvalue, minvalue, num_frames, num_frames)
-}
-
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cpal-backend")]
-    use crate::PrcFmt;
+    use crate::ToF32;
     use crate::audiochunk::AudioChunk;
     use crate::config::BinarySampleFormat;
     use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
-    #[cfg(feature = "cpal-backend")]
-    use crate::utils::conversions::{
-        chunk_to_queue_float, chunk_to_queue_int, queue_to_chunk_float, queue_to_chunk_int,
-    };
-    #[cfg(feature = "cpal-backend")]
-    use std::collections::VecDeque;
+
+    #[test]
+    fn capture_levels_preserve_mask_padding_and_invalid_sample_cleanup() {
+        for (format, frames) in [
+            (BinarySampleFormat::F32_LE, 1025),
+            (BinarySampleFormat::F32_LE, 1041),
+            (BinarySampleFormat::F64_LE, 1025),
+            (BinarySampleFormat::F64_LE, 1041),
+        ] {
+            let valid_frames = 1025;
+            let mut data = Vec::new();
+            for frame in 0..frames {
+                let first = if frame == valid_frames - 1 {
+                    -0.875
+                } else {
+                    0.25
+                };
+                let third = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.75][frame % 4];
+                for value in [first, 2.0, third] {
+                    let value = if frame < valid_frames { value } else { 9.0 };
+                    match format {
+                        BinarySampleFormat::F32_LE => data.extend(value.to_f32().to_le_bytes()),
+                        BinarySampleFormat::F64_LE => data.extend(value.to_le_bytes()),
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let chunk = buffer_to_chunk_rawbytes(
+                &data,
+                3,
+                &format,
+                valid_frames * 3 * format.bytes_per_sample(),
+                &[true, false, true],
+                true,
+            );
+            assert_eq!((chunk.frames, chunk.valid_frames), (frames, valid_frames));
+            assert_eq!((chunk.minval, chunk.maxval), (-0.875, 0.75));
+            assert!(chunk.waveforms[1].is_empty());
+            for frame in 0..frames {
+                let first = if frame >= valid_frames {
+                    0.0
+                } else if frame == valid_frames - 1 {
+                    -0.875
+                } else {
+                    0.25
+                };
+                let third = if frame < valid_frames && frame % 4 == 3 {
+                    0.75
+                } else {
+                    0.0
+                };
+                assert_eq!(chunk.waveforms[0][frame], first);
+                assert_eq!(chunk.waveforms[2][frame], third);
+            }
+        }
+    }
 
     #[test]
     fn to_buffer_int16() {
@@ -576,9 +462,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 4];
         chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::S32_LE);
-        #[cfg(feature = "32bit")]
+        #[cfg(camillafloat_f32)]
         let expected = vec![0xD0, 0xCC, 0xCC, 0x0C];
-        #[cfg(not(feature = "32bit"))]
+        #[cfg(not(camillafloat_f32))]
         let expected = vec![0xCC, 0xCC, 0xCC, 0x0C];
         assert_eq!(buffer, expected);
     }
@@ -599,9 +485,9 @@ mod tests {
         let chunk = AudioChunk::new(waveforms, 0.0, 0.0, 1, 1);
         let mut buffer = vec![0u8; 8];
         chunk_to_buffer_rawbytes(chunk, &mut buffer, &BinarySampleFormat::F64_LE);
-        #[cfg(feature = "32bit")]
+        #[cfg(camillafloat_f32)]
         let expected = vec![0x00, 0x00, 0x00, 0xA0, 0x99, 0x99, 0xB9, 0x3F];
-        #[cfg(not(feature = "32bit"))]
+        #[cfg(not(camillafloat_f32))]
         let expected = vec![0x9A, 0x99, 0x99, 0x99, 0x99, 0x99, 0xB9, 0x3F];
         assert_eq!(buffer, expected);
     }
@@ -757,33 +643,5 @@ mod tests {
             false,
         );
         assert_eq!(waveforms[0], chunk2.waveforms[0]);
-    }
-
-    #[cfg(feature = "cpal-backend")]
-    #[test]
-    fn to_from_queue_i16() {
-        let bits = 16;
-        let scalefactor = (2.0 as PrcFmt).powf((bits - 1) as PrcFmt);
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
-        let mut queue = VecDeque::<i16>::new();
-        chunk_to_queue_int(&chunk, &mut queue, scalefactor);
-        assert_eq!(queue.len(), 3);
-        let chunk2 = queue_to_chunk_int(&mut queue, 3, 1, scalefactor);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-        assert_eq!(queue.len(), 0);
-    }
-
-    #[cfg(feature = "cpal-backend")]
-    #[test]
-    fn to_from_queue_f32() {
-        let waveforms = vec![vec![-0.5, 0.0, 0.5]; 1];
-        let chunk = AudioChunk::new(waveforms.clone(), 0.0, 0.0, 3, 3);
-        let mut queue = VecDeque::<f32>::new();
-        chunk_to_queue_float(&chunk, &mut queue);
-        assert_eq!(queue.len(), 3);
-        let chunk2 = queue_to_chunk_float(&mut queue, 3, 1);
-        assert_eq!(waveforms[0], chunk2.waveforms[0]);
-        assert_eq!(queue.len(), 0);
     }
 }

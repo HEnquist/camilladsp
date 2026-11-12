@@ -1,11 +1,9 @@
-extern crate criterion;
-use camillalib::utils::stash::{recycle_chunk, vec_from_stash};
+use camilladsp::utils::stash::{recycle_chunk, vec_from_stash};
 use criterion::{Criterion, criterion_group, criterion_main};
-extern crate camillalib;
 
-use camillalib::audiochunk::AudioChunk;
-use camillalib::config::BinarySampleFormat;
-use camillalib::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
+use camilladsp::audiochunk::AudioChunk;
+use camilladsp::config::BinarySampleFormat;
+use camilladsp::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 
 fn bench_to_chunk_small(c: &mut Criterion) {
     let datalen = 2 * 4 * 64;
