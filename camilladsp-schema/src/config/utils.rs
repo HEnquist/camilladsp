@@ -719,23 +719,28 @@ pub fn validate_config(
     issues.into_result(impulses)
 }
 
-/// An issue for a file that could not be opened. One that does not exist is a
-/// [`IssueKind::MissingFile`], anything else means the config is invalid.
 /// Check that a raw capture file can be read.
+/// A directory is rejected, since opening one for reading succeeds on Linux and macOS.
 /// A FIFO is only checked for existence.
 /// Opening its read end blocks until there is a writer,
 /// and closing it again makes a writer that was waiting get SIGPIPE on its first write.
 fn check_raw_capture_file(filename: &str) -> std::io::Result<()> {
+    let metadata = std::fs::metadata(filename)?;
+    if metadata.is_dir() {
+        return Err(std::io::ErrorKind::IsADirectory.into());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::FileTypeExt;
-        if std::fs::metadata(filename)?.file_type().is_fifo() {
+        if metadata.file_type().is_fifo() {
             return Ok(());
         }
     }
     File::open(filename).map(|_| ())
 }
 
+/// An issue for a file that could not be opened. One that does not exist is a
+/// [`IssueKind::MissingFile`], anything else means the config is invalid.
 fn file_issue(path: Vec<PathElement>, filename: &str, message: String) -> Issue {
     if matches!(Path::new(filename).try_exists(), Ok(false)) {
         Issue::missing_file(path, message)
@@ -1730,6 +1735,19 @@ devices:
         let result = validate_config(&mut raw_capture_config(&path), None);
         std::fs::remove_file(&path).unwrap();
         assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[test]
+    fn capture_directory_is_rejected() {
+        let path = temp_path("capture_dir");
+        std::fs::create_dir(&path).unwrap();
+        let result = validate_config(&mut raw_capture_config(&path), None);
+        std::fs::remove_dir(&path).unwrap();
+        let issues = result.err().expect("a directory should be rejected");
+        assert_eq!(
+            located(&issues),
+            vec![("devices.capture.filename".to_string(), IssueKind::Invalid)]
+        );
     }
 
     #[cfg(unix)]

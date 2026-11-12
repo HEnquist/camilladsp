@@ -164,6 +164,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
 - A `RawFile` capture from a FIFO that has no writer yet no longer hangs the config validation.
   The check opened the FIFO, which blocks until a writer appears, so CamillaDSP never started.
   A FIFO is now only checked for existence.
+- A directory is no longer accepted as the `RawFile` capture file. Opening it succeeded,
+  so the error only came when the capture started reading.
 - The `Compressor` now rejects a `factor` of zero, which previously gave every sample above the
   threshold an infinite gain. Values below 1.0 are still allowed, for upward expansion.
 - No numeric config value accepts `.nan`, `.inf` or `-.inf` any more. The range tests were written
