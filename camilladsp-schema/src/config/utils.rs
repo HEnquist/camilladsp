@@ -721,6 +721,21 @@ pub fn validate_config(
 
 /// An issue for a file that could not be opened. One that does not exist is a
 /// [`IssueKind::MissingFile`], anything else means the config is invalid.
+/// Check that a raw capture file can be read.
+/// A FIFO is only checked for existence.
+/// Opening its read end blocks until there is a writer,
+/// and closing it again makes a writer that was waiting get SIGPIPE on its first write.
+fn check_raw_capture_file(filename: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if std::fs::metadata(filename)?.file_type().is_fifo() {
+            return Ok(());
+        }
+    }
+    File::open(filename).map(|_| ())
+}
+
 fn file_issue(path: Vec<PathElement>, filename: &str, message: String) -> Issue {
     if matches!(Path::new(filename).try_exists(), Ok(false)) {
         Issue::missing_file(path, message)
@@ -882,7 +897,7 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
         && !dev.filename.is_empty()
     {
         let fname = &dev.filename;
-        if let Err(err) = File::open(fname) {
+        if let Err(err) = check_raw_capture_file(fname) {
             let msg = format!("Could not open input file '{fname}'. Reason: {err}");
             issues.push(file_issue(
                 issue_path!["devices", "capture", "filename"],
@@ -1680,6 +1695,56 @@ devices:
                 IssueKind::MissingFile
             )]
         );
+    }
+
+    fn raw_capture_config(filename: &str) -> crate::config::Configuration {
+        let yaml = format!(
+            r#"
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  capture: {{type: RawFile, filename: "{filename}", channels: 2, format: S16_LE}}
+  playback: {{type: Stdout, channels: 2, format: S16_LE}}
+"#
+        );
+        parse(&yaml).unwrap()
+    }
+
+    fn temp_path(name: &str) -> String {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "camilladsp_schema_test_{}_{}",
+            name,
+            std::process::id()
+        ));
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn regular_capture_file_is_accepted() {
+        let path = temp_path("regular.raw");
+        std::fs::write(&path, [0u8; 16]).unwrap();
+        let result = validate_config(&mut raw_capture_config(&path), None);
+        std::fs::remove_file(&path).unwrap();
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_fifo_without_writer_does_not_block() {
+        let path = temp_path("capture.fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Validate in a separate thread, so a blocking open fails the test instead of hanging it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut conf = raw_capture_config(&path);
+        std::thread::spawn(move || tx.send(validate_config(&mut conf, None).is_ok()));
+        let result = rx.recv_timeout(std::time::Duration::from_secs(5));
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(result, Ok(true), "validation failed or blocked on the FIFO");
     }
 
     #[test]
