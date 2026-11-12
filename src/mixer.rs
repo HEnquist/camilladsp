@@ -85,10 +85,10 @@ impl Mixer {
         for out_chan in 0..self.channels_out {
             let v = vec_from_stash(input.frames);
             waveforms.push(v);
-            for source in 0..self.mapping[out_chan].len() {
-                let source_chan = self.mapping[out_chan][source].channel;
+            for source in &self.mapping[out_chan] {
+                let source_chan = source.channel;
                 if !input.waveforms[source_chan].is_empty() {
-                    let gain = self.mapping[out_chan][source].gain;
+                    let gain = source.gain;
                     for (out_val, in_val) in waveforms[out_chan]
                         .iter_mut()
                         .zip(input.waveforms[source_chan].iter())
