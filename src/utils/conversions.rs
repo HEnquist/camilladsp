@@ -33,14 +33,14 @@ where
     let mut clipped = 0;
     let mut peak: CamillaFloat = 0.0;
     let num_valid_bytes = chunk.valid_frames * chunk.channels * bytes_per_sample;
-    for chan in 0..chunk.channels {
-        if chunk.waveforms[chan].is_empty() {
+    for (chan, waveform) in chunk.waveforms.iter().enumerate().take(chunk.channels) {
+        if waveform.is_empty() {
             adapter.fill_channel_with(chan, &0.0);
         } else {
-            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, &chunk.waveforms[chan]);
+            let (nbr, clp) = adapter.copy_from_slice_to_channel(chan, 0, waveform);
             clipped += clp;
             if clp > 0 && nbr > 0 {
-                let pk = chunk.waveforms[chan]
+                let pk = waveform
                     .iter()
                     .map(|x| x.abs())
                     .fold(0.0, CamillaFloat::max);
