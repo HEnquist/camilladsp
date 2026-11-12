@@ -606,13 +606,44 @@ pub fn validate_config(conf: &mut Configuration, filename: Option<&str>) -> Res<
     }
     if let CaptureDevice::RawFile(dev) = &conf.devices.capture {
         let fname = &dev.filename;
-        match File::open(fname) {
-            Ok(f) => f,
-            Err(err) => {
-                let msg = format!("Could not open input file '{fname}'. Reason: {err}");
-                return Err(ConfigError::new(&msg).into());
+        // Validate that the capture path is reachable WITHOUT blocking.
+        //
+        // A blocking open(2) of a FIFO with no writer blocks in the kernel
+        // (fifo_open -> wait_for_partner) until a writer appears. Because this
+        // validation runs on the main thread before the capture thread, the audio
+        // pipeline, and the WebSocket server are started, a writer-less FIFO would
+        // hang the whole process and the control channel would never come up.
+        //
+        // A FIFO with no writer is a legal steady state (the capture device itself
+        // opens it non-blocking and waits for data), so open it non-blocking:
+        // success means the path is usable, and only a genuine error is reported.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::libc::O_NONBLOCK)
+                .open(fname)
+            {
+                Ok(_f) => { /* path is reachable; the capture thread will read it */ }
+                Err(err) => {
+                    let msg = format!("Could not open input file '{fname}'. Reason: {err}");
+                    return Err(ConfigError::new(&msg).into());
+                }
             }
-        };
+        }
+        // On non-Unix targets there is no O_NONBLOCK for a FIFO open; keep the
+        // original blocking validation semantics.
+        #[cfg(not(unix))]
+        {
+            match File::open(fname) {
+                Ok(_f) => { /* path is reachable */ }
+                Err(err) => {
+                    let msg = format!("Could not open input file '{fname}'. Reason: {err}");
+                    return Err(ConfigError::new(&msg).into());
+                }
+            }
+        }
     }
     if let CaptureDevice::WavFile(dev) = &conf.devices.capture {
         let fname = &dev.filename;
