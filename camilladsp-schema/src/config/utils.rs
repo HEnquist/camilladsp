@@ -1698,16 +1698,19 @@ devices:
     }
 
     fn raw_capture_config(filename: &str) -> crate::config::Configuration {
-        let yaml = format!(
-            r#"
+        let yaml = r#"
 devices:
   samplerate: 44100
   chunksize: 1024
-  capture: {{type: RawFile, filename: "{filename}", channels: 2, format: S16_LE}}
-  playback: {{type: Stdout, channels: 2, format: S16_LE}}
-"#
-        );
-        parse(&yaml).unwrap()
+  capture: {type: RawFile, filename: placeholder, channels: 2, format: S16_LE}
+  playback: {type: Stdout, channels: 2, format: S16_LE}
+"#;
+        let mut conf = parse(yaml).unwrap();
+        // Set the name after parsing, a Windows path would need escaping in the yaml.
+        if let crate::config::CaptureDevice::RawFile(dev) = &mut conf.devices.capture {
+            dev.filename = filename.to_string();
+        }
+        conf
     }
 
     fn temp_path(name: &str) -> String {
