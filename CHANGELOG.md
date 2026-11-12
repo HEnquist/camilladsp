@@ -31,7 +31,7 @@ Changes:
 
 Bugfixes:
 - Prevent high RACE CPU use when its output decays to silence.
-- Reserve enough channel slots when growing recycled audio buffers.
+- Reserve enough channel slots when growing recycled audio buffers, broken since 4.0.
 - Changing biquad parameters on the fly no longer produces a loud transient.
 - `DiffEq` filters with an `a0` other than 1.0 now get the correct gain.
 - PipeWire: an `autoconnect_to` target that is not found no longer falls back to the default device.

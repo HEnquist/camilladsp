@@ -62,6 +62,9 @@ use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::ringbuffer::RingBufferFeeder;
+use crate::utils::rt_priority::{
+    demote_current_thread_from_real_time, promote_current_thread_to_real_time,
+};
 use crate::{CaptureStatus, PlaybackStatus};
 
 // ---------------------------------------------------------------------------
@@ -1646,6 +1649,21 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     got_callback
                 );
                 barrier.wait();
+                // This loop is what moves the chunks from processing into the ring buffer that
+                // the callback reads, so a late wakeup underruns the callback. It gets the same
+                // real-time priority as the Wasapi playback loop.
+                let rt_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Playback loop thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Playback loop thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
                 debug!("Playback device starts now!");
 
                 let mut conversion_result;
@@ -1723,6 +1741,11 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             break 'deviceloop;
                         }
                     }
+                }
+                if let Some(h) = rt_handle
+                    && demote_current_thread_from_real_time(h).is_err()
+                {
+                    warn!("Could not bring the playback loop thread back to normal priority.");
                 }
 
                 // Stop ASIO and clean up.
@@ -2084,6 +2107,23 @@ impl CaptureDevice for AsioCaptureDevice {
                 }
                 barrier.wait();
 
+                // The callback only fills the ring buffer, and this loop is what hands the
+                // chunks on. At normal priority it can be woken tens of ms late, and the
+                // playback buffer then dips and may underrun, so it gets the same real-time
+                // priority as the Wasapi capture loop.
+                let rt_handle = match promote_current_thread_to_real_time(0, 1) {
+                    Ok(h) => {
+                        debug!("Capture loop thread has real-time priority.");
+                        Some(h)
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Capture loop thread could not get real time priority, error: {err}."
+                        );
+                        None
+                    }
+                };
+
                 // Discard anything the callback managed to queue before the gate closed, then
                 // let it start pushing. Ordering matters: the callback only pushes once the
                 // flag is set, so nothing can arrive between the drain and the store.
@@ -2289,6 +2329,11 @@ impl CaptureDevice for AsioCaptureDevice {
 
                 // Close the gate first, so callbacks arriving during teardown do no work.
                 CAPTURE_STREAM_ACTIVE.store(false, Ordering::Release);
+                if let Some(h) = rt_handle
+                    && demote_current_thread_from_real_time(h).is_err()
+                {
+                    warn!("Could not bring the capture loop thread back to normal priority.");
+                }
 
                 // Stop ASIO and clean up.
                 // In full-duplex mode, release_shared_asio() must be called BEFORE
