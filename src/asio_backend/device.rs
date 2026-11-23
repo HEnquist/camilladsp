@@ -61,7 +61,7 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::utils::ringbuffer::RingBufferFeeder;
+use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder, priming_frames};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -82,6 +82,8 @@ pub struct AsioPlaybackDevice {
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
     pub full_duplex: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +120,9 @@ struct AsioPlaybackContext {
     /// Preallocated scratch buffer used when reading from the ring buffer in callback.
     read_tmp: Vec<u8>,
     target_level: usize,
+    chunksize: usize,
+    /// Set every time playback starts or restarts.
+    restarted: Arc<AtomicBool>,
     /// Estimator for the current buffer fill level.
     buffer_fill: Arc<parking_lot::Mutex<countertimer::DeviceBufferEstimator>>,
     /// Whether the stream is currently running (receiving data).
@@ -333,15 +338,19 @@ pub unsafe extern "system" fn buffer_switch_playback(buffer_index: c_long, _dire
                 info!("Restarting playback after buffer underrun.");
                 ctx.interrupted = false;
             }
-            // Prefill at least one full callback's worth of frames so the loop
+            // Prime to at least one full callback's worth of frames, so the loop
             // below doesn't immediately re-drain the ring buffer to empty and
             // re-trigger an underrun when target_level is smaller than the
             // driver's actual buffer size (see issue #498).
-            let prefill_frames = ctx.target_level.max(ctx.buffer_size);
-            // On first startup, start immediately without extra silence prefill.
-            // On restart after underrun, keep target_level prefill to rebuild delay.
-            let new_len = ctx.sample_queue.len() + prefill_frames * bytes_per_frame;
+            // The ring buffer also holds the chunk that ended the gap, which is not counted.
+            let queued_frames = ((ctx.sample_queue.len() + available) / bytes_per_frame)
+                .saturating_sub(ctx.chunksize);
+            let silence = priming_frames(ctx.target_level.max(ctx.buffer_size), queued_frames);
+            let new_len = ctx.sample_queue.len() + silence * bytes_per_frame;
             ctx.sample_queue.resize(new_len, 0);
+            // Data held up before the device may arrive on top of the silence,
+            // let the playback thread drop it.
+            ctx.restarted.store(true, Ordering::Release);
         }
         let to_read = available.min(needed_bytes.saturating_sub(ctx.sample_queue.len()));
         let tmp = &mut ctx.read_tmp[0..to_read];
@@ -1372,6 +1381,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
         let adjust_period = self.adjust_period;
         let mut adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
         let full_duplex = self.full_duplex;
+        let trim_backlog = self.trim_backlog;
         if adjust && full_duplex {
             warn!("Rate adjust is not supported in full-duplex ASIO mode. Disabling rate adjust.");
             adjust = false;
@@ -1400,6 +1410,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     countertimer::DeviceBufferEstimator::new(samplerate, chunksize),
                 ));
                 let buffer_fill_clone = buffer_fill.clone();
+                let playback_restarted = Arc::new(AtomicBool::new(false));
                 let mut chunk_stats = ChunkStats {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
@@ -1410,6 +1421,8 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                 let mut rate_reporter =
                     RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                let mut backlog_trimmer =
+                    BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
 
                 // --- Device-specific setup (full-duplex vs single-direction) ---
                 // Format is resolved inside; bytes_per_sample depends on it.
@@ -1531,6 +1544,8 @@ impl PlaybackDevice for AsioPlaybackDevice {
                         bytes_per_sample,
                         read_tmp: vec![0u8; asio_buffer_size * bytes_per_sample * channels],
                         target_level,
+                        chunksize,
+                        restarted: playback_restarted.clone(),
                         buffer_fill: buffer_fill_clone,
                         running: false,
                         interrupted: false,
@@ -1603,6 +1618,8 @@ impl PlaybackDevice for AsioPlaybackDevice {
                             (preferred_buf as usize) * bytes_per_sample * channels
                         ],
                         target_level,
+                        chunksize,
+                        restarted: playback_restarted.clone(),
                         buffer_fill: buffer_fill_clone,
                         running: false,
                         interrupted: false,
@@ -1695,10 +1712,26 @@ impl PlaybackDevice for AsioPlaybackDevice {
 
                     match channel.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(AudioMessage::Audio(chunk)) => {
+                            if playback_restarted.swap(false, Ordering::AcqRel) {
+                                backlog_trimmer.restarted();
+                            }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            let queued_frames = channel.len() * chunksize;
+                            let level = match estimate {
+                                Some(countertimer::BufferEstimate::Level(frames)) => {
+                                    Some(frames + queued_frames)
+                                }
+                                _ => None,
+                            };
+                            if backlog_trimmer.drop_chunk(level) {
+                                // The levels measured with the backlog in place would push
+                                // rate adjust the wrong way.
+                                rate_reporter.interrupt();
+                                continue;
+                            }
                             if let Some(speed) = rate_reporter.update_from_estimate(
                                 estimate,
-                                channel.len() * chunksize,
+                                queued_frames,
                                 &playback_status,
                             ) {
                                 status_channel

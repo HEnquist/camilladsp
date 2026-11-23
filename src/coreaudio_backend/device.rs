@@ -24,7 +24,9 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
+use crate::utils::ringbuffer::{
+    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, priming_frames,
+};
 use crossbeam_channel::{TryRecvError, TrySendError, bounded};
 use dispatch::Semaphore;
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -33,6 +35,7 @@ use std::collections::VecDeque;
 use std::mem;
 use std::os::raw::c_void;
 use std::ptr::{NonNull, null, null_mut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -154,6 +157,8 @@ pub struct CoreaudioPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -538,6 +543,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let trim_backlog = self.trim_backlog;
         let handle = thread::Builder::new()
             .name("CoreaudioPlayback".to_string())
             .spawn(move || {
@@ -586,6 +592,9 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
 
                 let mut running = false;
                 let mut starting = true;
+                // Set by the callback every time playback starts or restarts.
+                let playback_restarted = Arc::new(AtomicBool::new(false));
+                let playback_restarted_cb = playback_restarted.clone();
 
                 let callback_res = audio_unit.set_render_callback(move |args: Args| {
                     let Args {
@@ -605,8 +614,17 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                     else {
                                         info!("Restarting playback after buffer underrun.");
                                     }
-                                    debug!("Inserting {target_level} silent frames to reach target delay.");
-                                    sample_queue.resize(sample_queue.len() + blockalign * target_level, 0);
+                                    // The ring buffer also holds this chunk, which is not counted.
+                                    let queued_frames = (sample_queue.len()
+                                        + device_consumer.occupied_len())
+                                    .saturating_sub(bytes)
+                                        / blockalign;
+                                    let silence = priming_frames(target_level, queued_frames);
+                                    debug!("Inserting {silence} silent frames to reach target delay.");
+                                    sample_queue.resize(sample_queue.len() + blockalign * silence, 0);
+                                    // Data held up before the device may arrive on top of
+                                    // the silence, let the playback thread drop it.
+                                    playback_restarted_cb.store(true, Ordering::Release);
                                 }
                                 append_from_ringbuffer(&mut device_consumer, &mut sample_queue, bytes);
                             }
@@ -695,6 +713,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                 };
                 let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
+                let mut backlog_trimmer =
+                    BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
                 'deviceloop: loop {
                     if !alive_listener.is_alive() {
                         error!("Playback device is no longer alive");
@@ -722,8 +742,22 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
+                            if playback_restarted.swap(false, Ordering::AcqRel) {
+                                backlog_trimmer.restarted();
+                            }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
-                            if let Some(speed) = rate_reporter.update_from_estimate(estimate, channel.len() * chunksize, &playback_status) {
+                            let queued_frames = channel.len() * chunksize;
+                            let level = match estimate {
+                                Some(countertimer::BufferEstimate::Level(frames)) => Some(frames + queued_frames),
+                                _ => None,
+                            };
+                            if backlog_trimmer.drop_chunk(level) {
+                                // The levels measured with the backlog in place would push
+                                // rate adjust the wrong way.
+                                rate_reporter.interrupt();
+                                continue;
+                            }
+                            if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, &playback_status) {
                                 status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                             }
                             chunk.update_stats(&mut chunk_stats);
