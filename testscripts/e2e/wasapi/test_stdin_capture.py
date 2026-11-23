@@ -1,4 +1,4 @@
-"""A stdin capture played on WASAPI, through a start and a restart, without losing audio.
+"""A stdin capture played on WASAPI and ASIO, through a start and a restart, without losing audio.
 
 Stdin has no clock of its own. While data is coming it reads as fast as the pipeline
 takes it, so it runs ahead of the playback and keeps the channel to it full. After every
@@ -28,6 +28,7 @@ from .cable import (
     LEVEL_DB,
     RATE,
     TONE_HZ,
+    asio_block,
     record,
     render_endpoint,
     wasapi_block,
@@ -55,11 +56,17 @@ def tone_seconds(data):
     return np.count_nonzero(rms > expected / 2) * BLOCK / RATE
 
 
-def test_no_audio_is_lost_at_a_start_or_a_restart(spawn_cdsp, win_config):
+@pytest.mark.parametrize("backend", ["wasapi", "asio"])
+def test_no_audio_is_lost_at_a_start_or_a_restart(spawn_cdsp, win_config, request, backend):
     """The tone comes out as long as it went in, with a hole where the writer paused.
 
     The hole is checked so the test can not pass without a restart having happened.
     """
+    if backend == "asio":
+        request.getfixturevalue("steinberg")
+        playback = asio_block("playback")
+    else:
+        playback = wasapi_block("playback", render_endpoint()[1])
     frames = int(TONE_SECONDS * RATE)
     tone = 10 ** (LEVEL_DB / 20) * np.sin(2 * np.pi * TONE_HZ / RATE * np.arange(frames))
     data = np.repeat(tone, CHANNELS).astype("<f4").tobytes()
@@ -71,9 +78,7 @@ def test_no_audio_is_lost_at_a_start_or_a_restart(spawn_cdsp, win_config):
     )
     recorder.start()
     time.sleep(0.5)
-    config = win_config(
-        capture=stdin_block(), playback=wasapi_block("playback", render_endpoint()[1])
-    )
+    config = win_config(capture=stdin_block(), playback=playback)
     process, _ = spawn_cdsp(config=config, pipe_stdin=True)
     process.stdin.write(data[:half])
     process.stdin.flush()

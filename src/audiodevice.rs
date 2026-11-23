@@ -237,6 +237,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 full_duplex,
+                trim_backlog: conf.capture.has_own_clock(),
             })
         }
         // Every device type parses on every platform, and validation rejects the

@@ -273,6 +273,11 @@ These apply to the optional `threaded-alsa` build feature.
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 - When capture timed out waiting for the driver, the part of the chunk that had not arrived was
   filled with leftover audio from the previous chunk. It is now filled with silence.
+- Starting playback, and restarting it after an underrun, added the target level of silence, or
+  a whole driver buffer if that is larger, on top of the data already queued, so playback started
+  above the target level. The silence now only fills up to that level.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 
 ### CoreAudio
 - Starting playback, and restarting it after an underrun, added the target level of silence on top
