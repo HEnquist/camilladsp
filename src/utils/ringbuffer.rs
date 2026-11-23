@@ -159,10 +159,11 @@ impl BacklogTrimmer {
 
 /// How many frames of silence to put in front of the data when playback starts or restarts.
 ///
-/// The playback is primed up to the target level, counting what is already queued.
-/// `queued_frames` is what is queued besides the chunk that ends the gap, so that a start with
-/// only that chunk gets the whole target level of silence. A capture that has run ahead, such
-/// as a file, may have queued the target level already, and then no silence is added.
+/// The playback is primed up to the target level, counting `queued_frames`, what is already
+/// queued and counts towards the level. Backends that measure the level after a callback has
+/// taken its frames leave out the chunk that ended the gap, since that callback is about to take
+/// it. Those that measure it before count everything. A capture that has run ahead, such as a
+/// file, may have queued the target level already, and then no silence is added.
 pub fn priming_frames(target_level: usize, queued_frames: usize) -> usize {
     target_level.saturating_sub(queued_frames)
 }

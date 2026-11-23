@@ -309,6 +309,11 @@ These apply to the optional `threaded-alsa` build feature.
   connected automatically if the target appears later.
 - Losing the connection to the processing thread is now reported as a playback error rather than
   as a normal end of playback, like the other backends do.
+- Starting playback, and restarting it after an underrun, began on whatever was queued, so with a
+  target level above a chunk it started below the target. Silence is now played first to fill up
+  to the target, like in the other backends.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 
 ### File
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.

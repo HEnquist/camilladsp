@@ -145,6 +145,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             target_level: conf.target_level(),
             adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
+            trim_backlog: conf.capture.has_own_clock(),
         }),
         config::PlaybackDevice::File {
             channels,
