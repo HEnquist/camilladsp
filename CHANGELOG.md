@@ -38,7 +38,7 @@ Bugfixes:
 - File playback writes correct wav header sizes.
 - Alsa: a capture overrun no longer stops processing when capture and playback share a USB device.
 - Alsa: playback resumes at the target level after the device stalls, such as a UAC2 gadget.
-- Alsa: the level comes back to the target right after a gap in the data,
+- Alsa, CoreAudio and WASAPI: the level comes back to the target right after a gap in the data,
   instead of staying high for 30 s or more.
 - Alsa, threaded backend: many fixes for stalls, pauses and rate adjust,
   and it no longer keeps a CPU core busy.

@@ -188,6 +188,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 exclusive: dev.is_exclusive(),
+                trim_backlog: conf.capture.has_own_clock(),
             })
         }
         #[cfg(target_os = "windows")]
@@ -202,6 +203,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
             polling: dev.is_polling(),
+            trim_backlog: conf.capture.has_own_clock(),
         }),
         #[cfg(feature = "dummy-backend")]
         config::PlaybackDevice::Dummy {

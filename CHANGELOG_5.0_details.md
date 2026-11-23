@@ -274,7 +274,19 @@ These apply to the optional `threaded-alsa` build feature.
 - When capture timed out waiting for the driver, the part of the chunk that had not arrived was
   filled with leftover audio from the previous chunk. It is now filled with silence.
 
+### CoreAudio
+- Starting playback, and restarting it after an underrun, added the target level of silence on top
+  of the data already queued, so playback started above the target level.
+  The silence now only fills up to the target.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
+
 ### WASAPI
+- Starting playback, and restarting it after an underrun, added the target level of silence on top
+  of the data already queued, so playback started above the target level.
+  The silence now only fills up to the target.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 - The playback buffer level could jump by one device period, 10 ms in shared mode, and stay there
   for seconds. Rate adjust then corrected for drift that was not there.
   With VB-Audio Virtual Cable, the engine's read of a period is sometimes not yet visible
