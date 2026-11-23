@@ -417,6 +417,27 @@ impl CaptureDevice {
         }
     }
 
+    /// Whether the capture is paced by a clock of its own, like a sound card.
+    ///
+    /// The file, stdin and generator devices deliver data as fast as the pipeline takes it,
+    /// and are paced only by the playback device. Stdin, and a RawFile that is a FIFO, may
+    /// be fed in real time by another process, but that can not be told from here, so they
+    /// count as having no clock.
+    pub fn has_own_clock(&self) -> bool {
+        match self {
+            CaptureDevice::Alsa { .. }
+            | CaptureDevice::PipeWire { .. }
+            | CaptureDevice::CoreAudio(_)
+            | CaptureDevice::Wasapi(_)
+            | CaptureDevice::Asio(_)
+            | CaptureDevice::Dummy { .. } => true,
+            CaptureDevice::RawFile(_)
+            | CaptureDevice::WavFile(_)
+            | CaptureDevice::Stdin(_)
+            | CaptureDevice::SignalGenerator { .. } => false,
+        }
+    }
+
     pub fn channels(&self) -> usize {
         match self {
             CaptureDevice::Alsa { channels, .. } => channels.get(),

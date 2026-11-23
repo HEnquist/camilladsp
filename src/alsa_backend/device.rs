@@ -69,6 +69,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 pub struct AlsaCaptureDevice {
@@ -536,8 +538,12 @@ fn playback_loop_bytes(
         params.adjust_period as f64,
         params.target_level,
     );
-    let mut backlog_trimmer =
-        BacklogTrimmer::new(params.target_level, params.chunksize, params.samplerate);
+    let mut backlog_trimmer = BacklogTrimmer::new(
+        params.trim_backlog,
+        params.target_level,
+        params.chunksize,
+        params.samplerate,
+    );
     trace!("PB: {buf_manager:?}");
     let thread_handle = match promote_current_thread_to_real_time(
         params.chunksize as u32,
@@ -1180,6 +1186,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust_enabled = self.enable_rate_adjust;
+        let trim_backlog = self.trim_backlog;
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
@@ -1211,6 +1218,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             target_level,
                             adjust_period,
                             adjust_enabled,
+                            trim_backlog,
                             sample_format: binary_format,
                             playback_status,
                             bytes_per_frame: channels * bytes_per_sample,

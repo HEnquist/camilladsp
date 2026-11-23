@@ -71,6 +71,8 @@ pub struct AlsaPlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 pub struct AlsaCaptureDevice {
@@ -1114,6 +1116,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust_enabled = self.enable_rate_adjust;
+        let trim_backlog = self.trim_backlog;
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
         let channels = self.channels;
@@ -1279,8 +1282,12 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_enabled,
                         );
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
-                        let mut backlog_trimmer =
-                            BacklogTrimmer::new(target_level, chunksize, samplerate);
+                        let mut backlog_trimmer = BacklogTrimmer::new(
+                            trim_backlog,
+                            target_level,
+                            chunksize,
+                            samplerate,
+                        );
 
                         loop {
                             match channel.recv() {

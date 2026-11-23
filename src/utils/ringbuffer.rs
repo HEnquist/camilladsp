@@ -88,7 +88,12 @@ impl RingBufferFeeder {
 /// the gap ends, so it is often less than two chunks even after a long gap.
 /// A burst of a chunk or two from the capture side can then also lose a chunk.
 /// That drops audio, so it is only done right after a restart, when the audio already has a gap.
+///
+/// A capture without a clock of its own, such as a file, runs ahead of the playback and keeps
+/// the channel to it full. The level is then always above the target after a restart, and the
+/// trimmer would drop a part of the stream that was never late. For those it is disabled.
 pub struct BacklogTrimmer {
+    enabled: bool,
     target_level: usize,
     chunksize: usize,
     window: Duration,
@@ -97,11 +102,13 @@ pub struct BacklogTrimmer {
 }
 
 impl BacklogTrimmer {
-    pub fn new(target_level: usize, chunksize: usize, samplerate: usize) -> Self {
+    /// With `enabled` false, the trimmer never drops anything.
+    pub fn new(enabled: bool, target_level: usize, chunksize: usize, samplerate: usize) -> Self {
         let window =
             Duration::from_secs_f64(BACKLOG_WINDOW_CHUNKS * chunksize as f64 / samplerate as f64)
                 .max(BACKLOG_WINDOW);
         BacklogTrimmer {
+            enabled,
             target_level,
             chunksize,
             window,
@@ -112,7 +119,9 @@ impl BacklogTrimmer {
 
     /// The playback device was just restarted, start watching the level.
     pub fn restarted(&mut self) {
-        self.restarted_at = Some(Instant::now());
+        if self.enabled {
+            self.restarted_at = Some(Instant::now());
+        }
     }
 
     /// Check the `level` measured as a chunk arrives, `None` if it is not known.
@@ -356,7 +365,14 @@ mod tests {
 
     // Target 2000 frames, chunks of 1000. Chunks are dropped while the level is above 3000.
     fn trimmer() -> BacklogTrimmer {
-        BacklogTrimmer::new(2000, 1000, 48000)
+        BacklogTrimmer::new(true, 2000, 1000, 48000)
+    }
+
+    #[test]
+    fn disabled_trimmer_keeps_everything_after_a_restart() {
+        let mut trimmer = BacklogTrimmer::new(false, 2000, 1000, 48000);
+        trimmer.restarted();
+        assert!(!trimmer.drop_chunk(Some(10000)));
     }
 
     #[test]
