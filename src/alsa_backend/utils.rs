@@ -69,6 +69,7 @@ pub struct PlaybackParams {
     pub target_level: usize,
     pub adjust_period: f32,
     pub adjust_enabled: bool,
+    pub trim_backlog: bool,
     pub sample_format: BinarySampleFormat,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
     pub bytes_per_frame: usize,

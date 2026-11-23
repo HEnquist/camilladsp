@@ -234,6 +234,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   and rate adjust took 30 s or more to bring it back. Right after a restart, chunks are now
   dropped while the level is more than a chunk or two above the target.
   This applies to both the default and the threaded backend.
+  It is not done with the file, stdin and signal generator capture devices, which have no clock
+  of their own and run ahead of the playback, so nothing they deliver is ever late.
 
 ### Alsa, threaded backend
 These apply to the optional `threaded-alsa` build feature.
