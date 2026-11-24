@@ -148,6 +148,7 @@ struct PlaybackParams {
     adjust_period: f32,
     enable_rate_adjust: bool,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+    processing_params: Arc<ProcessingParameters>,
     control: Arc<DummyControl>,
 }
 
@@ -450,6 +451,7 @@ fn playback_loop(
         params.adjust_period,
         params.target_level,
         params.enable_rate_adjust,
+        params.processing_params.clone(),
     );
     // A real device converts every chunk to the format the hardware wants on its way out,
     // which is where clipping happens. Without a format configured the audio is dropped as
@@ -669,6 +671,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
@@ -694,6 +697,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     adjust_period,
                     enable_rate_adjust,
                     playback_status,
+                    processing_params,
                     control: listener.control(),
                 };
                 status_channel

@@ -259,6 +259,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let node_name = self
             .node_name
@@ -600,8 +601,13 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let clipped_counter = playback_status_clone.read().clipped_samples.clone();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
-                    let mut rate_reporter =
-                        RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                    let mut rate_reporter = RateAdjustReporter::new(
+                        samplerate,
+                        adjust_period,
+                        target_level,
+                        adjust,
+                        processing_params,
+                    );
                     let mut backlog_trimmer =
                         BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
                     let mut conversion_result;

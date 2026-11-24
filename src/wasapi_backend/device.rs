@@ -858,6 +858,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let exclusive = self.exclusive;
@@ -897,8 +898,13 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let mut peak_values = Vec::new();
                 let clipped_counter = playback_status.read().clipped_samples.clone();
 
-                let mut rate_reporter =
-                    RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                let mut rate_reporter = RateAdjustReporter::new(
+                    samplerate,
+                    adjust_period,
+                    target_level,
+                    adjust,
+                    processing_params,
+                );
                 let mut backlog_trimmer =
                     BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
 

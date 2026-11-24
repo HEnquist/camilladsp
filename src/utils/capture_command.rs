@@ -38,8 +38,8 @@ pub enum CommandOutcome {
 /// Handle one result of `try_recv` on a capture thread's command channel.
 ///
 /// `SetSpeed` updates `rate_adjust`. When the device can adjust its own clock (`device_pitch`)
-/// the speed is returned as [`CommandOutcome::SetPitch`] for the loop to apply, otherwise it goes
-/// to the resampler here if that is asynchronous.
+/// the clock speed is returned as [`CommandOutcome::SetPitch`] for the loop to apply, otherwise
+/// the resampler speed goes to the resampler here if that is asynchronous.
 pub fn handle_capture_command(
     command: Result<CommandMessage, TryRecvError>,
     rate_adjust: &mut f64,
@@ -53,11 +53,14 @@ pub fn handle_capture_command(
             CommandOutcome::Exit
         }
         Ok(CommandMessage::SetSpeed { speed }) => {
-            debug!("Requested to adjust capture speed to {speed}.");
-            *rate_adjust = speed;
+            debug!("Requested to adjust capture speed to {speed:?}.");
             if device_pitch {
-                return CommandOutcome::SetPitch(speed);
-            } else if let Some(resampler) = resampler {
+                *rate_adjust = speed.clock;
+                return CommandOutcome::SetPitch(speed.clock);
+            }
+            let speed = speed.resampler;
+            *rate_adjust = speed;
+            if let Some(resampler) = resampler {
                 if async_src {
                     if resampler.set_resample_ratio_relative(speed, true).is_err() {
                         debug!("Failed to set resampling speed to {speed}.");
@@ -89,6 +92,7 @@ mod tests {
     use super::*;
     use crate::ProcessingParameters;
     use crate::config;
+    use crate::utils::rate_controller::RateAdjust;
     use crate::utils::resampling::new_resampler;
     use std::sync::Arc;
 
@@ -127,8 +131,12 @@ mod tests {
     fn set_speed_goes_to_the_pitch_control() {
         let mut rate_adjust = 1.0;
         let mut resampler = None;
+        let speed = RateAdjust {
+            resampler: 1.002,
+            clock: 1.001,
+        };
         let outcome = handle_capture_command(
-            Ok(CommandMessage::SetSpeed { speed: 1.001 }),
+            Ok(CommandMessage::SetSpeed { speed }),
             &mut rate_adjust,
             &mut resampler,
             true,
@@ -151,7 +159,9 @@ mod tests {
         );
         let ratio = |r: &Option<ChunkResampler>| r.as_ref().unwrap().resampler.resample_ratio();
         let outcome = handle_capture_command(
-            Ok(CommandMessage::SetSpeed { speed: 1.0001 }),
+            Ok(CommandMessage::SetSpeed {
+                speed: RateAdjust::both(1.0001),
+            }),
             &mut rate_adjust,
             &mut resampler,
             true,
@@ -161,7 +171,9 @@ mod tests {
         assert_eq!(ratio(&resampler), 1.0);
         // Without a pitch control the same speed goes to the resampler.
         let outcome = handle_capture_command(
-            Ok(CommandMessage::SetSpeed { speed: 1.0001 }),
+            Ok(CommandMessage::SetSpeed {
+                speed: RateAdjust::both(1.0001),
+            }),
             &mut rate_adjust,
             &mut resampler,
             true,
@@ -175,8 +187,12 @@ mod tests {
     fn set_speed_without_pitch_or_resampler_only_records_it() {
         let mut rate_adjust = 1.0;
         let mut resampler = None;
+        let speed = RateAdjust {
+            resampler: 0.999,
+            clock: 0.998,
+        };
         let outcome = handle_capture_command(
-            Ok(CommandMessage::SetSpeed { speed: 0.999 }),
+            Ok(CommandMessage::SetSpeed { speed }),
             &mut rate_adjust,
             &mut resampler,
             true,

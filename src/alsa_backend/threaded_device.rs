@@ -57,7 +57,7 @@ use crate::alsa_backend::utils::{
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::RateAdjustReporter;
+use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -1081,9 +1081,10 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 }
 
 /// Sent by an inner device thread once the device is open, with the negotiated sample format
-/// and whether the device has a pitch control for rate adjust.
+/// and, when the device has a pitch control for rate adjust, the speed that control is at.
+/// The control keeps its value between sessions, and the rate controller starts from it.
 enum AlsaThreadState {
-    Ready(BinarySampleFormat, bool),
+    Ready(BinarySampleFormat, Option<f64>),
     Error(String),
 }
 
@@ -1108,6 +1109,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -1178,11 +1180,16 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 let pitch_elem = pitch_hctl
                                     .as_ref()
                                     .and_then(|h| find_playback_pitch(h, &pcmdevice));
+                                // The pitch is the reciprocal of the capture speed.
+                                let pitch_speed = pitch_elem.as_ref().map(|elem| {
+                                    elem.read()
+                                        .ok()
+                                        .and_then(|v| v.get_integer(0))
+                                        .filter(|v| *v > 0)
+                                        .map_or(1.0, |v| 1_000_000.0 / v as f64)
+                                });
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(
-                                        binary_format,
-                                        pitch_elem.is_some(),
-                                    ))
+                                    .send(AlsaThreadState::Ready(binary_format, pitch_speed))
                                     .unwrap_or(());
 
                                 let io = pcmdevice.io_bytes();
@@ -1244,7 +1251,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_speed)) => {
+                        let pitch_supported = pitch_speed.is_some();
                         status_channel
                             .send(StatusMessage::PlaybackReady)
                             .unwrap_or(());
@@ -1281,7 +1289,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period,
                             target_level,
                             adjust_enabled,
+                            processing_params,
                         );
+                        if let Some(speed) = pitch_speed {
+                            rate_reporter.playback_clock_speed(speed);
+                        }
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                         let mut backlog_trimmer = BacklogTrimmer::new(
                             trim_backlog,
@@ -1319,7 +1331,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                         if pitch_supported {
                                             let _ = send_playback_device_message(
                                                 &tx_dev,
-                                                PlaybackDeviceMessage::SetPitch(speed),
+                                                PlaybackDeviceMessage::SetPitch(speed.clock),
                                             );
                                         } else {
                                             status_channel
@@ -1548,11 +1560,26 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         "Capture Pitch 1000000",
                                     );
                                 }
-                                let pitch_supported =
-                                    element_loopback.is_some() || element_uac2_gadget.is_some();
+                                // Both read the inverse of how SetSpeed writes them.
+                                let pitch_speed = if let Some(elem) = &element_loopback {
+                                    Some(
+                                        elem.read_as_int()
+                                            .filter(|v| *v > 0)
+                                            .map_or(1.0, |v| 100_000.0 / v as f64),
+                                    )
+                                } else {
+                                    element_uac2_gadget.as_ref().map(|elem| {
+                                        elem.read_as_int()
+                                            .map_or(1.0, |v| v as f64 / 1_000_000.0)
+                                    })
+                                };
+                                if let Some(speed) = pitch_speed {
+                                    debug!("Capture clock speed is {speed} at start.");
+                                    processing_params_inner.set_capture_clock_speed(speed);
+                                }
 
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(binary_format, pitch_supported))
+                                    .send(AlsaThreadState::Ready(binary_format, pitch_speed))
                                     .unwrap_or(());
                                 if rx_start_inner.recv().is_err() {
                                     return;
@@ -1655,6 +1682,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             break;
                                         }
                                         Ok(CommandMessage::SetSpeed { speed }) => {
+                                            let speed = speed.clock;
                                             if let Some(elem_loopback) = &element_loopback {
                                                 elem_loopback
                                                     .write_as_int((100_000.0 / speed) as i32);
@@ -1787,7 +1815,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_speed)) => {
+                        let pitch_supported = pitch_speed.is_some();
                         let bytes_per_sample = binary_format.bytes_per_sample();
                         let blockalign = bytes_per_sample * channels;
 
@@ -1864,7 +1893,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     CommandOutcome::Continue => {}
                                     CommandOutcome::SetPitch(speed) => {
                                         tx_inner_command
-                                            .try_send(CommandMessage::SetSpeed { speed })
+                                            .try_send(CommandMessage::SetSpeed {
+                                                speed: RateAdjust::both(speed),
+                                            })
                                             .unwrap_or_default();
                                     }
                                     CommandOutcome::Exit | CommandOutcome::Disconnected => {

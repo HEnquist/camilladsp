@@ -660,6 +660,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let samplerate = self.samplerate;
@@ -722,7 +723,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let clipped_counter = playback_status.read().clipped_samples.clone();
                 let blockalign = 4 * channels;
 
-                let mut rate_reporter = RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                let mut rate_reporter = RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust, processing_params);
                 trace!("Build output stream.");
                 let mut conversion_result;
                 let mut sample_queue: VecDeque<u8> =
@@ -1140,6 +1141,11 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 // adjust is going to write them.
                 let pitch_supported = enable_rate_adjust && configure_pitch_control(device_id);
                 if pitch_supported {
+                    // An earlier session may have left the pitch anywhere, and the rate
+                    // controller has to start from where it is.
+                    let pitch = get_pitch(device_id).unwrap_or(1.0);
+                    debug!("Capture pitch is {pitch} at start.");
+                    processing_params.set_capture_clock_speed(pitch);
                     if samplerate == capture_samplerate && resampler.is_some() {
                         warn!("Needless 1:1 sample rate conversion active. Not needed since capture device supports rate adjust.");
                     } else if async_src && resampler.is_some() {
@@ -1373,35 +1379,39 @@ impl CaptureDevice for CoreaudioCaptureDevice {
     }
 }
 
-// Will this ever be needed?
-/*
-fn get_pitch(device_id: AudioDeviceID) -> Option<f32> {
+/// Read the pitch, the inverse of [`set_pitch`].
+///
+/// BlackHole only adds the pitch control a moment after the clock source changes to
+/// Internal Adjustable, so a read straight after [`configure_pitch_control`] can find no
+/// such property. It is retried for up to half a second.
+fn get_pitch(device_id: AudioDeviceID) -> Option<f64> {
     let property_address = AudioObjectPropertyAddress {
         mSelector: kAudioDevicePropertyStereoPan,
         mScope: kAudioObjectPropertyScopeOutput,
         mElement: kAudioObjectPropertyElementMain,
     };
-
-    let pan: f32 = 0.0;
-    let data_size = mem::size_of::<f32>() as u32;
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            device_id,
-            &property_address as *const _,
-            0,
-            null(),
-            &data_size as *const _ as *mut _,
-            &pan as *const _ as *mut _,
-        )
-    };
-    if status != 0 {
-        warn!("Unable to get pitch, error code: {}", status);
-        return None;
+    let mut status = 0;
+    for _ in 0..10 {
+        let mut pan: f32 = 0.0;
+        let mut data_size = mem::size_of::<f32>() as u32;
+        status = unsafe {
+            AudioObjectGetPropertyData(
+                device_id,
+                NonNull::from(&property_address),
+                0,
+                null(),
+                NonNull::from(&mut data_size),
+                NonNull::from(&mut pan).cast(),
+            )
+        };
+        if status == 0 {
+            return Some(1.0 + 0.02 * (pan as f64 - 0.5));
+        }
+        thread::sleep(Duration::from_millis(50));
     }
-    let pitch = 1.0 + 0.02 * (pan - 0.5);
-    Some(pitch)
+    warn!("Unable to read the capture pitch, error code: {status}.");
+    None
 }
-*/
 
 fn set_pitch(device_id: AudioDeviceID, pitch: f32) {
     let property_address = AudioObjectPropertyAddress {
