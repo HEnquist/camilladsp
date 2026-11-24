@@ -157,6 +157,17 @@ impl BacklogTrimmer {
     }
 }
 
+/// How many frames of silence to put in front of the data when playback starts or restarts.
+///
+/// The playback is primed up to the target level, counting `queued_frames`, what is already
+/// queued and counts towards the level. Backends that measure the level after a callback has
+/// taken its frames leave out the chunk that ended the gap, since that callback is about to take
+/// it. Those that measure it before count everything. A capture that has run ahead, such as a
+/// file, may have queued the target level already, and then no silence is added.
+pub fn priming_frames(target_level: usize, queued_frames: usize) -> usize {
+    target_level.saturating_sub(queued_frames)
+}
+
 /// Copy available bytes from a ring buffer consumer into `out_slice`,
 /// then zero-fill any remaining tail.
 ///
@@ -210,7 +221,7 @@ pub fn append_from_ringbuffer(
 mod tests {
     use super::{
         BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer,
-        fill_playback_output_from_ringbuffer,
+        fill_playback_output_from_ringbuffer, priming_frames,
     };
     use ringbuf::{HeapRb, traits::*};
     use std::collections::VecDeque;
@@ -366,6 +377,13 @@ mod tests {
     // Target 2000 frames, chunks of 1000. Chunks are dropped while the level is above 3000.
     fn trimmer() -> BacklogTrimmer {
         BacklogTrimmer::new(true, 2000, 1000, 48000)
+    }
+
+    #[test]
+    fn priming_counts_what_is_queued() {
+        assert_eq!(priming_frames(2000, 0), 2000);
+        assert_eq!(priming_frames(2000, 1500), 500);
+        assert_eq!(priming_frames(2000, 5000), 0);
     }
 
     #[test]

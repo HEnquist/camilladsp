@@ -23,7 +23,9 @@ use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
-use crate::utils::ringbuffer::{RingBufferFeeder, append_from_ringbuffer};
+use crate::utils::ringbuffer::{
+    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, priming_frames,
+};
 use crate::utils::rt_channel;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
@@ -66,6 +68,8 @@ pub struct WasapiPlaybackDevice {
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
     pub polling: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -425,6 +429,8 @@ struct PlaybackSync {
     rx_play: Receiver<PlaybackDeviceMessage>,
     tx_cb: Sender<DisconnectReason>,
     bufferfill: Arc<Mutex<countertimer::DeviceBufferEstimator>>,
+    /// Set by the inner thread every time playback starts or restarts.
+    restarted: Arc<AtomicBool>,
 }
 
 enum PlaybackDeviceMessage {
@@ -543,10 +549,18 @@ fn playback_loop(
                         } else {
                             info!("Restarting playback after buffer underrun.");
                         }
+                        // The ring buffer also holds this chunk, which is not counted.
+                        let queued_frames = (sample_queue.len() + ringbuffer.occupied_len())
+                            .saturating_sub(bytes)
+                            / blockalign;
+                        let silence = priming_frames(target_level, queued_frames);
                         debug!(
-                            "Playback, inserting {target_level} silent frames to reach target delay."
+                            "Playback, inserting {silence} silent frames to reach target delay."
                         );
-                        sample_queue.resize(sample_queue.len() + blockalign * target_level, 0);
+                        sample_queue.resize(sample_queue.len() + blockalign * silence, 0);
+                        // Data held up before the device may arrive on top of the silence,
+                        // let the outer thread drop it.
+                        sync.restarted.store(true, Ordering::Release);
                     }
                     append_from_ringbuffer(&mut ringbuffer, &mut sample_queue, bytes);
                 }
@@ -858,6 +872,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let trim_backlog = self.trim_backlog;
         let sample_format = self.sample_format;
         let handle = thread::Builder::new()
             .name("WasapiPlayback".to_string())
@@ -872,6 +887,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     samplerate, chunksize,
                 )));
                 let buffer_fill_clone = buffer_fill.clone();
+                let playback_restarted = Arc::new(AtomicBool::new(false));
+                let playback_restarted_inner = playback_restarted.clone();
                 let mut chunk_stats = ChunkStats {
                     rms: vec![0.0; channels],
                     peak: vec![0.0; channels],
@@ -882,6 +899,8 @@ impl PlaybackDevice for WasapiPlaybackDevice {
 
                 let mut rate_reporter =
                     RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                let mut backlog_trimmer =
+                    BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
 
                 trace!("Build output stream.");
                 let mut conversion_result;
@@ -924,6 +943,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             rx_play: rx_dev,
                             tx_cb: tx_disconnectreason,
                             bufferfill: buffer_fill_clone,
+                            restarted: playback_restarted_inner,
                         };
                         let result = playback_loop(
                             audio_client,
@@ -1007,10 +1027,26 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     }
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
+                            if playback_restarted.swap(false, Ordering::AcqRel) {
+                                backlog_trimmer.restarted();
+                            }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            let queued_frames = channel.len() * chunksize;
+                            let level = match estimate {
+                                Some(countertimer::BufferEstimate::Level(frames)) => {
+                                    Some(frames + queued_frames)
+                                }
+                                _ => None,
+                            };
+                            if backlog_trimmer.drop_chunk(level) {
+                                // The levels measured with the backlog in place would push
+                                // rate adjust the wrong way.
+                                rate_reporter.interrupt();
+                                continue;
+                            }
                             if let Some(speed) = rate_reporter.update_from_estimate(
                                 estimate,
-                                channel.len() * chunksize,
+                                queued_frames,
                                 &playback_status,
                             ) {
                                 status_channel

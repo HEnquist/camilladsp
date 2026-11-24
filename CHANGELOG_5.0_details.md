@@ -286,8 +286,25 @@ These apply to the optional `threaded-alsa` build feature.
   `chunksize`, fixing continuous underruns when the driver requests a larger buffer than `chunksize`.
 - When capture timed out waiting for the driver, the part of the chunk that had not arrived was
   filled with leftover audio from the previous chunk. It is now filled with silence.
+- Starting playback, and restarting it after an underrun, added the target level of silence, or
+  a whole driver buffer if that is larger, on top of the data already queued, so playback started
+  above the target level. The silence now only fills up to that level.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
+
+### CoreAudio
+- Starting playback, and restarting it after an underrun, added the target level of silence on top
+  of the data already queued, so playback started above the target level.
+  The silence now only fills up to the target.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 
 ### WASAPI
+- Starting playback, and restarting it after an underrun, added the target level of silence on top
+  of the data already queued, so playback started above the target level.
+  The silence now only fills up to the target.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 - The playback buffer level could jump by one device period, 10 ms in shared mode, and stay there
   for seconds. Rate adjust then corrected for drift that was not there.
   With VB-Audio Virtual Cable, the engine's read of a period is sometimes not yet visible
@@ -305,6 +322,11 @@ These apply to the optional `threaded-alsa` build feature.
   connected automatically if the target appears later.
 - Losing the connection to the processing thread is now reported as a playback error rather than
   as a normal end of playback, like the other backends do.
+- Starting playback, and restarting it after an underrun, began on whatever was queued, so with a
+  target level above a chunk it started below the target. Silence is now played first to fill up
+  to the target, like in the other backends.
+- After a gap in the data, the backlog that arrives after the restart is dropped, like in the Alsa
+  backends. This is not done with the file, stdin and signal generator capture devices.
 
 ### File
 - File playback now writes correct wav header sizes, and stops at the 4 GB limit for plain wav.

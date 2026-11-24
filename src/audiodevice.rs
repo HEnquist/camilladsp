@@ -151,6 +151,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             target_level: conf.target_level(),
             adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
+            trim_backlog: conf.capture.has_own_clock(),
         }),
         config::PlaybackDevice::File {
             channels,
@@ -194,6 +195,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 exclusive: dev.is_exclusive(),
+                trim_backlog: conf.capture.has_own_clock(),
             })
         }
         #[cfg(target_os = "windows")]
@@ -208,6 +210,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
             adjust_period: conf.adjust_interval_s(),
             enable_rate_adjust: conf.rate_adjust(),
             polling: dev.is_polling(),
+            trim_backlog: conf.capture.has_own_clock(),
         }),
         #[cfg(feature = "dummy-backend")]
         config::PlaybackDevice::Dummy {
@@ -241,6 +244,7 @@ pub fn new_playback_device(conf: config::Devices) -> Box<dyn PlaybackDevice> {
                 adjust_period: conf.adjust_interval_s(),
                 enable_rate_adjust: conf.rate_adjust(),
                 full_duplex,
+                trim_backlog: conf.capture.has_own_clock(),
             })
         }
         // Every device type parses on every platform, and validation rejects the

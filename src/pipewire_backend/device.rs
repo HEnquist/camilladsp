@@ -15,7 +15,9 @@
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
 use crate::ToF32;
-use crate::utils::ringbuffer::{RingBufferFeeder, fill_playback_output_from_ringbuffer};
+use crate::utils::ringbuffer::{
+    BacklogTrimmer, RingBufferFeeder, fill_playback_output_from_ringbuffer, priming_frames,
+};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -130,6 +132,8 @@ pub struct PipeWirePlaybackDevice {
     pub target_level: usize,
     pub adjust_period: f32,
     pub enable_rate_adjust: bool,
+    /// Drop the backlog that arrives after a restart, see `BacklogTrimmer`.
+    pub trim_backlog: bool,
 }
 
 /// PipeWire capture device
@@ -282,6 +286,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
         };
         let adjust_period = self.adjust_period;
         let adjust = self.adjust_period > 0.0 && self.enable_rate_adjust;
+        let trim_backlog = self.trim_backlog;
 
         let handle = thread::Builder::new()
             .name("PipeWirePlayback".to_string())
@@ -387,6 +392,11 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                 let mut logged_playback_quantum = false;
                 let mut running = false;
                 let mut interrupted = false;
+                // Frames of silence still to be played before the data, after a start.
+                let mut silence_owed = 0usize;
+                // Set by the callback every time playback starts or restarts.
+                let playback_restarted = Arc::new(AtomicBool::new(false));
+                let playback_restarted_cb = playback_restarted.clone();
                 let _listener = stream
                     .add_local_listener_with_user_data(())
                     .state_changed(move |_, _, old, new| {
@@ -449,13 +459,34 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         // Pop bytes from ring buffer directly into output - no allocations!
                         let mut consumer = rb_consumer_clone.borrow_mut();
 
+                        if !running && consumer.occupied_len() >= stride {
+                            running = true;
+                            if interrupted {
+                                info!("Restarting playback after buffer underrun.");
+                                interrupted = false;
+                            }
+                            // The level is measured before the callback takes its frames, so
+                            // everything queued counts.
+                            silence_owed =
+                                priming_frames(target_level, consumer.occupied_len() / stride);
+                            debug!("Inserting {silence_owed} silent frames to reach target delay.");
+                            // Data held up before the device may arrive on top of the silence,
+                            // let the playback thread drop it.
+                            playback_restarted_cb.store(true, Ordering::Release);
+                        }
+                        // The silence still owed counts towards the level.
+                        let owed_at_start = silence_owed;
+                        let silence_bytes = (silence_owed * stride).min(callback_bytes);
+                        silence_owed -= silence_bytes / stride;
+                        out_slice[..silence_bytes].fill(0);
+
                         // Fill output from ring buffer, then zero any missing tail (underrun handling)
                         let (available_bytes, bytes_from_rb) = fill_playback_output_from_ringbuffer(
                             &mut *consumer,
-                            &mut out_slice[..callback_bytes],
+                            &mut out_slice[silence_bytes..callback_bytes],
                         );
 
-                        if bytes_from_rb < callback_bytes {
+                        if bytes_from_rb < callback_bytes - silence_bytes {
                             if running {
                                 warn!("Playback interrupted, no data available.");
                                 running = false;
@@ -463,14 +494,8 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                             }
                             trace!(
                                 "PipeWire playback: underrun, had {} of {} bytes, {} available",
-                                bytes_from_rb, callback_bytes, available_bytes
+                                bytes_from_rb, callback_bytes - silence_bytes, available_bytes
                             );
-                        } else if !running {
-                            running = true;
-                            if interrupted {
-                                info!("Restarting playback after buffer underrun.");
-                                interrupted = false;
-                            }
                         }
 
                         // CRITICAL: Tell PipeWire how much data we wrote
@@ -482,7 +507,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
 
                         // Update buffer level estimator
                         if let Some(mut estimator) = buffer_fill_clone.try_lock() {
-                            estimator.add(available_bytes / stride);
+                            estimator.add(available_bytes / stride + owed_at_start);
                         }
                     })
                     .register();
@@ -577,14 +602,30 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let mut raw_buffer = vec![0u8; chunksize * stride];
                     let mut rate_reporter =
                         RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                    let mut backlog_trimmer =
+                        BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
                     let mut conversion_result;
 
                     let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                     loop {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
+                                if playback_restarted.swap(false, Ordering::AcqRel) {
+                                    backlog_trimmer.restarted();
+                                }
                                 let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
-                                if let Some(speed) = rate_reporter.update_from_estimate(estimate, channel.len() * chunksize, &playback_status) {
+                                let queued_frames = channel.len() * chunksize;
+                                let level = match estimate {
+                                    Some(countertimer::BufferEstimate::Level(frames)) => Some(frames + queued_frames),
+                                    _ => None,
+                                };
+                                if backlog_trimmer.drop_chunk(level) {
+                                    // The levels measured with the backlog in place would push
+                                    // rate adjust the wrong way.
+                                    rate_reporter.interrupt();
+                                    continue;
+                                }
+                                if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, &playback_status) {
                                     status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                                 }
                                 chunk.update_stats(&mut chunk_stats);
