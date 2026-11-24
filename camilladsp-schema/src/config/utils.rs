@@ -784,6 +784,12 @@ fn validate_devices(conf: &Configuration, issues: &mut Issues) {
         let msg = format!("target_level cannot be larger than {target_level_limit}");
         issues.invalid(issue_path!["devices", "target_level"], msg);
     }
+    if conf.devices.queuelimit() == 0 {
+        issues.invalid(
+            issue_path!["devices", "queuelimit"],
+            "queuelimit must be at least 1",
+        );
+    }
     if let Some(interval) = conf.devices.adjust_interval_s
         && interval <= 0.0
     {
@@ -1594,6 +1600,23 @@ pipeline:
         validate_config(&mut conf, None)
             .err()
             .expect("the config should be invalid")
+    }
+
+    #[test]
+    fn zero_queuelimit_is_rejected() {
+        let yaml = r#"
+devices:
+  samplerate: 44100
+  chunksize: 1024
+  queuelimit: 0
+  capture: {type: Stdin, channels: 2, format: S16_LE}
+  playback: {type: Stdout, channels: 2, format: S16_LE}
+"#;
+        let issues = issues_in(yaml);
+        assert_eq!(
+            located(&issues),
+            vec![("devices.queuelimit".to_string(), IssueKind::Invalid)]
+        );
     }
 
     #[test]

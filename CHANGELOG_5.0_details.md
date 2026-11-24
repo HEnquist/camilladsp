@@ -152,6 +152,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   larger than 0 and no larger than 1.0. These previously panicked inside the resampler on the first
   chunk, rather than being reported when the config was loaded.
 - `rate_measure_interval_s` must now be larger than zero, matching `adjust_interval_s`.
+- `queuelimit` must now be at least 1. A value of 0 made each queue between the threads hand over
+  one chunk at a time, with no slack between them. The new queues always hold at least one chunk,
+  so 0 would otherwise silently have become 1.
 - A mixer mapping that lists the same source channel twice is now rejected. The check existed but
   never fired, so the channel was simply mixed in twice.
 - Mixer source gains now have the same range as the `Gain` filter, -150 to +150 dB, or -10 to +10

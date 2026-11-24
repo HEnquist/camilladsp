@@ -1049,6 +1049,7 @@ A parameter marked (*) in any example is optional. If they are left out from the
   It sets the limit for the length of the queues between the capture device and the processing thread,
   as well as between the processing thread and the playback device.
   The total queue size limit will be `2*chunksize*queuelimit` samples per channel.
+  The value must be at least 1.
 
   The value should only be changed if the capture device can provide data faster
   than the playback device can play it, like when using the ALSA "cdsp" plugin.
