@@ -18,6 +18,7 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::filters::fftconv::ConvCoeffCache;
 use crate::pipeline;
+use crate::utils::audio_workgroup;
 use crate::utils::rt_channel::SendTimeoutError;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -134,6 +135,14 @@ fn processing(
         };
 
     barrier_proc.wait();
+    // The devices publish their audio workgroup before the barrier.
+    audio_workgroup::join_current_thread("Processing");
+    if let Some(pool) = &processing_pool {
+        // The workers stay in it until they exit with the pool.
+        pool.broadcast(|ctx| {
+            audio_workgroup::join_current_thread(&format!("Filter worker {}", ctx.index()))
+        });
+    }
     debug!("Processing loop starts now!");
     loop {
         match rx_cap.recv() {
@@ -210,6 +219,7 @@ fn processing(
     }
     processing_params.set_processing_load(0.0);
     processing_params.set_resampler_load(0.0);
+    audio_workgroup::leave_current_thread();
     if let Some(h) = thread_handle {
         match demote_current_thread_from_real_time(h) {
             Ok(_) => {

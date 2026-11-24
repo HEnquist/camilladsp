@@ -28,6 +28,9 @@ Changes:
 - No more pre-built armv6 binary for Raspberry Pi 1 and Zero.
 - Log module names start with `camilladsp::` instead of `camillalib::`.
 - Overruns and underruns are logged the same way in every backend, with one warning per event.
+- CoreAudio: the audio threads join the audio workgroup of the device, for a much lower CPU load
+  on Apple silicon (macOS 11 and later).
+- CoreAudio: the device buffer size follows `chunksize`, for lower latency with small chunks.
 
 Bugfixes:
 - Prevent high RACE CPU use when its output decays to silence.
