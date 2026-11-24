@@ -1591,6 +1591,16 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let capture_bytes = chunksize * bytes_per_frame;
                                 let capture_frames = chunksize as Frames;
                                 let mut buffer = vec![0u8; capture_bytes];
+                                // Read one period per wake, and leave anything beyond it in the
+                                // device. Reading everything empties the device, and the next
+                                // wake then depends on a whole period having arrived. A device
+                                // whose position moves in coarse steps, such as the Loopback
+                                // with its jiffies timer, can show a little less than that at a
+                                // period tick, and then the wake waits for the next one.
+                                // What is left behind keeps the next wake clear of that.
+                                let read_bytes = (buf_manager.data.periodsize().max(1) as usize)
+                                    .min(chunksize)
+                                    * bytes_per_frame;
                                 let mut chunk_nbr = 0usize;
                                 let mut ring_full = false;
 
@@ -1703,7 +1713,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     }
 
                                     let capture_res = capture_buffer(
-                                        &mut buffer,
+                                        &mut buffer[..read_bytes],
                                         &pcmdevice,
                                         &io,
                                         capture_frames as usize,
