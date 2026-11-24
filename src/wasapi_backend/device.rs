@@ -26,6 +26,7 @@ use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::ringbuffer::{
     BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, priming_frames,
 };
+use crate::utils::rt_channel;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use ringbuf::wrap::caching::Caching;
@@ -626,7 +627,7 @@ fn playback_loop(
 }
 
 struct CaptureChannels {
-    pub tx_filled: Sender<(u64, usize)>,
+    pub tx_filled: rt_channel::Sender<(u64, usize)>,
     pub ringbuf: Caching<Arc<HeapRb<u8>>, true, false>,
 }
 
@@ -853,7 +854,7 @@ fn capture_loop(
 impl PlaybackDevice for WasapiPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1191,7 +1192,7 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 impl CaptureDevice for WasapiCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -1232,7 +1233,7 @@ impl CaptureDevice for WasapiCaptureDevice {
                     32*chunksize/1024 + 10
                 };
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
-                let (tx_dev, rx_dev) = bounded(channel_capacity);
+                let (tx_dev, rx_dev) = rt_channel::bounded(channel_capacity);
 
                 let (tx_state_dev, rx_state_dev) = bounded(0);
                 let (tx_start_inner, rx_start_inner) = bounded(0);

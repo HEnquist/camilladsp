@@ -16,7 +16,7 @@
 
 use crossbeam_channel::{Sender, TryRecvError};
 
-use crate::audiodevice::AudioMessage;
+use crate::audiodevice::{AudioMessage, AudioSender};
 use crate::utils::resampling::ChunkResampler;
 use crate::{CommandMessage, StatusMessage};
 
@@ -78,7 +78,7 @@ pub fn handle_capture_command(
 
 /// End the capture stream after an Exit command. `EndOfStream` goes to the processing thread
 /// first, then `CaptureDone` to the engine.
-pub fn send_capture_done(audio: &Sender<AudioMessage>, status: &Sender<StatusMessage>) {
+pub fn send_capture_done(audio: &AudioSender, status: &Sender<StatusMessage>) {
     debug!("Sending EndOfStream.");
     audio.send(AudioMessage::EndOfStream).unwrap_or(());
     status.send(StatusMessage::CaptureDone).unwrap_or(());
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn capture_done_sends_end_of_stream_first() {
-        let (tx_audio, rx_audio) = crossbeam_channel::unbounded();
+        let (tx_audio, rx_audio) = crate::utils::rt_channel::bounded(1);
         let (tx_status, rx_status) = crossbeam_channel::unbounded();
         send_capture_done(&tx_audio, &tx_status);
         assert!(matches!(rx_audio.try_recv(), Ok(AudioMessage::EndOfStream)));

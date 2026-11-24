@@ -255,7 +255,7 @@ fn pipewire_playback_callback_bytes(
 impl PlaybackDevice for PipeWirePlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -719,7 +719,7 @@ fn nbr_capture_bytes(
 impl CaptureDevice for PipeWireCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -846,7 +846,7 @@ impl CaptureDevice for PipeWireCaptureDevice {
                 let rb_producer = Rc::new(RefCell::new(rb_producer));
 
                 // Notification channel to wake up processing thread when data is available
-                let (notify_tx, notify_rx) = crossbeam_channel::bounded::<()>(1);
+                let (notify_tx, notify_rx) = crate::utils::rt_channel::bounded::<()>(1);
 
                 let exit_flag = Arc::new(AtomicBool::new(false));
                 let exit_flag_clone = exit_flag.clone();

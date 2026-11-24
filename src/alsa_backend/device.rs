@@ -91,13 +91,13 @@ pub struct AlsaCaptureDevice {
 }
 
 struct CaptureChannels {
-    audio: crossbeam_channel::Sender<AudioMessage>,
+    audio: AudioSender,
     status: crossbeam_channel::Sender<StatusMessage>,
     command: crossbeam_channel::Receiver<CommandMessage>,
 }
 
 struct PlaybackChannels {
-    audio: crossbeam_channel::Receiver<AudioMessage>,
+    audio: AudioReceiver,
     status: crossbeam_channel::Sender<StatusMessage>,
 }
 
@@ -778,9 +778,9 @@ fn playback_loop_bytes(
     }
 }
 
-fn drain_check_eos(audio: &crossbeam_channel::Receiver<AudioMessage>) -> Option<AudioMessage> {
+fn drain_check_eos(audio: &AudioReceiver) -> Option<AudioMessage> {
     let mut eos: Option<AudioMessage> = None;
-    while let Some(msg) = audio.try_iter().next() {
+    while let Ok(msg) = audio.try_recv() {
         if let AudioMessage::EndOfStream = msg {
             eos = Some(msg);
         }
@@ -1173,7 +1173,7 @@ fn nbr_capture_bytes_and_frames(
 impl PlaybackDevice for AlsaPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1250,7 +1250,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 impl CaptureDevice for AlsaCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,

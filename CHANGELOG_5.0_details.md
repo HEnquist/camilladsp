@@ -152,6 +152,9 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   larger than 0 and no larger than 1.0. These previously panicked inside the resampler on the first
   chunk, rather than being reported when the config was loaded.
 - `rate_measure_interval_s` must now be larger than zero, matching `adjust_interval_s`.
+- `queuelimit` must now be at least 1. A value of 0 made each queue between the threads hand over
+  one chunk at a time, with no slack between them. The new queues always hold at least one chunk,
+  so 0 would otherwise silently have become 1.
 - A mixer mapping that lists the same source channel twice is now rejected. The check existed but
   never fired, so the channel was simply mixed in twice.
 - Mixer source gains now have the same range as the `Gain` filter, -150 to +150 dB, or -10 to +10
@@ -215,6 +218,16 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   0.2 s windows with 1024-frame chunks at 48 kHz. That noise alternates in sign, but measurements
   outside the limit in either direction counted as in a row. Now only measurements off in the same
   direction count. It also stopped after four measurements instead of the documented three.
+
+### Audio threads
+- Waiting for audio data between the capture, processing and playback threads no longer yields
+  the CPU. The crossbeam channels used before spin and then call `yield_now()` up to four times
+  before they block, and on macOS a single yield from a real-time thread can take several
+  milliseconds when other threads are busy. With 32-frame chunks at 96 kHz on a loaded machine,
+  this gave occasional delays of up to 10 ms between the threads, which is enough to underrun the
+  playback device at small chunk sizes. Waiting now blocks right away, and the worst delay in the
+  same test was below 0.4 ms. The channels are still crossbeam channels, wrapped so that a blocked
+  thread is woken by a condition variable instead.
 
 ### Alsa
 - After a capture overrun, the capture device is now started right after it is prepared.

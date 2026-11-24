@@ -62,6 +62,7 @@ use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder, priming_frames};
+use crate::utils::rt_channel;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -136,7 +137,7 @@ struct AsioCaptureContext {
     /// Ring buffer producer — writes bytes read from hardware.
     device_producer: ringbuf::wrap::caching::Caching<Arc<HeapRb<u8>>, true, false>,
     /// Notification channel: (chunk_counter, pushed_bytes).
-    tx_dev: crossbeam_channel::Sender<(u64, usize)>,
+    tx_dev: rt_channel::Sender<(u64, usize)>,
     /// Double-buffer pointers, one entry per channel.
     channel_buffers: Vec<ChannelBuffers>,
     num_channels: usize,
@@ -1363,7 +1364,7 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 impl PlaybackDevice for AsioPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1764,8 +1765,8 @@ impl PlaybackDevice for AsioPlaybackDevice {
                                 .unwrap_or(());
                             break 'deviceloop;
                         }
-                        Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                        Err(rt_channel::RecvTimeoutError::Timeout) => {}
+                        Err(rt_channel::RecvTimeoutError::Disconnected) => {
                             let msg = "Playback message channel disconnected".to_string();
                             error!("{msg}.");
                             status_channel
@@ -1815,7 +1816,7 @@ impl PlaybackDevice for AsioPlaybackDevice {
 impl CaptureDevice for AsioCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -1868,7 +1869,7 @@ impl CaptureDevice for AsioCaptureDevice {
                     32 * chunksize / 1024 + 10
                 };
                 debug!("Using a capture channel capacity of {channel_capacity} buffers.");
-                let (tx_dev, rx_dev) = bounded(channel_capacity);
+                let (tx_dev, rx_dev) = rt_channel::bounded(channel_capacity);
 
                 // --- Device-specific setup (full-duplex vs single-direction) ---
                 // Format is resolved inside; bytes_per_sample depends on it.
@@ -2239,11 +2240,11 @@ impl CaptureDevice for AsioCaptureDevice {
                                     expected_chunk_nbr = chunk_nbr;
                                 }
                             }
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                            Err(rt_channel::RecvTimeoutError::Timeout) => {
                                 warn!("Capture, waiting for data timed out.");
                                 break;
                             }
-                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                            Err(rt_channel::RecvTimeoutError::Disconnected) => {
                                 error!("Capture, channel is closed.");
                                 channel
                                     .send(AudioMessage::EndOfStream)

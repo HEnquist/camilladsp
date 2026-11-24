@@ -22,6 +22,7 @@ use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
 use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder};
+use crate::utils::rt_channel;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -357,7 +358,7 @@ fn write_playback_pitch(elem: &Elem, elval: &mut ElemValue, speed: f64) {
 
 #[allow(clippy::too_many_arguments)]
 fn run_playback_inner_loop<C>(
-    rx_play: &crossbeam_channel::Receiver<PlaybackDeviceMessage>,
+    rx_play: &rt_channel::Receiver<PlaybackDeviceMessage>,
     device_consumer: &mut C,
     pcmdevice: &alsa::PCM,
     io: &alsa::pcm::IO<u8>,
@@ -441,8 +442,8 @@ fn run_playback_inner_loop<C>(
                         stop_requested = true;
                         break;
                     }
-                    Err(crossbeam_channel::TryRecvError::Empty) => break,
-                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    Err(rt_channel::TryRecvError::Empty) => break,
+                    Err(rt_channel::TryRecvError::Disconnected) => {
                         channel_disconnected = true;
                         break;
                     }
@@ -625,7 +626,7 @@ fn run_playback_inner_loop<C>(
                     trace!("pcm_drop result {drop_res:?}");
                     break;
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                Err(rt_channel::RecvTimeoutError::Timeout) => {
                     // Only write silence if the device buffer is running low.
                     // The ALSA device buffer may still have plenty of valid audio
                     // even though the ring buffer is momentarily empty (the non-RT
@@ -660,7 +661,7 @@ fn run_playback_inner_loop<C>(
                         );
                     }
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                Err(rt_channel::RecvTimeoutError::Disconnected) => {
                     status_channel_inner
                         .send(StatusMessage::PlaybackError(
                             "Playback inner queue disconnected".to_string(),
@@ -1048,7 +1049,7 @@ fn open_pcm(
 }
 
 fn send_playback_device_message(
-    channel: &crossbeam_channel::Sender<PlaybackDeviceMessage>,
+    channel: &rt_channel::Sender<PlaybackDeviceMessage>,
     msg: PlaybackDeviceMessage,
 ) -> bool {
     let is_droppable = matches!(
@@ -1059,14 +1060,14 @@ fn send_playback_device_message(
     loop {
         match channel.send_timeout(pending, std::time::Duration::from_millis(20)) {
             Ok(()) => return true,
-            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+            Err(rt_channel::SendTimeoutError::Timeout(msg)) => {
                 if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
                     trace!("Playback: inner queue full during shutdown, dropping message");
                     return true;
                 }
                 pending = msg;
             }
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+            Err(rt_channel::SendTimeoutError::Disconnected(_)) => return false,
         }
     }
 }
@@ -1103,7 +1104,7 @@ enum CaptureDeviceMessage {
 impl PlaybackDevice for AlsaPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1127,7 +1128,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
             .spawn(move || {
                 let channel_capacity = 8 * 1024 / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
-                let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
+                let (tx_dev, rx_dev) = rt_channel::bounded(channel_capacity);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
 
                 let ringbuffer_bytes_per_sample = conf_sample_format
@@ -1436,7 +1437,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
 impl CaptureDevice for AlsaCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -1477,7 +1478,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                     32 * chunksize / 1024 + 10
                 };
 
-                let (tx_dev, rx_dev) = crossbeam_channel::bounded(channel_capacity);
+                let (tx_dev, rx_dev) = rt_channel::bounded(channel_capacity);
                 let (tx_inner_command, rx_inner_command) = crossbeam_channel::bounded(32);
                 let (tx_state_dev, rx_state_dev) = crossbeam_channel::bounded(0);
                 let (tx_start_inner, rx_start_inner) = crossbeam_channel::bounded(0);
