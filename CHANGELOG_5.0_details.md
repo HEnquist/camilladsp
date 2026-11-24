@@ -137,6 +137,19 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   one starts, recovery from a playback underrun is logged at info, and the details of each event
   are logged at trace. Some backends previously warned on every chunk or callback, flooding the
   log, while others only logged at debug level.
+- CoreAudio: the capture, processing, filter worker and playback threads join the audio workgroup
+  of the playback device, or of the capture device when playback is not CoreAudio.
+  The workgroup tells the scheduler that the threads work against the deadline of the device's IO
+  thread, which keeps them on the performance cores of Apple silicon.
+  In one report the processing load went from 8.4 % to 1.4 % on an M1 Pro.
+  Workgroups need macOS 11 or later. The functions are looked up at runtime, so the Intel build
+  still runs on older versions, with the threads left out of the workgroup as before.
+- CoreAudio: the IO buffer size of the devices was never set, and the backend assumed 512 frames.
+  That put a floor of a few 512-frame buffers on the latency, whatever the `chunksize`.
+  The backend now asks for buffers of `chunksize` frames, clamped to the range the device supports,
+  but only when that is smaller than the size the device already uses.
+  The size the device ends up using is logged at info level. When the device can't go as low as
+  the chunk size, the log message suggests the `chunksize` that matches the device buffer.
 
 ## Bugfixes
 

@@ -12,6 +12,8 @@ One format is used for communicating with the application.
 This is typically 32-bit float, the same format that CoreAudio uses internally.
 The other format (called the physical format) is the one used to send or receive data to/from the sound card driver.
 
+CamillaDSP lowers the IO buffer size of the devices to match `chunksize` when the device supports it, and logs the size the device ends up using.
+
 ## Microphone access
 In order to capture audio on macOS, an application needs the be given access.
 First time CamillaDSP is launched, the system should show a popup asking if the Terminal app

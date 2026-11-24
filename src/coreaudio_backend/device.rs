@@ -57,18 +57,22 @@ use libc::pid_t;
 use objc2_audio_toolbox::{kAudioCodecUnknownPropertyError, kAudioUnitProperty_StreamFormat};
 use objc2_core_audio::{
     AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
-    AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyClockSource,
-    kAudioDevicePropertyClockSourceNameForIDCFString, kAudioDevicePropertyClockSources,
+    AudioObjectPropertyAddress, AudioObjectPropertySelector, AudioObjectSetPropertyData,
+    kAudioDevicePropertyBufferFrameSize, kAudioDevicePropertyBufferFrameSizeRange,
+    kAudioDevicePropertyClockSource, kAudioDevicePropertyClockSourceNameForIDCFString,
+    kAudioDevicePropertyClockSources, kAudioDevicePropertyIOThreadOSWorkgroup,
     kAudioDevicePropertyStereoPan, kAudioDevicePropertyStreamConfiguration, kAudioHardwareNoError,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyElementWildcard,
     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
     kAudioObjectPropertyScopeOutput,
 };
 use objc2_core_audio_types::{
-    AudioBuffer, AudioStreamBasicDescription, AudioValueTranslation, kAudioFormatFlagIsFloat,
+    AudioBuffer, AudioStreamBasicDescription, AudioValueRange, AudioValueTranslation,
+    kAudioFormatFlagIsFloat,
 };
 use objc2_core_foundation::CFString;
 
+use crate::utils::audio_workgroup;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -517,6 +521,133 @@ fn open_coreaudio_capture(
     Ok((audio_unit, device_id))
 }
 
+/// Read a fixed size property in the global scope of a device.
+/// `value` only provides the initial contents of the buffer the property is read into.
+fn get_global_property<T>(
+    device_id: AudioDeviceID,
+    selector: AudioObjectPropertySelector,
+    mut value: T,
+) -> Result<T, i32> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: selector,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let data_size = mem::size_of::<T>() as u32;
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::from(&property_address),
+            0,
+            null(),
+            NonNull::from(&data_size),
+            NonNull::from(&mut value).cast(),
+        )
+    };
+    if status == 0 { Ok(value) } else { Err(status) }
+}
+
+/// The audio workgroup of the IO thread of a device.
+/// The property only exists from macOS 11, older versions return `None`.
+fn get_io_workgroup(device_id: AudioDeviceID) -> Option<audio_workgroup::Workgroup> {
+    match get_global_property(
+        device_id,
+        kAudioDevicePropertyIOThreadOSWorkgroup,
+        null_mut::<c_void>(),
+    ) {
+        // The caller is responsible for releasing the returned workgroup.
+        Ok(workgroup) => unsafe { audio_workgroup::Workgroup::from_retained(workgroup) },
+        Err(status) => {
+            debug!("The device has no audio workgroup, error code: {status}.");
+            None
+        }
+    }
+}
+
+/// Ask the device for IO buffers of `frames` frames, clamped to the range it supports, and return
+/// the buffer size it uses afterwards.
+///
+/// Only a smaller size than the current one is ever requested. A larger one would only add latency
+/// compared to leaving the device alone, since chunks larger than the device buffer work fine.
+fn request_buffer_frame_size(device_id: AudioDeviceID, frames: usize) -> Option<usize> {
+    let current = match get_global_property(device_id, kAudioDevicePropertyBufferFrameSize, 0u32) {
+        Ok(size) => size,
+        Err(status) => {
+            warn!("Unable to read the device buffer size, error code: {status}.");
+            return None;
+        }
+    };
+    let range = match get_global_property(
+        device_id,
+        kAudioDevicePropertyBufferFrameSizeRange,
+        AudioValueRange {
+            mMinimum: 0.0,
+            mMaximum: 0.0,
+        },
+    ) {
+        Ok(range) => range,
+        Err(status) => {
+            warn!("Unable to read the device buffer size range, error code: {status}.");
+            return Some(current as usize);
+        }
+    };
+    let wanted = (frames as f64).min(range.mMaximum).max(range.mMinimum) as u32;
+    debug!(
+        "Device buffer size is {current} frames, supported range {} to {}.",
+        range.mMinimum, range.mMaximum
+    );
+    if wanted >= current {
+        return Some(current as usize);
+    }
+    debug!("Requesting a device buffer size of {wanted} frames.");
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyBufferFrameSize,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let status = unsafe {
+        AudioObjectSetPropertyData(
+            device_id,
+            NonNull::from(&property_address),
+            0,
+            null(),
+            mem::size_of::<u32>() as u32,
+            NonNull::from(&wanted).cast(),
+        )
+    };
+    if status != 0 {
+        warn!("Unable to set the device buffer size, error code: {status}.");
+    }
+    match get_global_property(device_id, kAudioDevicePropertyBufferFrameSize, 0u32) {
+        Ok(size) => Some(size as usize),
+        Err(status) => {
+            warn!("Unable to read the device buffer size, error code: {status}.");
+            Some(current as usize)
+        }
+    }
+}
+
+/// Log the buffer size a device ended up with. When it is larger than the chunk, suggest the
+/// chunk size that matches it. `matching_chunksize` is the buffer size converted to the processing
+/// sample rate.
+fn log_buffer_frame_size(
+    direction: &str,
+    buffer_frames: usize,
+    requested_frames: usize,
+    matching_chunksize: usize,
+) {
+    info!("The {direction} device uses buffers of {buffer_frames} frames.");
+    if buffer_frames > requested_frames {
+        info!(
+            "The {direction} device does not support buffers as small as the chunk size. \
+            Set chunksize to {matching_chunksize} to match the device buffer."
+        );
+    }
+}
+
+/// The number of frames per callback assumed when the device buffer size can't be read.
+const FALLBACK_CALLBACK_FRAMES: usize = 512;
+
 enum PlaybackDeviceMessage {
     Data(usize),
 }
@@ -547,8 +678,37 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
         let handle = thread::Builder::new()
             .name("CoreaudioPlayback".to_string())
             .spawn(move || {
-                // Devices typically request around 1000 frames per buffer, set a reasonable capacity for the channel
-                let channel_capacity = 8 * 1024 / chunksize + 3;
+                let (mut audio_unit, device_id) = match open_coreaudio_playback(
+                    &devname,
+                    samplerate,
+                    channels,
+                    &sample_format,
+                    exclusive,
+                ) {
+                    Ok(audio_unit) => audio_unit,
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::PlaybackError(err.to_string()))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                };
+                let callback_frames = match request_buffer_frame_size(device_id, chunksize) {
+                    Some(frames) => {
+                        log_buffer_frame_size("playback", frames, chunksize, frames);
+                        frames
+                    }
+                    None => FALLBACK_CALLBACK_FRAMES,
+                };
+                // Published until this thread exits.
+                let _workgroup = get_io_workgroup(device_id)
+                    .map(|workgroup| audio_workgroup::publish(workgroup, true));
+
+                // The headroom for the callbacks was sized for 1024 frames before the buffer
+                // size was known, and is kept at least that large.
+                let headroom_frames = callback_frames.max(1024);
+                let channel_capacity = 8 * headroom_frames / chunksize + 3;
                 debug!("Using a playback channel capacity of {channel_capacity} chunks.");
                 let (tx_dev, rx_dev) = bounded(channel_capacity);
                 let buffer_fill = Arc::new(Mutex::new(countertimer::DeviceBufferEstimator::new(samplerate, chunksize)));
@@ -568,25 +728,8 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                 let mut sample_queue: VecDeque<u8> =
                     VecDeque::with_capacity((16 * chunksize  + target_level) * blockalign);
 
-                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2048 ));
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * chunksize + 2 * headroom_frames ));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
-
-                let (mut audio_unit, device_id) = match open_coreaudio_playback(
-                    &devname,
-                    samplerate,
-                    channels,
-                    &sample_format,
-                    exclusive,
-                ) {
-                    Ok(audio_unit) => audio_unit,
-                    Err(err) => {
-                        status_channel
-                            .send(StatusMessage::PlaybackError(err.to_string()))
-                            .unwrap_or(());
-                        barrier.wait();
-                        return;
-                    }
-                };
 
                 type Args = render_callback::Args<data::InterleavedBytes<f32>>;
 
@@ -712,6 +855,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         None
                     }
                 };
+                audio_workgroup::join_current_thread("Playback");
                 let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                 let mut backlog_trimmer =
                     BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
@@ -809,6 +953,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                         }
                     }
                 }
+                audio_workgroup::leave_current_thread();
                 if let Some(h) = thread_handle {
                     match demote_current_thread_from_real_time(h) {
                         Ok(_) => {
@@ -875,11 +1020,31 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         chunksize,
                     processing_params.clone(),
                     );
-                // Rough guess of the number of frames per callback. 
-                //let callback_frames = samplerate / 85;
-                let callback_frames = 512;
-                // TODO check if always 512!
-                //trace!("Estimated playback callback period to {} frames", callback_frames);
+                trace!("Build input stream.");
+                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {
+                    Ok(audio_unit) => audio_unit,
+                    Err(err) => {
+                        status_channel
+                            .send(StatusMessage::CaptureError(err.to_string()))
+                            .unwrap_or(());
+                        barrier.wait();
+                        return;
+                    }
+                };
+                // The length of a chunk at the capture sample rate.
+                let chunk_frames = (chunksize * capture_samplerate).div_ceil(samplerate);
+                let callback_frames = match request_buffer_frame_size(device_id, chunk_frames) {
+                    Some(frames) => {
+                        let matching_chunksize = (frames * samplerate).div_ceil(capture_samplerate);
+                        log_buffer_frame_size("capture", frames, chunk_frames, matching_chunksize);
+                        frames
+                    }
+                    None => FALLBACK_CALLBACK_FRAMES,
+                };
+                // Published until this thread exits. Only used when playback publishes nothing.
+                let _workgroup = get_io_workgroup(device_id)
+                    .map(|workgroup| audio_workgroup::publish(workgroup, false));
+
                 let channel_capacity = if let Some(resamp) = &resampler {
                     let max_input_frames = resamp.resampler.input_frames_max();
                     32*(chunksize + max_input_frames)/callback_frames + 10
@@ -899,20 +1064,11 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                 } else {
                     chunksize
                 };
-                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * buffer_capacity_frames + 2 * callback_frames ));
+                // The headroom for the callbacks was sized for 512 frames before the buffer
+                // size was known, and is kept at least that large.
+                let headroom_frames = callback_frames.max(512);
+                let ringbuffer = HeapRb::<u8>::new(blockalign * ( 2 * buffer_capacity_frames + 2 * headroom_frames ));
                 let (mut device_producer, mut device_consumer) = ringbuffer.split();
-
-                trace!("Build input stream.");
-                let (mut audio_unit, device_id) = match open_coreaudio_capture(&devname, capture_samplerate, channels, &sample_format) {
-                    Ok(audio_unit) => audio_unit,
-                    Err(err) => {
-                        status_channel
-                            .send(StatusMessage::CaptureError(err.to_string()))
-                            .unwrap_or(());
-                        barrier.wait();
-                        return;
-                    }
-                };
 
                 let mut chunk_counter = 0;
                 let mut ring_full = false;
@@ -1038,6 +1194,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         None
                     }
                 };
+                audio_workgroup::join_current_thread("Capture");
                 'deviceloop: loop {
                     match handle_capture_command(command_channel.try_recv(), &mut rate_adjust, &mut resampler, async_src, pitch_supported) {
                         CommandOutcome::Continue => {}
@@ -1200,6 +1357,7 @@ impl CaptureDevice for CoreaudioCaptureDevice {
                         }
                     }
                 }
+                audio_workgroup::leave_current_thread();
                 if let Some(h) = thread_handle {
                     match demote_current_thread_from_real_time(h) {
                         Ok(_) => {
