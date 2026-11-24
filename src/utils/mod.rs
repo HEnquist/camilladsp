@@ -21,6 +21,7 @@ pub mod decibels;
 pub mod rate_controller;
 pub mod resampling;
 pub mod ringbuffer;
+pub mod rt_channel;
 pub mod rt_priority;
 pub mod stash;
 pub use camilladsp_schema::utils::{time, wavtools};

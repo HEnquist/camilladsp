@@ -193,7 +193,7 @@ pub struct GeneratorDevice {
 }
 
 struct CaptureChannels {
-    audio: crossbeam_channel::Sender<AudioMessage>,
+    audio: AudioSender,
     status: crossbeam_channel::Sender<StatusMessage>,
     command: crossbeam_channel::Receiver<CommandMessage>,
 }
@@ -262,7 +262,7 @@ fn capture_loop(params: GeneratorParams, msg_channels: CaptureChannels) {
 impl CaptureDevice for GeneratorDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,

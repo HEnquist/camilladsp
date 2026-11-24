@@ -30,6 +30,7 @@ use crate::file_backend::device as filedevice;
 use crate::generatordevice;
 #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
 use crate::pipewire_backend::device as pipewiredevice;
+use crate::utils::rt_channel;
 #[cfg(target_os = "windows")]
 use crate::wasapi_backend::device as wasapidevice;
 use parking_lot::RwLock;
@@ -80,11 +81,16 @@ pub enum AudioMessage {
     EndOfStream,
 }
 
+/// Sends audio from the capture thread to processing, and from processing to playback.
+pub type AudioSender = rt_channel::Sender<AudioMessage>;
+/// Receives audio in the processing thread from capture, and in the playback thread from processing.
+pub type AudioReceiver = rt_channel::Receiver<AudioMessage>;
+
 /// A playback device
 pub trait PlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -95,7 +101,7 @@ pub trait PlaybackDevice {
 pub trait CaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,

@@ -520,7 +520,7 @@ enum PlaybackDeviceMessage {
 impl PlaybackDevice for CoreaudioPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -808,7 +808,7 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 impl CaptureDevice for CoreaudioCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,

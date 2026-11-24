@@ -216,6 +216,16 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   outside the limit in either direction counted as in a row. Now only measurements off in the same
   direction count. It also stopped after four measurements instead of the documented three.
 
+### Audio threads
+- Waiting for audio data between the capture, processing and playback threads no longer yields
+  the CPU. The crossbeam channels used before spin and then call `yield_now()` up to four times
+  before they block, and on macOS a single yield from a real-time thread can take several
+  milliseconds when other threads are busy. With 32-frame chunks at 96 kHz on a loaded machine,
+  this gave occasional delays of up to 10 ms between the threads, which is enough to underrun the
+  playback device at small chunk sizes. Waiting now blocks right away, and the worst delay in the
+  same test was below 0.4 ms. The channels are still crossbeam channels, wrapped so that a blocked
+  thread is woken by a condition variable instead.
+
 ### Alsa
 - After a capture overrun, the capture device is now started right after it is prepared.
   It was previously left prepared until a poll timed out, so capture delivered nothing in between.

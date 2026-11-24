@@ -22,7 +22,7 @@ use std::{
 use parking_lot::RwLock;
 
 use crate::filters::fftconv::{ConvCoeffCache, ImpulseCache};
-use crate::utils::stash;
+use crate::utils::{rt_channel, stash};
 use crate::{
     ChannelMask, CommandMessage, ProcessingState, Res, StatusMessage, StatusStructs, audiodevice,
     config, processing,
@@ -136,8 +136,8 @@ pub fn start_pipeline(
 ) -> (EnginePipeline, crossbeam_channel::Receiver<StatusMessage>) {
     // Before any audio thread exists, so that none of them has to allocate.
     stash::prefill_for_config(active_config);
-    let (tx_pb, rx_pb) = crossbeam_channel::bounded(active_config.devices.queuelimit());
-    let (tx_cap, rx_cap) = crossbeam_channel::bounded(active_config.devices.queuelimit());
+    let (tx_pb, rx_pb) = rt_channel::bounded(active_config.devices.queuelimit());
+    let (tx_cap, rx_cap) = rt_channel::bounded(active_config.devices.queuelimit());
     let (tx_status, rx_status) = crossbeam_channel::unbounded();
     let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
     let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();

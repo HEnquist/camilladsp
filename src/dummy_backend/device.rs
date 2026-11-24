@@ -119,7 +119,7 @@ pub struct DummyPlaybackDevice {
 }
 
 struct CaptureChannels {
-    audio: crossbeam_channel::Sender<AudioMessage>,
+    audio: AudioSender,
     status: crossbeam_channel::Sender<StatusMessage>,
     command: crossbeam_channel::Receiver<CommandMessage>,
 }
@@ -412,7 +412,7 @@ fn capture_loop(
 /// hardware changed format underneath it.
 fn playback_loop(
     params: PlaybackParams,
-    channel: crossbeam_channel::Receiver<AudioMessage>,
+    channel: AudioReceiver,
     status_channel: &crossbeam_channel::Sender<StatusMessage>,
 ) -> StatusMessage {
     debug!("starting dummy playback loop");
@@ -596,7 +596,7 @@ fn playback_loop(
 impl CaptureDevice for DummyCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -665,7 +665,7 @@ impl CaptureDevice for DummyCaptureDevice {
 impl PlaybackDevice for DummyPlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,

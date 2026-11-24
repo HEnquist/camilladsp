@@ -18,6 +18,7 @@ use crate::audiodevice::*;
 use crate::config;
 use crate::filters::fftconv::ConvCoeffCache;
 use crate::pipeline;
+use crate::utils::rt_channel::SendTimeoutError;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -25,20 +26,20 @@ use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-fn forward_to_playback(tx_pb: &crossbeam_channel::Sender<AudioMessage>, msg: AudioMessage) -> bool {
+fn forward_to_playback(tx_pb: &AudioSender, msg: AudioMessage) -> bool {
     let is_droppable = !matches!(msg, AudioMessage::EndOfStream);
     let mut pending = msg;
     loop {
         match tx_pb.send_timeout(pending, std::time::Duration::from_millis(20)) {
             Ok(()) => return true,
-            Err(crossbeam_channel::SendTimeoutError::Timeout(msg)) => {
+            Err(SendTimeoutError::Timeout(msg)) => {
                 if is_droppable && SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
                     trace!("Processing: playback queue full during shutdown, dropping message");
                     return true;
                 }
                 pending = msg;
             }
-            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => return false,
+            Err(SendTimeoutError::Disconnected(_)) => return false,
         }
     }
 }
@@ -55,8 +56,8 @@ pub type PipelineConfig = (config::ConfigChange, config::Configuration, ConvCoef
 pub fn run_processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
-    tx_pb: crossbeam_channel::Sender<AudioMessage>,
-    rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+    tx_pb: AudioSender,
+    rx_cap: AudioReceiver,
     rx_pipeconf: crossbeam_channel::Receiver<PipelineConfig>,
     processing_params: Arc<ProcessingParameters>,
 ) -> thread::JoinHandle<()> {
@@ -78,8 +79,8 @@ pub fn run_processing(
 fn processing(
     conf_proc: config::Configuration,
     barrier_proc: Arc<Barrier>,
-    tx_pb: crossbeam_channel::Sender<AudioMessage>,
-    rx_cap: crossbeam_channel::Receiver<AudioMessage>,
+    tx_pb: AudioSender,
+    rx_cap: AudioReceiver,
     rx_pipeconf: crossbeam_channel::Receiver<PipelineConfig>,
     processing_params: Arc<ProcessingParameters>,
 ) {

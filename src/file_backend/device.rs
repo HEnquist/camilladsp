@@ -183,7 +183,7 @@ pub struct FileCaptureDevice {
 }
 
 struct CaptureChannels {
-    audio: crossbeam_channel::Sender<AudioMessage>,
+    audio: AudioSender,
     status: crossbeam_channel::Sender<StatusMessage>,
     command: crossbeam_channel::Receiver<CommandMessage>,
 }
@@ -220,7 +220,7 @@ pub trait Reader {
 impl PlaybackDevice for FilePlaybackDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Receiver<AudioMessage>,
+        channel: AudioReceiver,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -640,7 +640,7 @@ fn capture_loop(
 impl CaptureDevice for FileCaptureDevice {
     fn start(
         &mut self,
-        channel: crossbeam_channel::Sender<AudioMessage>,
+        channel: AudioSender,
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         command_channel: crossbeam_channel::Receiver<CommandMessage>,
@@ -790,7 +790,7 @@ fn send_silence(
     samples: usize,
     channels: usize,
     chunksize: usize,
-    audio_channel: &crossbeam_channel::Sender<AudioMessage>,
+    audio_channel: &AudioSender,
     command_channel: &crossbeam_channel::Receiver<CommandMessage>,
     resampler: &mut Option<ChunkResampler>,
 ) {
