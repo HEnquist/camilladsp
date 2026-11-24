@@ -1,0 +1,29 @@
+---
+# A dummy to dummy config for the end-to-end tests. Needs a build with the
+# dummy-backend feature.
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Dummy
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      # -6 dBFS, so the peak to peak signal range is 1.0.
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 2
+
+filters:
+  testgain:
+    type: Gain
+    description: "nbr 1"
+    parameters:
+      gain: -6.0
+
+pipeline:
+  - type: Filter
+    channels: [0, 1]
+    names: [testgain]

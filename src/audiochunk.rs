@@ -16,30 +16,36 @@
 
 use std::time::Instant;
 
-use crate::PrcFmt;
+use crate::CamillaFloat;
+use crate::ToF32;
 use crate::utils::decibels::linear_to_db;
 
 /// Main container of audio data
 pub struct AudioChunk {
     pub frames: usize,
     pub channels: usize,
-    pub maxval: PrcFmt,
-    pub minval: PrcFmt,
+    pub maxval: CamillaFloat,
+    pub minval: CamillaFloat,
     pub timestamp: Instant,
     pub valid_frames: usize,
-    pub waveforms: Vec<Vec<PrcFmt>>,
+    pub waveforms: Vec<Vec<CamillaFloat>>,
 }
 
-/// Container for RMS and peak values of a chunk
+/// Container for RMS and peak values of a chunk.
+///
+/// These are telemetry rather than audio: they exist to be reported over the
+/// websocket, which uses `f32` throughout, so they are stored as `f32`. The
+/// values are still accumulated at processing precision in [`rms_and_peak`] and
+/// converted once here.
 pub struct ChunkStats {
-    pub rms: Vec<PrcFmt>,
-    pub peak: Vec<PrcFmt>,
+    pub rms: Vec<f32>,
+    pub peak: Vec<f32>,
 }
 
 impl ChunkStats {
-    fn write_values<F>(&self, source: &[PrcFmt], values: &mut Vec<f32>, map: F)
+    fn write_values<F>(&self, source: &[f32], values: &mut Vec<f32>, map: F)
     where
-        F: Fn(PrcFmt) -> f32,
+        F: Fn(f32) -> f32,
     {
         values.resize(source.len(), 0.0);
         for (slot, value) in values.iter_mut().zip(source.iter()) {
@@ -48,27 +54,28 @@ impl ChunkStats {
     }
 
     pub fn rms_db(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.rms, values, |value| linear_to_db(value as f32))
+        self.write_values(&self.rms, values, linear_to_db)
     }
 
     pub fn rms_linear(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.rms, values, |value| value as f32)
+        self.write_values(&self.rms, values, |value| value)
     }
 
     pub fn peak_db(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.peak, values, |value| linear_to_db(value as f32))
+        self.write_values(&self.peak, values, linear_to_db)
     }
 
     pub fn peak_linear(&self, values: &mut Vec<f32>) {
-        self.write_values(&self.peak, values, |value| value as f32)
+        self.write_values(&self.peak, values, |value| value)
     }
 }
 
 impl AudioChunk {
+    /// Create a new chunk from `waveforms`, recording the expected max/min values and frame count.
     pub fn new(
-        waveforms: Vec<Vec<PrcFmt>>,
-        maxval: PrcFmt,
-        minval: PrcFmt,
+        waveforms: Vec<Vec<CamillaFloat>>,
+        maxval: CamillaFloat,
+        minval: CamillaFloat,
         frames: usize,
         valid_frames: usize,
     ) -> Self {
@@ -85,7 +92,7 @@ impl AudioChunk {
         }
     }
 
-    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<PrcFmt>>) -> Self {
+    pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<CamillaFloat>>) -> Self {
         let timestamp = chunk.timestamp;
         let maxval = chunk.maxval;
         let minval = chunk.minval;
@@ -104,10 +111,10 @@ impl AudioChunk {
     }
 
     pub fn stats(&self) -> ChunkStats {
-        let rms_peak: Vec<(PrcFmt, PrcFmt)> =
+        let rms_peak: Vec<(CamillaFloat, CamillaFloat)> =
             self.waveforms.iter().map(|wf| rms_and_peak(wf)).collect();
-        let rms: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.0).collect();
-        let peak: Vec<PrcFmt> = rms_peak.iter().map(|rp| rp.1).collect();
+        let rms: Vec<f32> = rms_peak.iter().map(|rp| rp.0.to_f32()).collect();
+        let peak: Vec<f32> = rms_peak.iter().map(|rp| rp.1.to_f32()).collect();
         ChunkStats { rms, peak }
     }
 
@@ -120,8 +127,8 @@ impl AudioChunk {
             .zip(stats.peak.iter_mut().zip(stats.rms.iter_mut()))
         {
             let (rms, peak) = rms_and_peak(wf);
-            *peakval = peak;
-            *rmsval = rms;
+            *peakval = peak.to_f32();
+            *rmsval = rms.to_f32();
         }
         xtrace!("Stats: rms {:?}, peak {:?}", stats.rms, stats.peak);
     }
@@ -134,18 +141,63 @@ impl AudioChunk {
 }
 
 /// Get RMS and peak value of a vector
-pub fn rms_and_peak(data: &[PrcFmt]) -> (PrcFmt, PrcFmt) {
+pub fn rms_and_peak(data: &[CamillaFloat]) -> (CamillaFloat, CamillaFloat) {
     if !data.is_empty() {
-        let (squaresum, peakval) = data.iter().fold((0.0, 0.0), |(sqsum, peak), value| {
-            let newpeak = if peak > value.abs() {
-                peak
-            } else {
-                value.abs()
-            };
-            (sqsum + *value * *value, newpeak)
-        });
-        ((squaresum / data.len() as PrcFmt).sqrt(), peakval)
+        // Independent accumulators let the compiler vectorize both reductions.
+        let mut squares = [0.0; 8];
+        let mut peaks: [CamillaFloat; 8] = [0.0; 8];
+        let (chunks, remainder) = data.as_chunks::<8>();
+        for chunk in chunks {
+            for i in 0..8 {
+                squares[i] += chunk[i] * chunk[i];
+                peaks[i] = peaks[i].max(chunk[i].abs());
+            }
+        }
+        let mut squaresum = squares.iter().sum::<CamillaFloat>();
+        let mut peakval = peaks.into_iter().fold(0.0, CamillaFloat::max);
+        for value in remainder {
+            squaresum += *value * *value;
+            peakval = peakval.max(value.abs());
+        }
+        ((squaresum / data.len() as CamillaFloat).sqrt(), peakval)
     } else {
         (0.0, 0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ToCamillaFloat;
+
+    #[test]
+    fn chunk_levels_include_partial_blocks_and_silent_channels() {
+        for frames in [1, 7, 8, 9, 63, 64, 65, 1023, 1024, 1025, 4097] {
+            let mut reference: Vec<_> =
+                (0..frames).map(|i| 0.7 * (i as f64 * 0.13).sin()).collect();
+            reference[frames - 1] = -1.25;
+            let waveform = reference.iter().map(|v| v.to_camilla_float()).collect();
+            let expected_rms = (reference.iter().map(|v| v * v).sum::<f64>() / frames as f64)
+                .sqrt()
+                .to_f32();
+            let chunk = AudioChunk::new(
+                vec![waveform, Vec::new(), vec![0.0; frames]],
+                0.7,
+                -1.25,
+                frames,
+                frames,
+            );
+            let mut stats = ChunkStats {
+                rms: vec![1.0; 3],
+                peak: vec![1.0; 3],
+            };
+            chunk.update_stats(&mut stats);
+            assert!(
+                (stats.rms[0] - expected_rms).abs() < 2e-6,
+                "frames={frames}"
+            );
+            assert_eq!(stats.peak, [1.25, 0.0, 0.0]);
+            assert_eq!(&stats.rms[1..], &[0.0, 0.0]);
+        }
     }
 }

@@ -1,0 +1,31 @@
+---
+# A dummy to dummy config for the rate control tests, with the rate adjust loop on and a
+# short adjust interval. Needs a build with the dummy-backend feature.
+#
+# The interval is 0.2 s rather than the 10 s default because the controller works on the
+# error relative to the frames in one interval: at 10 s a buffer error of a chunk or two
+# is a rounding error and the loop crawls, while at 0.2 s it is large enough to move at
+# the controller's own clamp. Short intervals converge faster, not slower.
+#
+# The two port numbers are placeholders, replaced by the tests with free ports.
+devices:
+  samplerate: 48000
+  chunksize: 512
+  queuelimit: 8
+  target_level: 2048
+  enable_rate_adjust: true
+  adjust_interval_s: 0.2
+  capture:
+    type: Dummy
+    channels: 2
+    control_port: 11111
+    signal:
+      type: Sine
+      freq: 1000
+      level: -6.0
+  playback:
+    type: Dummy
+    channels: 2
+    control_port: 22222
+
+pipeline: []

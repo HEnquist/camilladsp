@@ -1,0 +1,84 @@
+# Runs on a change to the engine, the shared e2e fixtures or this backend, and skips a
+# change that is only inside another backend. The dummy backend is not in this build.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/asio_backend/**"
+      - "!src/dummy_backend/**"
+      - "!src/pipewire_backend/**"
+      - "!src/wasapi_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - testscripts/e2e/coreaudio/**
+      - .github/workflows/e2e_coreaudio.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+name: End-to-end, CoreAudio
+
+# Kept separate from ci_test.yml so a flaky device job can never block the lint and
+# unit test signal. One workflow per backend, so each can get its own path filter.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # The coreaudio tests, on BlackHole 2ch and 16ch. A HAL plugin rather than a kernel
+  # extension, so the casks install on a stock runner with no reboot, and the runner's
+  # processes already have the microphone permission capture needs. The installer asks
+  # for a reboot, and what it actually takes is a restart of coreaudiod.
+  #
+  # Apple silicon only. The backend has no architecture specific code and BlackHole is
+  # one universal binary, and the probe found the Intel runner behaving the same.
+  coreaudio:
+    name: CoreAudio, BlackHole
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install BlackHole 2ch and 16ch
+        run: |
+          brew install --cask blackhole-2ch blackhole-16ch
+          brew list --cask --versions | grep -i blackhole
+
+      - name: Restart coreaudiod until both devices are listed
+        run: |
+          sudo killall coreaudiod || true
+          start=$(date +%s)
+          until system_profiler SPAudioDataType | grep -q "BlackHole 16ch" \
+              && system_profiler SPAudioDataType | grep -q "BlackHole 2ch"; do
+            if [ $(( $(date +%s) - start )) -gt 60 ]; then
+              system_profiler SPAudioDataType
+              echo "BlackHole not listed after 60 s"
+              exit 1
+            fi
+            sleep 2
+          done
+          system_profiler SPAudioDataType
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coreaudio
+
+      # No --features, the CoreAudio backend is in every macOS build.
+      - name: Build
+        run: cargo build --profile e2e
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout websocket-client numpy sounddevice
+
+      - name: Run the CoreAudio tests
+        run: pytest -v testscripts/e2e -m coreaudio

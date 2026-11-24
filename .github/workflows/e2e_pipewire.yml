@@ -1,0 +1,116 @@
+# Runs on a change to the engine, the shared e2e fixtures or this backend, and skips a
+# change that is only inside another backend. The dummy backend is not in this build.
+on:
+  push:
+    paths: &paths
+      - src/**
+      - "!src/alsa_backend/**"
+      - "!src/asio_backend/**"
+      - "!src/coreaudio_backend/**"
+      - "!src/dummy_backend/**"
+      - "!src/wasapi_backend/**"
+      - Cargo.*
+      - testscripts/e2e/*
+      - testscripts/e2e/pipewire/**
+      - .github/workflows/e2e_pipewire.yml
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+name: End-to-end, PipeWire
+
+# Kept separate from ci_test.yml so a flaky device job can never block the lint and
+# unit test signal. One workflow per backend, so each can get its own path filter.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # The pipewire tests, on two null sinks the suite creates itself. PipeWire is all
+  # userspace, so unlike the alsa job this needs no VM, only the daemons, started by
+  # hand since there is no user session to start them.
+  #
+  # In a Debian trixie container rather than on the runner's Ubuntu. The backend sets
+  # node.dont-fallback with autoconnect_to, which WirePlumber only honours from 0.5, and
+  # Ubuntu 24.04 ships 0.4. Trixie has PipeWire 1.4 and WirePlumber 0.5. The steps
+  # before the tests check each thing the suite depends on in turn, so an image change
+  # fails there and says which.
+  pipewire:
+    name: PipeWire, null sinks
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install the build and test dependencies, and PipeWire
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends \
+            ca-certificates curl git zstd build-essential pkg-config clang libclang-dev \
+            libasound2-dev libpipewire-0.3-dev libdbus-1-dev \
+            dbus-daemon pipewire pipewire-bin wireplumber \
+            python3-pytest python3-pytest-timeout python3-numpy python3-websocket
+
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pipewire
+
+      - name: Build
+        run: cargo build --profile e2e --features pipewire-backend
+
+      # The daemons outlive this step, and the two variables are what every later step
+      # needs to find them.
+      - name: Start D-Bus, PipeWire and WirePlumber
+        run: |
+          export XDG_RUNTIME_DIR=/tmp/xdg
+          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
+          dbus-daemon --session --fork --address="$DBUS_SESSION_BUS_ADDRESS"
+          setsid nohup pipewire > pipewire.log 2>&1 < /dev/null &
+          setsid nohup wireplumber > wireplumber.log 2>&1 < /dev/null &
+          start=$(date +%s)
+          until pw-cli ls Client 2>/dev/null | grep -q '"WirePlumber"'; do
+            if [ $(( $(date +%s) - start )) -gt 30 ]; then
+              echo "WirePlumber not connected after 30 s"
+              exit 1
+            fi
+            sleep 1
+          done
+          pipewire --version
+          wireplumber --version
+          wpctl status
+
+      - name: Check a null sink can be fed and recorded
+        run: |
+          pw-cli create-node adapter '{ factory.name = support.null-audio-sink
+            node.name = cdsp-e2e-probe media.class = Audio/Sink object.linger = true
+            audio.channels = 2 audio.position = [ FL FR ] }'
+          head -c 384000 /dev/zero | timeout 20 pw-cat --playback --raw --format f32 \
+            --rate 48000 --channels 2 --target cdsp-e2e-probe -
+          # Two seconds of the monitor into a file, ended by timeout, whose 124 is the
+          # expected outcome. Not through head, since a pipe closed under pw-cat is a
+          # SIGPIPE, and the step shell runs with pipefail. Raw mode always writes to
+          # stdout, whatever the file argument says, hence the redirect.
+          timeout 2 pw-cat --record --raw --format f32 --rate 48000 --channels 2 \
+            --target cdsp-e2e-probe -P '{ stream.capture.sink = true }' - > probe.raw \
+            || [ $? -eq 124 ]
+          bytes=$(stat -c %s probe.raw)
+          echo "recorded $bytes bytes"
+          [ "$bytes" -ge 192000 ]
+
+      - name: Run the PipeWire tests
+        run: python3 -m pytest -v testscripts/e2e -m pipewire
+
+      - name: Daemon logs on failure
+        if: failure()
+        run: cat pipewire.log wireplumber.log || true

@@ -229,30 +229,29 @@ filters:
       type: Tilt
       gain: -5.0
 
-  FivePointParametricEqualizer:
+  NPointParametricEqualizer:
     type: BiquadCombo
     parameters:
-      type: FivePointPeq
-      # LowShelf
-      fls: 125
-      gls: 1.0
-      qls: 0.7
-      # Peaking_1
-      fp1: 400
-      gp1: -0.5
-      qp1: 0.7
-      # Peaking_2
-      fp2: 1000
-      gp2: 1.5
-      qp2: 0.7
-      # Peaking_3
-      fp3: 2500
-      gp3: -0.25
-      qp3: 0.7
-      # HighShelf
-      fhs: 8000
-      ghs: 0.5
-      qhs: 0.7
+      type: NPointPeq
+      bands:
+        # Lowshelf
+        - freq: 125
+          gain: 1.0
+          q: 0.7
+        # Peaking
+        - freq: 400
+          gain: -0.5
+          q: 0.7
+        - freq: 1000
+          gain: 1.5
+          q: 0.7
+        - freq: 2500
+          gain: -0.25
+          q: 0.7
+        # Highshelf
+        - freq: 8000
+          gain: 0.5
+          q: 0.7
 
   Graphic:
     type: BiquadCombo

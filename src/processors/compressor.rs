@@ -14,13 +14,17 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use crate::PrcFmt;
-use crate::Res;
+use crate::CamillaFloat;
+use crate::ToCamillaFloat;
 use crate::audiochunk::AudioChunk;
 use crate::config;
-use crate::filters::limiter::Limiter;
+use crate::filters::clipper::Clipper;
 use crate::processors::Processor;
 use crate::utils::decibels::db_to_linear;
+use crate::utils::time::time_to_samples;
+
+/// Parameter validation lives in `camilladsp-schema`.
+pub use camilladsp_schema::processors::compressor::validate_compressor;
 
 #[derive(Clone, Debug)]
 pub struct Compressor {
@@ -28,15 +32,15 @@ pub struct Compressor {
     pub channels: usize,
     pub monitor_channels: Vec<usize>,
     pub process_channels: Vec<usize>,
-    pub attack: PrcFmt,
-    pub release: PrcFmt,
-    pub threshold: PrcFmt,
-    pub factor: PrcFmt,
-    pub makeup_gain: PrcFmt,
-    pub limiter: Option<Limiter>,
+    pub attack: CamillaFloat,
+    pub release: CamillaFloat,
+    pub threshold: CamillaFloat,
+    pub factor: CamillaFloat,
+    pub makeup_gain: CamillaFloat,
+    pub clipper: Option<Clipper>,
     pub samplerate: usize,
-    pub scratch: Vec<PrcFmt>,
-    pub prev_loudness: PrcFmt,
+    pub scratch: Vec<CamillaFloat>,
+    pub prev_loudness: CamillaFloat,
 }
 
 impl Compressor {
@@ -49,7 +53,6 @@ impl Compressor {
     ) -> Self {
         let name = name.to_string();
         let channels = config.channels;
-        let srate = samplerate as PrcFmt;
         let mut monitor_channels = config.monitor_channels();
         if monitor_channels.is_empty() {
             for n in 0..channels {
@@ -62,9 +65,12 @@ impl Compressor {
                 process_channels.push(n);
             }
         }
-        let attack = (-1.0 / srate / config.attack).exp();
-        let release = (-1.0 / srate / config.release).exp();
-        let clip_limit = config.clip_limit.map(db_to_linear);
+        let attack_samples = time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+        let release_samples =
+            time_to_samples(config.release.get(), config.release_unit, samplerate);
+        let attack = (-1.0 / attack_samples).exp().to_camilla_float();
+        let release = (-1.0 / release_samples).exp().to_camilla_float();
+        let clip_limit = config.clip_limit.map(|limit| db_to_linear(limit.get()));
 
         let scratch = vec![0.0; chunksize];
 
@@ -82,12 +88,12 @@ impl Compressor {
             config.soft_clip(),
             clip_limit
         );
-        let limiter = if let Some(limit) = config.clip_limit {
-            let limitconf = config::LimiterParameters {
+        let clipper = if let Some(limit) = config.clip_limit {
+            let clipconf = config::ClipperParameters {
                 clip_limit: limit,
                 soft_clip: config.soft_clip,
             };
-            Some(Limiter::from_config("Limiter", limitconf))
+            Some(Clipper::from_config("Clipper", clipconf))
         } else {
             None
         };
@@ -99,21 +105,21 @@ impl Compressor {
             process_channels,
             attack,
             release,
-            threshold: config.threshold,
-            factor: config.factor,
-            makeup_gain: config.makeup_gain(),
-            limiter,
+            threshold: config.threshold.to_camilla_float(),
+            factor: config.factor.to_camilla_float(),
+            makeup_gain: config.makeup_gain().to_camilla_float(),
+            clipper,
             samplerate,
             scratch,
             prev_loudness: -100.0,
         }
     }
 
-    /// Sum all channels that are included in loudness monitoring, store result in self.scratch
+    /// Sum all channels that are included in loudness monitoring, store result in self.scratch.
+    /// A channel that was not captured is empty, and counts as silence.
     fn sum_monitor_channels(&mut self, input: &AudioChunk) {
-        let ch = self.monitor_channels[0];
-        self.scratch.copy_from_slice(&input.waveforms[ch]);
-        for ch in self.monitor_channels.iter().skip(1) {
+        self.scratch.fill(0.0);
+        for ch in self.monitor_channels.iter() {
             for (acc, val) in self.scratch.iter_mut().zip(input.waveforms[*ch].iter()) {
                 *acc += *val;
             }
@@ -136,6 +142,10 @@ impl Compressor {
 
     /// Calculate linear gain, store result in self.scratch
     fn calculate_linear_gain(&mut self) {
+        if self.scratch.iter().all(|val| *val <= self.threshold) {
+            self.scratch.fill(db_to_linear(self.makeup_gain));
+            return;
+        }
         for val in self.scratch.iter_mut() {
             if *val > self.threshold {
                 *val = -(*val - self.threshold) * (self.factor - 1.0) / self.factor;
@@ -147,15 +157,15 @@ impl Compressor {
         }
     }
 
-    fn apply_gain(&self, input: &mut [PrcFmt]) {
+    fn apply_gain(&self, input: &mut [CamillaFloat]) {
         for (val, gain) in input.iter_mut().zip(self.scratch.iter()) {
             *val *= gain;
         }
     }
 
-    fn apply_limiter(&self, input: &mut [PrcFmt]) {
-        if let Some(limiter) = &self.limiter {
-            limiter.apply_clip(input);
+    fn apply_clipper(&self, input: &mut [CamillaFloat]) {
+        if let Some(clipper) = &self.clipper {
+            clipper.apply_clip(input);
         }
     }
 }
@@ -166,15 +176,14 @@ impl Processor for Compressor {
     }
 
     /// Apply a Compressor to an AudioChunk, modifying it in-place.
-    fn process_chunk(&mut self, input: &mut AudioChunk) -> Res<()> {
+    fn process_chunk(&mut self, input: &mut AudioChunk) {
         self.sum_monitor_channels(input);
         self.estimate_loudness();
         self.calculate_linear_gain();
         for ch in self.process_channels.iter() {
             self.apply_gain(&mut input.waveforms[*ch]);
-            self.apply_limiter(&mut input.waveforms[*ch]);
+            self.apply_clipper(&mut input.waveforms[*ch]);
         }
-        Ok(())
     }
 
     fn update_parameters(&mut self, config: config::Processor) {
@@ -183,7 +192,7 @@ impl Processor for Compressor {
         } = config
         {
             let channels = config.channels;
-            let srate = self.samplerate as PrcFmt;
+            let samplerate = self.samplerate;
             let mut monitor_channels = config.monitor_channels();
             if monitor_channels.is_empty() {
                 for n in 0..channels {
@@ -196,28 +205,32 @@ impl Processor for Compressor {
                     process_channels.push(n);
                 }
             }
-            let attack = (-1.0 / srate / config.attack).exp();
-            let release = (-1.0 / srate / config.release).exp();
-            let clip_limit = config.clip_limit.map(db_to_linear);
+            let attack_samples =
+                time_to_samples(config.attack.get(), config.attack_unit, samplerate);
+            let release_samples =
+                time_to_samples(config.release.get(), config.release_unit, samplerate);
+            let attack = (-1.0 / attack_samples).exp();
+            let release = (-1.0 / release_samples).exp();
+            let clip_limit = config.clip_limit.map(|limit| db_to_linear(limit.get()));
 
-            let limiter = if let Some(limit) = config.clip_limit {
-                let limitconf = config::LimiterParameters {
+            let clipper = if let Some(limit) = config.clip_limit {
+                let clipconf = config::ClipperParameters {
                     clip_limit: limit,
                     soft_clip: config.soft_clip,
                 };
-                Some(Limiter::from_config("Limiter", limitconf))
+                Some(Clipper::from_config("Clipper", clipconf))
             } else {
                 None
             };
 
             self.monitor_channels = monitor_channels;
             self.process_channels = process_channels;
-            self.attack = attack;
-            self.release = release;
-            self.threshold = config.threshold;
-            self.factor = config.factor;
-            self.makeup_gain = config.makeup_gain();
-            self.limiter = limiter;
+            self.attack = attack.to_camilla_float();
+            self.release = release.to_camilla_float();
+            self.threshold = config.threshold.to_camilla_float();
+            self.factor = config.factor.to_camilla_float();
+            self.makeup_gain = config.makeup_gain().to_camilla_float();
+            self.clipper = clipper;
 
             debug!(
                 "Updated compressor '{}', monitor_channels: {:?}, process_channels: {:?}, attack: {}, release: {}, threshold: {}, factor: {}, makeup_gain: {}, soft_clip: {}, clip_limit: {:?}",
@@ -239,36 +252,60 @@ impl Processor for Compressor {
     }
 }
 
-/// Validate the compressor config, to give a helpful message intead of a panic.
-pub fn validate_compressor(config: &config::CompressorParameters) -> Res<()> {
-    let channels = config.channels;
-    if config.attack <= 0.0 {
-        let msg = "Attack value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    if config.release <= 0.0 {
-        let msg = "Release value must be larger than zero.";
-        return Err(config::ConfigError::new(msg).into());
-    }
-    for ch in config.monitor_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid monitor channel: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::TimeUnit;
+    use crate::config::finite;
+
+    fn parameters() -> config::CompressorParameters {
+        config::CompressorParameters {
+            channels: 2,
+            monitor_channels: None,
+            process_channels: Some(vec![1]),
+            attack: finite!(1.0),
+            attack_unit: TimeUnit::Samples,
+            release: finite!(10.0),
+            release_unit: TimeUnit::Samples,
+            threshold: finite!(-20.0),
+            factor: finite!(4.0),
+            makeup_gain: None,
+            soft_clip: None,
+            clip_limit: None,
         }
     }
-    for ch in config.process_channels().iter() {
-        if *ch >= channels {
-            let msg = format!(
-                "Invalid channel to process: {}, max is: {}.",
-                *ch,
-                channels - 1
-            );
-            return Err(config::ConfigError::new(&msg).into());
+
+    #[test]
+    fn test_makeup_gain_below_threshold_after_update() {
+        let mut params = parameters();
+        let mut compressor = Compressor::from_config("test", params.clone(), 48000, 4);
+        let waveforms = vec![vec![0.001, -0.002, 0.003, -0.004]; 2];
+        for gain in [6.0, -6.0, 0.0] {
+            params.makeup_gain = Some(finite!(gain));
+            compressor.update_parameters(config::Processor::Compressor {
+                description: None,
+                parameters: params.clone(),
+            });
+            let mut chunk = AudioChunk::new(waveforms.clone(), 0.004, -0.004, 4, 4);
+            compressor.process_chunk(&mut chunk);
+            assert_eq!(chunk.waveforms[0], waveforms[0]);
+            let linear_gain = 10.0_f64.powf(gain / 20.0).to_camilla_float();
+            for (input, output) in waveforms[1].iter().zip(&chunk.waveforms[1]) {
+                assert!((output - input * linear_gain).abs() < 1.0e-8);
+            }
         }
     }
-    Ok(())
+
+    /// A monitored channel that was not captured is empty, and acts like a silent one.
+    #[test]
+    fn test_uncaptured_monitor_channel_is_silent() {
+        let waveform = vec![1.0, -1.0, 1.0, -1.0];
+        let mut empty = AudioChunk::new(vec![vec![], waveform.clone()], 1.0, -1.0, 4, 4);
+        let mut silent = AudioChunk::new(vec![vec![0.0; 4], waveform.clone()], 1.0, -1.0, 4, 4);
+        Compressor::from_config("test", parameters(), 48000, 4).process_chunk(&mut empty);
+        Compressor::from_config("test", parameters(), 48000, 4).process_chunk(&mut silent);
+        assert!(empty.waveforms[0].is_empty());
+        assert_eq!(empty.waveforms[1], silent.waveforms[1]);
+        assert_ne!(empty.waveforms[1], waveform);
+    }
 }
