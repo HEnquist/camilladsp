@@ -57,7 +57,7 @@ use crate::alsa_backend::utils::{
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter, device_capture_timestamps};
+use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -2071,9 +2071,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 &channel_mask,
                                 false,
                             );
-                            if device_capture_timestamps()
-                                && let Some(captured_at) = timeline.time_of(popped_frames)
-                            {
+                            if let Some(captured_at) = timeline.time_of(popped_frames) {
                                 chunk.timestamp = captured_at;
                             }
 

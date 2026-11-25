@@ -30,8 +30,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::utils::rate_controller::device_capture_timestamps;
-
 use crate::ProcessingParameters;
 
 use crate::STANDARD_RATES;
@@ -362,12 +360,9 @@ pub fn resume_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
 
 /// When the capture device captured the last frame read from it so far.
 /// That is now, less the frames it has captured since, which are waiting to be read.
-/// Gives now if the device can not tell, or the timestamps are set to creation time.
+/// Gives now if the device can not tell.
 pub fn capture_time(pcmdevice: &alsa::PCM, samplerate: usize) -> Instant {
     let now = Instant::now();
-    if !device_capture_timestamps() {
-        return now;
-    }
     pcmdevice
         .avail()
         .ok()
