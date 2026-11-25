@@ -49,12 +49,12 @@ use crate::alsa_backend::buffermanager::{
 };
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
-    ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
+    capture_time, ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
     list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::RateAdjustReporter;
+use crate::utils::rate_controller::{LevelReading, RateAdjustReporter};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -593,6 +593,7 @@ fn playback_loop_bytes(
                 } else {
                     None
                 };
+                let latency = chunk.timestamp.elapsed();
                 let waiting_chunks_in_channel = channels.audio.len();
                 trace!(
                     "Avail frames in buffer: {avail_at_chunk_recvd:?}, waiting chunks in channel: {waiting_chunks_in_channel}"
@@ -689,7 +690,11 @@ fn playback_loop_bytes(
                     let speed = avail_at_chunk_recvd.and_then(|avail| {
                         let delay = buf_manager.current_delay(avail);
                         rate_reporter.update(
-                            delay as f64 + (params.chunksize * waiting_chunks_in_channel) as f64,
+                            LevelReading {
+                                device: delay as f64,
+                                queued: (params.chunksize * waiting_chunks_in_channel) as f64,
+                                latency,
+                            },
                             &params.playback_status,
                         )
                     });
@@ -1018,6 +1023,7 @@ fn capture_loop_bytes(
             &mut params,
             processing_params,
         );
+        let captured_at = capture_time(pcmdevice, params.capture_samplerate);
         match capture_res {
             Ok(CaptureResult::Normal) => {
                 xtrace!("Captured {} bytes", capture_bytes);
@@ -1103,6 +1109,7 @@ fn capture_loop_bytes(
             &channel_mask,
             false,
         );
+        chunk.timestamp = captured_at;
         chunk.update_stats(&mut chunk_stats);
         crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(

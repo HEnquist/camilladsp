@@ -28,7 +28,9 @@ use parking_lot::RwLock;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::utils::rate_controller::device_capture_timestamps;
 
 use crate::ProcessingParameters;
 
@@ -356,6 +358,24 @@ pub fn resume_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
         pcmdevice.start()?;
     }
     Ok(())
+}
+
+/// When the capture device captured the last frame read from it so far.
+/// That is now, less the frames it has captured since, which are waiting to be read.
+/// Gives now if the device can not tell, or the timestamps are set to creation time.
+pub fn capture_time(pcmdevice: &alsa::PCM, samplerate: usize) -> Instant {
+    let now = Instant::now();
+    if !device_capture_timestamps() {
+        return now;
+    }
+    pcmdevice
+        .avail()
+        .ok()
+        .filter(|avail| *avail > 0)
+        .and_then(|avail| {
+            now.checked_sub(Duration::from_secs_f64(avail as f64 / samplerate as f64))
+        })
+        .unwrap_or(now)
 }
 
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {

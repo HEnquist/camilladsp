@@ -1037,6 +1037,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                                 backlog_trimmer.restarted();
                             }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            let latency = chunk.timestamp.elapsed();
                             let queued_frames = channel.len() * chunksize;
                             let level = match estimate {
                                 Some(countertimer::BufferEstimate::Level(frames)) => {
@@ -1053,6 +1054,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             if let Some(speed) = rate_reporter.update_from_estimate(
                                 estimate,
                                 queued_frames,
+                                latency,
                                 &playback_status,
                             ) {
                                 status_channel

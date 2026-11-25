@@ -51,13 +51,13 @@ use crate::alsa_backend::threaded_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsa_backend::utils::{
-    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, capture_time,
     ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
     list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter};
+use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter, device_capture_timestamps};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -1097,7 +1097,13 @@ enum PlaybackDeviceMessage {
 }
 
 enum CaptureDeviceMessage {
-    Data { chunk_nbr: usize, nbr_bytes: usize },
+    Data {
+        chunk_nbr: usize,
+        nbr_bytes: usize,
+        /// The frames pushed to the ring buffer so far, and when the device captured the last
+        /// of them. `None` when nothing was pushed.
+        captured: Option<(u64, Instant)>,
+    },
     EndOfStream,
 }
 
@@ -1310,6 +1316,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     }
                                     let estimate =
                                         buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                    let latency = chunk.timestamp.elapsed();
                                     let queued_frames = channel.len() * chunksize;
                                     let level = match estimate {
                                         Some(countertimer::BufferEstimate::Level(frames)) => {
@@ -1326,6 +1333,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     if let Some(speed) = rate_reporter.update_from_estimate(
                                         estimate,
                                         queued_frames,
+                                        latency,
                                         &playback_status,
                                     ) {
                                         if pitch_supported {
@@ -1603,6 +1611,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     * bytes_per_frame;
                                 let mut chunk_nbr = 0usize;
                                 let mut ring_full = false;
+                                let mut pushed_frames = 0u64;
 
                                 let fds = pcmdevice.get().unwrap();
                                 let nbr_pcm_fds = fds.len();
@@ -1748,10 +1757,24 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             } else {
                                                 ring_full = false;
                                             }
+                                            // What did not fit was the newest part of the read.
+                                            let dropped_frames = (bytes_read - pushed_bytes)
+                                                / cap_params.bytes_per_frame;
+                                            let read_end =
+                                                capture_time(&pcmdevice, capture_samplerate);
+                                            let last_pushed = read_end
+                                                .checked_sub(Duration::from_secs_f64(
+                                                    dropped_frames as f64
+                                                        / capture_samplerate as f64,
+                                                ))
+                                                .unwrap_or(read_end);
+                                            pushed_frames +=
+                                                (pushed_bytes / cap_params.bytes_per_frame) as u64;
                                             if tx_dev
                                                 .try_send(CaptureDeviceMessage::Data {
                                                     chunk_nbr,
                                                     nbr_bytes: pushed_bytes,
+                                                    captured: Some((pushed_frames, last_pushed)),
                                                 })
                                                 .is_err()
                                             {
@@ -1766,6 +1789,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                 .try_send(CaptureDeviceMessage::Data {
                                                     chunk_nbr,
                                                     nbr_bytes: 0,
+                                                    captured: None,
                                                 })
                                                 .unwrap_or_default();
                                         }
@@ -1866,6 +1890,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                         let mut expected_chunk_nbr = 0usize;
                         let mut exit_forwarded = false;
+                        let mut timeline = countertimer::FrameTimeline::new(capture_samplerate);
+                        let mut popped_frames = 0u64;
 
                         status_channel.send(StatusMessage::CaptureReady).unwrap_or(());
                         barrier.wait();
@@ -1926,7 +1952,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     Ok(CaptureDeviceMessage::Data {
                                         chunk_nbr,
                                         nbr_bytes,
+                                        captured,
                                     }) => {
+                                        if let Some((frames, time)) = captured {
+                                            timeline.anchor(frames, time);
+                                        }
                                         if chunk_nbr > expected_chunk_nbr {
                                             warn!(
                                                 "Capture, samples were dropped, missing {} buffers.",
@@ -1964,8 +1994,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                             while let Ok(CaptureDeviceMessage::Data {
                                 chunk_nbr,
                                 nbr_bytes: _,
+                                captured,
                             }) = rx_dev.try_recv()
                             {
+                                if let Some((frames, time)) = captured {
+                                    timeline.anchor(frames, time);
+                                }
                                 expected_chunk_nbr = chunk_nbr + 1;
                             }
 
@@ -1983,6 +2017,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                            popped_frames += capture_frames as u64;
                             // What the device delivered since the last chunk, rather than the
                             // chunk itself. A chunk can only be taken once the period that
                             // completes it has arrived, so counting chunks times them up to a
@@ -2036,6 +2071,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 &channel_mask,
                                 false,
                             );
+                            if device_capture_timestamps()
+                                && let Some(captured_at) = timeline.time_of(popped_frames)
+                            {
+                                chunk.timestamp = captured_at;
+                            }
 
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_capture_audio_buffer(&capture_status, &chunk);

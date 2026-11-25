@@ -891,6 +891,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 backlog_trimmer.restarted();
                             }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            let latency = chunk.timestamp.elapsed();
                             let queued_frames = channel.len() * chunksize;
                             let level = match estimate {
                                 Some(countertimer::BufferEstimate::Level(frames)) => Some(frames + queued_frames),
@@ -902,7 +903,7 @@ impl PlaybackDevice for CoreaudioPlaybackDevice {
                                 rate_reporter.interrupt();
                                 continue;
                             }
-                            if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, &playback_status) {
+                            if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, latency, &playback_status) {
                                 status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                             }
                             chunk.update_stats(&mut chunk_stats);

@@ -16,6 +16,11 @@ New features:
 - PipeWire: request the config sample rate as the graph rate, for multi-rate DACs.
 
 Changes:
+- Rate adjust steers device clocks (BlackHole pitch, ALSA Loopback rate shift, USB gadget pitch)
+  with a dead-beat controller, which settles in seconds instead of minutes.
+- Rate adjust measures the buffer level against when each chunk was captured,
+  so that delays between capture and playback no longer show up as level noise.
+- `adjust_interval_s` defaults to 2 seconds instead of 10.
 - Config errors list every problem found, each with its location in the config.
 - Several times faster biquad filtering.
 - Faster convolution setup and processing, with lower memory use.

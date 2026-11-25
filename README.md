@@ -960,7 +960,7 @@ devices:
   silence_threshold: -60 (*)
   silence_timeout_s: 3.0 (*)
   target_level: 500 (*)
-  adjust_interval_s: 10 (*)
+  adjust_interval_s: 2 (*)
   enable_rate_adjust: true (*)
   resampler: null (*)
   capture_samplerate: 44100 (*)
@@ -1084,10 +1084,10 @@ A parameter marked (*) in any example is optional. If they are left out from the
   with tight latency requirements,
   to a maximum of `(2 + queuelimit) * chunksize` for minimal underrun risk when latency is not a concern.
 
-* `adjust_interval_s` (optional, defaults to 10)
+* `adjust_interval_s` (optional, defaults to 2)
 
   The `adjust_interval_s` parameter is used to set the interval between corrections, in seconds.
-  The default is 10 seconds. Only applies when `enable_rate_adjust` is set to `true`.
+  The default is 2 seconds. Only applies when `enable_rate_adjust` is set to `true`.
   A smaller value reacts faster but can be less smooth,
   while a larger value is steadier but slower to react.
   Faster reaction can be useful if there are occasional

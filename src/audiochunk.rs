@@ -26,6 +26,8 @@ pub struct AudioChunk {
     pub channels: usize,
     pub maxval: CamillaFloat,
     pub minval: CamillaFloat,
+    /// When the capture device captured the last frame of the chunk, as close as the capture
+    /// backend can tell. A backend that cannot tell leaves the time the chunk was created.
     pub timestamp: Instant,
     pub valid_frames: usize,
     pub waveforms: Vec<Vec<CamillaFloat>>,
