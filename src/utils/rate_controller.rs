@@ -152,11 +152,32 @@ impl PIRateController {
     }
 }
 
+/// How the deadbeat controller reads the levels of a period.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeadbeatEstimator {
+    /// The slope and end level of a least squares line.
+    Fit,
+    /// The period averages. The drift comes from the difference between two consecutive
+    /// averages, and the error is the average itself.
+    Average,
+}
+
+/// The previous period, as the average based estimator needs it.
+#[derive(Debug, Clone, Copy)]
+struct PreviousPeriod {
+    average: f64,
+    /// Time from the centre of the period to its last level, when the speed changed.
+    centre_to_end: f64,
+    /// The speed during the period.
+    applied: f64,
+}
+
 /// Deadbeat controller that steers a device clock to keep the buffer at a target level.
 ///
 /// The buffer level integrates the speed mismatch with a gain of exactly `fs` frames per second,
-/// so the controller can estimate the speed where the level stays constant from the slope of the
-/// level, and then pick the speed that removes the level error over the next `periods` periods.
+/// so the controller can estimate the speed where the level stays constant from how fast the
+/// level moves, and then pick the speed that removes the level error over the next `periods`
+/// periods.
 pub struct DeadbeatRateController {
     fs: f64,
     interval: f64,
@@ -164,9 +185,11 @@ pub struct DeadbeatRateController {
     periods: f64,
     alpha: f64,
     max_step: f64,
+    estimator: DeadbeatEstimator,
     applied: f64,
     /// The speed where the level stays constant, `None` until the first period is measured.
     true_speed: Option<f64>,
+    previous: Option<PreviousPeriod>,
 }
 
 impl DeadbeatRateController {
@@ -179,6 +202,7 @@ impl DeadbeatRateController {
         periods: f64,
         alpha: f64,
         max_step: f64,
+        estimator: DeadbeatEstimator,
     ) -> Self {
         Self {
             fs: fs as f64,
@@ -187,9 +211,86 @@ impl DeadbeatRateController {
             periods,
             alpha,
             max_step,
+            estimator,
             applied: 1.0,
             true_speed: None,
+            previous: None,
         }
+    }
+
+    /// The levels before an interruption can't be compared with the ones after it.
+    /// The drift estimate is kept, since the clocks didn't change.
+    fn forget_levels(&mut self) {
+        self.previous = None;
+    }
+
+    /// Calculate the next speed from the levels of a period.
+    /// Returns `None` if there are too few levels, and the speed should stay as it is.
+    fn next_period(&mut self, fit: &LevelFit) -> Option<f64> {
+        match self.estimator {
+            DeadbeatEstimator::Fit => {
+                let (end_level, slope) = fit.end_level_and_slope()?;
+                debug!("Playback buffer level fit: {end_level:.1} at the end, slope {slope:.2}/s.");
+                Some(self.next(end_level, slope))
+            }
+            DeadbeatEstimator::Average => {
+                let average = fit.average()?;
+                let centre = fit.mean_t()?;
+                Some(self.next_from_average(average, centre, fit.last_t))
+            }
+        }
+    }
+
+    /// Calculate the next speed from the average level of a period.
+    /// `centre` is the mean time of the levels, and `end` the time of the last one,
+    /// both from the start of the period, which is when the previous speed was applied.
+    ///
+    /// With the level rising at `(u - d)·fs` in each period, the difference between two
+    /// averages is `(u_prev - d)·fs·a + (u - d)·fs·b`, where `a` is the time from the previous
+    /// centre to the speed change and `b` from there to this centre. Solved for `d`, that gives
+    /// the speed that holds the level constant, without the half period lag of the averages.
+    /// The first period after a start or an interruption has nothing to compare with, and
+    /// uses the drift estimate from before, or the speed the clock runs at.
+    pub fn next_from_average(&mut self, average: f64, centre: f64, end: f64) -> f64 {
+        let drift = match self.previous {
+            Some(previous) if previous.centre_to_end + centre > 0.0 => {
+                let span = previous.centre_to_end + centre;
+                let applied_mean =
+                    (previous.applied * previous.centre_to_end + self.applied * centre) / span;
+                let estimate = applied_mean - (average - previous.average) / (self.fs * span);
+                Some(self.smooth(estimate))
+            }
+            _ => self.true_speed,
+        };
+        self.previous = Some(PreviousPeriod {
+            average,
+            centre_to_end: end - centre,
+            applied: self.applied,
+        });
+        let drift = drift.unwrap_or(self.applied);
+        let err = average - self.target_level;
+        let output = self.output(drift, err);
+        trace!("Deadbeat controller, average error: {err}, true speed: {drift}, output: {output}");
+        output
+    }
+
+    /// Average a new estimate of the true speed into the old one.
+    fn smooth(&mut self, estimate: f64) -> f64 {
+        let true_speed = match self.true_speed {
+            Some(previous) => previous + self.alpha * (estimate - previous),
+            None => estimate,
+        };
+        self.true_speed = Some(true_speed);
+        true_speed
+    }
+
+    /// The speed that removes `err` over `periods` periods, starting from `true_speed`.
+    fn output(&mut self, true_speed: f64, err: f64) -> f64 {
+        let correction =
+            (err / (self.fs * self.interval * self.periods)).clamp(-self.max_step, self.max_step);
+        let output = (true_speed - correction).clamp(1.0 - MAX_ADJUST, 1.0 + MAX_ADJUST);
+        self.applied = output;
+        output
     }
 
     /// Start from the speed the clock already runs at. The drift estimate is the applied speed
@@ -207,19 +308,12 @@ impl DeadbeatRateController {
     /// `alpha` only smooths the ones after it.
     pub fn next(&mut self, level: f64, slope: f64) -> f64 {
         let estimate = self.applied - slope / self.fs;
-        let true_speed = match self.true_speed {
-            Some(previous) => previous + self.alpha * (estimate - previous),
-            None => estimate,
-        };
-        self.true_speed = Some(true_speed);
+        let true_speed = self.smooth(estimate);
         let err = level - self.target_level;
-        let correction =
-            (err / (self.fs * self.interval * self.periods)).clamp(-self.max_step, self.max_step);
-        let output = (true_speed - correction).clamp(1.0 - MAX_ADJUST, 1.0 + MAX_ADJUST);
+        let output = self.output(true_speed, err);
         trace!(
             "Deadbeat controller, error: {err}, slope: {slope}, true speed: {true_speed}, output: {output}"
         );
-        self.applied = output;
         output
     }
 }
@@ -249,6 +343,11 @@ impl LevelFit {
         (self.n > 0).then(|| self.sum_l / self.n as f64)
     }
 
+    /// The mean time of the levels.
+    fn mean_t(&self) -> Option<f64> {
+        (self.n > 0).then(|| self.sum_t / self.n as f64)
+    }
+
     /// The fitted level at the time of the last value, and the slope per second.
     fn end_level_and_slope(&self) -> Option<(f64, f64)> {
         let n = self.n as f64;
@@ -263,27 +362,43 @@ impl LevelFit {
     }
 }
 
-/// Spike: `CAMILLA_DEADBEAT=N,alpha,max_step` sets the deadbeat parameters, and
-/// `CAMILLA_DEADBEAT=off` steers a clock with the PI controller instead, for comparison.
+/// Spike: `CAMILLA_DEADBEAT=[avg|fit,]N,alpha,max_step` sets the deadbeat estimator and
+/// parameters, and `CAMILLA_DEADBEAT=off` steers a clock with the PI controller instead, for
+/// comparison. Without a prefix the estimator is `avg`.
 fn deadbeat_from_env(
     fs: usize,
     interval: f64,
     target_level: usize,
 ) -> Option<DeadbeatRateController> {
-    let (mut periods, mut alpha, mut max_step) = (2.0, 0.5, 0.001);
+    let (mut estimator, mut periods, mut alpha, mut max_step) =
+        (DeadbeatEstimator::Average, 3.0, 0.5, 0.001);
     if let Ok(value) = std::env::var("CAMILLA_DEADBEAT") {
         if value.trim() == "off" {
             info!("Rate adjust steers a clock with the PI controller.");
             return None;
         }
-        let parts: Vec<Option<f64>> = value.split(',').map(|p| p.trim().parse().ok()).collect();
-        match parts[..] {
-            [Some(n), Some(a), Some(m)] => (periods, alpha, max_step) = (n, a, m),
-            _ => warn!("Ignoring CAMILLA_DEADBEAT={value}, expected N,alpha,max_step or off."),
+        let mut fields: Vec<&str> = value.split(',').map(|p| p.trim()).collect();
+        let parsed_estimator = match fields.first() {
+            Some(&"avg") => Some(DeadbeatEstimator::Average),
+            Some(&"fit") => Some(DeadbeatEstimator::Fit),
+            _ => None,
+        };
+        if parsed_estimator.is_some() {
+            fields.remove(0);
+        }
+        let numbers: Vec<Option<f64>> = fields.iter().map(|p| p.parse().ok()).collect();
+        match numbers[..] {
+            [Some(n), Some(a), Some(m)] => {
+                (periods, alpha, max_step) = (n, a, m);
+                estimator = parsed_estimator.unwrap_or(estimator);
+            }
+            _ => warn!(
+                "Ignoring CAMILLA_DEADBEAT={value}, expected [avg|fit,]N,alpha,max_step or off."
+            ),
         }
     }
     info!(
-        "Rate adjust steers a clock with the deadbeat controller, N={periods}, alpha={alpha}, max_step={max_step}."
+        "Rate adjust steers a clock with the deadbeat controller, {estimator:?}, N={periods}, alpha={alpha}, max_step={max_step}."
     );
     Some(DeadbeatRateController::new(
         fs,
@@ -292,6 +407,7 @@ fn deadbeat_from_env(
         periods,
         alpha,
         max_step,
+        estimator,
     ))
 }
 
@@ -414,6 +530,9 @@ impl RateAdjustReporter {
         if self.interrupted {
             self.interrupted = false;
             self.restart();
+            if let Some(deadbeat) = &mut self.deadbeat {
+                deadbeat.forget_levels();
+            }
             return None;
         }
         self.fit
@@ -426,13 +545,9 @@ impl RateAdjustReporter {
             self.seed_clock(params.capture_clock_speed());
         }
         let resampler = self.controller.next(average_level);
-        let clock = match (&mut self.deadbeat, self.fit.end_level_and_slope()) {
-            (Some(deadbeat), Some((end_level, slope))) => {
-                debug!("Playback buffer level fit: {end_level:.1} at the end, slope {slope:.2}/s.");
-                deadbeat.next(end_level, slope)
-            }
-            (Some(deadbeat), None) => deadbeat.applied,
-            (None, _) => resampler,
+        let clock = match &mut self.deadbeat {
+            Some(deadbeat) => deadbeat.next_period(&self.fit).unwrap_or(deadbeat.applied),
+            None => resampler,
         };
         self.restart();
         debug!(
@@ -482,7 +597,15 @@ mod tests {
         let target = 2000.0;
         // The capture clock runs 100 ppm slow at speed 1.0.
         let true_speed = 1.0 / (1.0 - 100e-6);
-        let mut controller = DeadbeatRateController::new(48000, interval, 2000, 1.0, 1.0, 0.01);
+        let mut controller = DeadbeatRateController::new(
+            48000,
+            interval,
+            2000,
+            1.0,
+            1.0,
+            0.01,
+            DeadbeatEstimator::Fit,
+        );
         let mut level = 2200.0;
         let mut speed = 1.0;
         let mut levels = Vec::new();
@@ -509,7 +632,15 @@ mod tests {
         let leftover = 1.001;
         let simulate = |seed: Option<f64>| {
             // With averaging, which must not hold back the first, exact, estimate.
-            let mut controller = DeadbeatRateController::new(48000, interval, 2000, 1.0, 0.5, 0.01);
+            let mut controller = DeadbeatRateController::new(
+                48000,
+                interval,
+                2000,
+                1.0,
+                0.5,
+                0.01,
+                DeadbeatEstimator::Fit,
+            );
             if let Some(speed) = seed {
                 controller.seed(speed);
             }
@@ -534,6 +665,109 @@ mod tests {
         // wrong way, below the true speed rather than down towards it.
         let (speeds, _) = simulate(None);
         assert!(speeds[0] < true_speed - 500e-6, "speeds {speeds:?}");
+    }
+
+    /// Feeds a controller levels once per chunk, like the reporter does, with a capture clock
+    /// that holds the level constant at `true_speed`. `offset(period, i)` is added to the
+    /// measured level. Returns the true level error and the speed at the end of each period.
+    fn run_periods(
+        controller: &mut DeadbeatRateController,
+        true_speed: f64,
+        start_error: f64,
+        periods: usize,
+        offset: impl Fn(usize, usize) -> f64,
+    ) -> (Vec<f64>, Vec<f64>) {
+        let fs = 48000.0;
+        let dt = 1024.0 / fs;
+        // The reporter ends a period at the first level past the period length.
+        let per_period = (controller.interval / dt).ceil() as usize + 1;
+        let mut level = controller.target_level + start_error;
+        let mut speed = controller.applied;
+        let mut errors = Vec::new();
+        let mut speeds = Vec::new();
+        for period in 0..periods {
+            let mut fit = LevelFit::default();
+            for i in 0..per_period {
+                let t = dt * i as f64;
+                // The first level comes one chunk after the start of the period.
+                level += (speed - true_speed) * fs * dt;
+                fit.add(t + dt, level + offset(period, i));
+            }
+            speed = controller.next_period(&fit).unwrap();
+            errors.push(level - controller.target_level);
+            speeds.push(speed);
+        }
+        (errors, speeds)
+    }
+
+    #[test]
+    fn average_deadbeat_settles_without_overshoot() {
+        let true_speed = 1.0 / (1.0 - 100e-6);
+        let mut controller = DeadbeatRateController::new(
+            48000,
+            2.0,
+            2000,
+            3.0,
+            1.0,
+            0.01,
+            DeadbeatEstimator::Average,
+        );
+        let (errors, speeds) = run_periods(&mut controller, true_speed, 200.0, 20, |_, _| 0.0);
+        // The first period has no drift estimate and takes the clock speed for it, so the level
+        // runs off. From there the error shrinks every period without changing sign.
+        let peak = errors
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .unwrap()
+            .0;
+        for pair in errors[peak..].windows(2) {
+            assert!(
+                pair[1].abs() < pair[0].abs() && pair[1] * pair[0] > 0.0,
+                "errors {errors:?}"
+            );
+        }
+        assert!(errors[19].abs() < 1.0, "errors {errors:?}");
+        assert!((speeds[19] - true_speed).abs() < 1e-7, "speeds {speeds:?}");
+    }
+
+    #[test]
+    fn average_deadbeat_shrugs_off_one_outlier() {
+        let true_speed = 1.0 / (1.0 - 100e-6);
+        let new = |estimator| {
+            let mut controller =
+                DeadbeatRateController::new(48000, 2.0, 2000, 3.0, 0.5, 0.001, estimator);
+            controller.seed(true_speed);
+            controller
+        };
+        // Settled at the target, then one level a whole chunk off at the end of period 10.
+        let outlier = |period, i| if period == 10 && i == 93 { 1024.0 } else { 0.0 };
+        let worst = |speeds: Vec<f64>| {
+            speeds
+                .iter()
+                .map(|s| (s - true_speed).abs())
+                .fold(0.0, f64::max)
+        };
+        let (_, speeds) = run_periods(
+            &mut new(DeadbeatEstimator::Average),
+            true_speed,
+            0.0,
+            20,
+            outlier,
+        );
+        let average = worst(speeds);
+        let (_, speeds) = run_periods(
+            &mut new(DeadbeatEstimator::Fit),
+            true_speed,
+            0.0,
+            20,
+            outlier,
+        );
+        let fit = worst(speeds);
+        // 1024 frames in 95 levels moves the average by 10.8 frames. That gives 113 ppm on the
+        // drift, half of it after smoothing, and 38 ppm of correction. The fit sees ~350 ppm.
+        assert!(average < 100e-6, "average {average}");
+        assert!(fit > 3.0 * average, "fit {fit}, average {average}");
     }
 
     // Default gains, no ramp, so the error is just level - target.
