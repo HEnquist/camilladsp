@@ -1562,10 +1562,24 @@ A higher playback buffer level gives more underrun safety, but also more delay.
 
 ### What CamillaDSP measures
 
-When `enable_rate_adjust: true`, CamillaDSP monitors playback buffer level
-and compares it to `target_level`.
-Every `adjust_interval_s` seconds it computes a small correction request.
+When `enable_rate_adjust: true`, CamillaDSP reads the playback buffer level
+every time a chunk arrives at the playback side, and compares it to `target_level`.
+Every `adjust_interval_s` seconds it averages the levels of the interval and computes a new correction.
 The goal is to keep the long-term average buffer level near `target_level`.
+
+The level read when a chunk arrives depends on when the chunk arrives.
+A chunk that is held up on its way from the capture device,
+for example because the capture thread woke up late,
+finds less in the playback buffer, although neither device clock has changed.
+CamillaDSP therefore refers each level to the moment the chunk was captured,
+by adding back how much longer than usual the chunk took, converted to frames.
+The usual time is measured when processing starts, and then follows slow changes,
+so that the average level stays where it would be without this correction.
+The Alsa backend stamps each chunk with the time the capture device captured its last frame.
+The other backends use the time the chunk was created, which covers only the delays after that.
+
+The levels also go through a short running median,
+which drops a single chunk that arrives very late, and the low reading that can follow it.
 
 ### How CamillaDSP applies the correction
 
@@ -1587,14 +1601,38 @@ CamillaDSP applies the correction from the capture side, using the first availab
 
   Rate adjust requests cannot be applied, so independent clocks will still drift over long runtimes.
 
+### How the correction is calculated
+
+The two ways of applying the correction use different controllers.
+
+- **Device clock: dead-beat controller**
+
+  A new clock speed takes effect almost at once,
+  and the buffer level then changes at exactly the speed difference times the sample rate.
+  The controller uses this to calculate the speed directly.
+  The difference between the average levels of two consecutive intervals
+  gives the speed at which the level stays constant.
+  The controller sets that speed, plus a correction that removes the level error over the next few intervals.
+  The speed estimate is smoothed over a few intervals, and the size of the correction is limited.
+  The levels just after a start are ignored, since playback is still filling the buffer,
+  and the first speed estimate comes from the slope of the levels in the first interval after that.
+
+- **Async resampler: PI controller**
+
+  The resampler ratio is set by a proportional-integral (PI) controller.
+  It removes a level error gradually, over a time that scales with `adjust_interval_s`.
+  It is slower than the dead-beat controller, but changes the ratio very smoothly.
+
 ### Practical meaning of settings
 - `target_level`
   Desired steady-state level of the playback buffer, in samples.
   Higher values increase underrun margin but also increase end-to-end delay.
 - `adjust_interval_s`
   How often corrections are updated.
-  Smaller values react faster but may be less smooth;
-  larger values are steadier but slower to react.
+  Smaller values react faster but make the speed less smooth,
+  since each correction is based on fewer level readings.
+  Larger values are steadier but slower to react.
+  This matters most for the PI controller, which reacts over a time proportional to the interval.
 
 ### Typical outcomes
 - **Independent clocks + rate adjust enabled:** stable long-term buffer level,
