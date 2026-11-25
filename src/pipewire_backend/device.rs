@@ -16,7 +16,8 @@
 
 use crate::ToF32;
 use crate::utils::ringbuffer::{
-    BacklogTrimmer, RingBufferFeeder, fill_playback_output_from_ringbuffer, priming_frames,
+    BacklogTrimmer, RingBufferFeeder, fill_playback_output_from_ringbuffer, on_playback_restart,
+    priming_frames,
 };
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -617,10 +618,10 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 if playback_restarted.swap(false, Ordering::AcqRel) {
-                                    backlog_trimmer.restarted();
+                                    on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                                 }
                                 let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
-                                let latency = chunk.timestamp.elapsed();
+                                let latency = chunk.capture_to_send();
                                 let queued_frames = channel.len() * chunksize;
                                 let level = match estimate {
                                     Some(countertimer::BufferEstimate::Level(frames)) => Some(frames + queued_frames),

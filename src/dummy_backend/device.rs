@@ -464,7 +464,7 @@ fn playback_loop(
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 let frames = chunk.frames;
-                let captured_at = chunk.timestamp;
+                let latency = chunk.capture_to_send();
                 params.control.add_frames(frames);
                 if params.control.failing() {
                     let message = "Dummy playback device failed on request".to_string();
@@ -535,7 +535,7 @@ fn playback_loop(
                         let level = LevelReading {
                             device: pacer.backlog().max(0.0),
                             queued,
-                            latency: captured_at.elapsed(),
+                            latency,
                         };
                         // Block until there is room in the buffer, which is what a
                         // real device does when its own is full.
@@ -543,6 +543,7 @@ fn playback_loop(
                         pacer.wait_for_backlog_below(buffer_size);
                         if pacer.resync_if_behind(max_deficit) {
                             params.control.count_resync();
+                            rate_reporter.interrupt();
                             warn!(
                                 "Dummy playback fell behind and dropped the backlog, as an underrun would"
                             );
@@ -560,7 +561,7 @@ fn playback_loop(
                         LevelReading {
                             device: prefilled as f64,
                             queued: 0.0,
-                            latency: captured_at.elapsed(),
+                            latency,
                         }
                     }
                 };

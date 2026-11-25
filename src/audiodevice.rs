@@ -324,6 +324,7 @@ pub fn new_capture_device(conf: config::Devices) -> Box<dyn CaptureDevice> {
             stop_on_inactive: stop_on_inactive.unwrap_or_default(),
             link_volume_control: link_volume_control.clone(),
             link_mute_control: link_mute_control.clone(),
+            enable_rate_adjust: conf.rate_adjust(),
         }),
         #[cfg(all(target_os = "linux", feature = "pipewire-backend"))]
         config::CaptureDevice::PipeWire {

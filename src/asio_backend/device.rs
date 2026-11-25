@@ -61,7 +61,9 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
-use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder, priming_frames};
+use crate::utils::ringbuffer::{
+    BacklogTrimmer, RingBufferFeeder, on_playback_restart, priming_frames,
+};
 use crate::utils::rt_channel;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -1720,10 +1722,10 @@ impl PlaybackDevice for AsioPlaybackDevice {
                     match channel.recv_timeout(std::time::Duration::from_millis(100)) {
                         Ok(AudioMessage::Audio(chunk)) => {
                             if playback_restarted.swap(false, Ordering::AcqRel) {
-                                backlog_trimmer.restarted();
+                                on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                             }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
-                            let latency = chunk.timestamp.elapsed();
+                            let latency = chunk.capture_to_send();
                             let queued_frames = channel.len() * chunksize;
                             let level = match estimate {
                                 Some(countertimer::BufferEstimate::Level(frames)) => {

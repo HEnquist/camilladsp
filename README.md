@@ -1572,9 +1572,12 @@ A chunk that is held up on its way from the capture device,
 for example because the capture thread woke up late,
 finds less in the playback buffer, although neither device clock has changed.
 CamillaDSP therefore refers each level to the moment the chunk was captured,
-by adding back how much longer than usual the chunk took, converted to frames.
+by adding back how much longer than usual the chunk took from capture until processing sent it on,
+converted to frames.
 The usual time is measured when processing starts, and then follows slow changes,
 so that the average level stays where it would be without this correction.
+Chunks waiting in the queue in front of the playback device are counted in full,
+so a level that is more than the device buffer holds is measured correctly.
 The Alsa backend stamps each chunk with the time the capture device captured its last frame.
 The other backends use the time the chunk was created, which covers only the delays after that.
 

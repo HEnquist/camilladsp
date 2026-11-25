@@ -54,6 +54,8 @@ pub struct CaptureParams {
     pub samplerate: usize,
     pub capture_samplerate: usize,
     pub async_src: bool,
+    /// Rate adjust is enabled, and needs to know when each chunk was captured.
+    pub rate_adjust: bool,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,

@@ -258,8 +258,8 @@ Two things to know before writing more rate control tests. The buffer level is s
 arrives and drains by a chunk before the next one does, so single readings are points on a sawtooth
 and the ones in between differ by a whole chunk: average a handful of them, as `average_level` does.
 And a short `adjust_interval_s` converges faster, not slower, since the controller works on the
-error relative to the frames in one interval, so at the 10 s default a buffer error of a chunk or
-two is a rounding error. The tests run at 0.2 s.
+error relative to the frames in one interval, so at the 2 s default a buffer error of a chunk or
+two moves the speed slowly. The tests run at 0.2 s.
 
 A dummy device can also be given the two things a real one does to the audio itself. The capture
 resamples when `capture_samplerate` differs from `samplerate`, and the playback converts each chunk

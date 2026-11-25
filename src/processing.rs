@@ -26,6 +26,7 @@ use crate::utils::rt_priority::{
 use crate::{ProcessingParameters, SHUTDOWN_REQUESTED};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Instant;
 
 fn forward_to_playback(tx_pb: &AudioSender, msg: AudioMessage) -> bool {
     let is_droppable = !matches!(msg, AudioMessage::EndOfStream);
@@ -149,6 +150,8 @@ fn processing(
             Ok(AudioMessage::Audio(mut chunk)) => {
                 //trace!("AudioMessage::Audio received");
                 chunk = pipeline.process_chunk(chunk);
+                // Rate adjust refers the playback levels to this time, see `LatencyReference`.
+                chunk.sent = Instant::now();
                 let msg = AudioMessage::Audio(chunk);
                 if !forward_to_playback(&tx_pb, msg) {
                     info!("Playback thread has already stopped.");

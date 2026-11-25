@@ -24,7 +24,7 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::ringbuffer::{
-    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, priming_frames,
+    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, on_playback_restart, priming_frames,
 };
 use crate::utils::rt_channel;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
@@ -1034,10 +1034,10 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
                             if playback_restarted.swap(false, Ordering::AcqRel) {
-                                backlog_trimmer.restarted();
+                                on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                             }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
-                            let latency = chunk.timestamp.elapsed();
+                            let latency = chunk.capture_to_send();
                             let queued_frames = channel.len() * chunksize;
                             let level = match estimate {
                                 Some(countertimer::BufferEstimate::Level(frames)) => {

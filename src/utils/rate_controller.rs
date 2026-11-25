@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
-use crate::utils::countertimer::{BufferEstimate, Stopwatch};
+use crate::utils::countertimer::BufferEstimate;
 use crate::{PlaybackStatus, ProcessingParameters};
 
 /// A playback buffer level, read when a chunk is about to be written.
@@ -30,8 +30,9 @@ pub struct LevelReading {
     /// Frames in the chunks queued in front of the playback thread, not counting the chunk
     /// at hand.
     pub queued: f64,
-    /// How long before the level was read the capture device captured the last frame of the
-    /// chunk at hand, from its [`timestamp`](crate::audiochunk::AudioChunk::timestamp).
+    /// How long after the capture device captured the last frame of the chunk at hand,
+    /// processing sent it on to playback, see
+    /// [`capture_to_send`](crate::audiochunk::AudioChunk::capture_to_send).
     pub latency: Duration,
 }
 
@@ -259,25 +260,19 @@ impl DeadbeatRateController {
     }
 
     /// Calculate the next speed from the levels of a period.
-    /// Returns `None` if there are too few levels, and the speed should stay as it is.
+    /// `referenced` is false when some of the levels were read before the
+    /// [`LatencyReference`] was in place.
     ///
-    /// The periods that start within [`IGNORE_AT_START`] of the start are ignored, and the
-    /// clock keeps the speed it started at. Playback is still priming the buffer then, and the
-    /// clock may not yet run at the speed it was set to: BlackHole holds the level flat for
-    /// about 0.6 s, and then it jumps by tens of frames. Used for the drift, that is off by
-    /// hundreds of ppm, and the first steps overshoot.
-    fn next_period(&mut self, fit: &LevelFit) -> Option<f64> {
-        let period_start = self.elapsed;
-        self.elapsed += fit.last_t;
-        if period_start < IGNORE_AT_START {
-            debug!("Deadbeat controller ignores the period starting {period_start:.2} s in.");
-            self.previous_applied = self.applied;
-            return Some(self.applied);
-        }
-        self.next_from_average(fit)
-    }
-
-    /// Calculate the next speed from the average level of a period.
+    /// Some periods are ignored, and the clock keeps the speed it has.
+    /// - The periods that start within [`IGNORE_AT_START`] of the start. Playback is still
+    ///   priming the buffer then, and the clock may not yet run at the speed it was set to:
+    ///   BlackHole holds the level flat for about 0.6 s, and then it jumps by tens of frames.
+    ///   Used for the drift, that is off by hundreds of ppm, and the first steps overshoot.
+    /// - The periods with levels from before the latency reference was in place. The levels
+    ///   step when it comes in, and a drift taken across the step is off by as much.
+    ///   With large chunks the reference can take longer to come in than
+    ///   [`IGNORE_AT_START`].
+    ///
     /// The times in `fit` are from the start of the period, which is when the previous speed
     /// was sent, and its speed integral is of the speed in effect at each level,
     /// see [`effective_speed`](Self::effective_speed).
@@ -293,10 +288,20 @@ impl DeadbeatRateController {
     /// The first period after a start has nothing to compare with. It ran at one speed, so
     /// the slope of a least squares line through its levels gives the drift directly.
     /// After an interruption the drift estimate from before is used.
-    fn next_from_average(&mut self, fit: &LevelFit) -> Option<f64> {
-        let average = fit.average()?;
-        let centre = fit.mean_t()?;
-        let mean_integral = fit.mean_speed_integral()?;
+    fn next_period(&mut self, fit: &LevelFit, referenced: bool) -> f64 {
+        let period_start = self.elapsed;
+        self.elapsed += fit.last_t;
+        if period_start < IGNORE_AT_START || !referenced {
+            debug!("Deadbeat controller ignores the period starting {period_start:.2} s in.");
+            self.previous_applied = self.applied;
+            return self.applied;
+        }
+        // The reporter only ends a period that has levels in it.
+        let (Some(average), Some(centre), Some(mean_integral)) =
+            (fit.average(), fit.mean_t(), fit.mean_speed_integral())
+        else {
+            return self.applied;
+        };
         let drift = match self.previous {
             Some(previous) if previous.end - previous.centre + centre > 0.0 => {
                 let span = previous.end - previous.centre + centre;
@@ -306,7 +311,7 @@ impl DeadbeatRateController {
             }
             _ => match self.true_speed {
                 Some(true_speed) => Some(true_speed),
-                None => fit.end_level_and_slope().map(|(_, slope)| {
+                None => fit.slope().map(|slope| {
                     debug!(
                         "Deadbeat controller takes its first drift from a slope of {slope:.2}/s."
                     );
@@ -325,7 +330,7 @@ impl DeadbeatRateController {
         let drift = drift.unwrap_or(self.applied);
         let output = self.output(drift, err);
         trace!("Deadbeat controller, average error: {err}, true speed: {drift}, output: {output}");
-        Some(output)
+        output
     }
 
     /// Average a new estimate of the true speed into the old one.
@@ -420,17 +425,14 @@ impl LevelFit {
         (self.n > 1).then(|| 2.0 * (self.last_t - mean_t) / (self.n - 1) as f64)
     }
 
-    /// The fitted level at the time of the last value, and the slope per second.
-    fn end_level_and_slope(&self) -> Option<(f64, f64)> {
+    /// The slope of the least squares line through the levels, per second.
+    fn slope(&self) -> Option<f64> {
         let n = self.n as f64;
         let denom = n * self.sum_tt - self.sum_t * self.sum_t;
         if self.n < 2 || denom <= 0.0 {
             return None;
         }
-        let slope = (n * self.sum_tl - self.sum_t * self.sum_l) / denom;
-        let mean_t = self.sum_t / n;
-        let mean_l = self.sum_l / n;
-        Some((mean_l + slope * (self.last_t - mean_t), slope))
+        Some((n * self.sum_tl - self.sum_t * self.sum_l) / denom)
     }
 }
 
@@ -476,9 +478,7 @@ impl LevelMedian {
 }
 
 /// How many latencies the usual latency starts out as the median of.
-/// Few enough that, at common chunk sizes, the reference is in place well within
-/// [`IGNORE_AT_START`]. The levels change when it comes in, and a period with that change in
-/// it gives a drift that is hundreds of ppm off.
+/// The periods with levels from before it is in place are ignored by the deadbeat controller.
 const LATENCY_START_SAMPLES: usize = 16;
 /// The time constant of following slow changes of the usual latency, in seconds.
 const LATENCY_TIME_CONSTANT: f64 = 60.0;
@@ -486,16 +486,20 @@ const LATENCY_TIME_CONSTANT: f64 = 60.0;
 /// Refers each buffer level to the moment its chunk was captured.
 ///
 /// A level read when a chunk arrives at the playback side depends on when the chunk arrives.
-/// A chunk held up anywhere between the capture device and the playback thread, by a late
-/// wakeup or a slow processing run, finds less in the playback buffer, although neither
-/// device clock has moved. The *latency* of a chunk is the time from when the capture device
-/// captured its last frame to when the level is read. Adding back how much longer than
-/// usual the latency was gives the level the playback buffer had when the chunk was captured.
+/// A chunk held up between the capture device and the playback channel, by a late capture
+/// wakeup or a slow processing run, finds less in the playback buffer and the queue in front
+/// of it, although neither device clock has moved.
+/// The *latency* of a chunk is the time from when the capture device captured its last frame
+/// to when processing sent the chunk on to playback.
+/// Adding back how much longer than usual the latency was gives the level as it would have
+/// been had the chunk not been held up.
 /// That level depends only on the two device clocks, which is what rate adjust is there to
 /// match.
 ///
-/// Chunks waiting in front of the playback side are left out of the referred level. They
-/// waited because the chunk at hand was late, and its latency already counts that.
+/// The time a chunk then waits in the queue in front of the playback thread is not part of
+/// the latency. The queue is counted in full instead, so that a queue that stays, because the
+/// target level is more than the device side holds, stays in the level as well.
+/// A late wakeup of the playback thread itself is not corrected for.
 ///
 /// The usual latency starts out as the median of the first few, so that one slow chunk does
 /// not skew it, and then follows slow changes. That keeps the average level where it was
@@ -520,11 +524,15 @@ impl LatencyReference {
         }
     }
 
-    /// Frames to add to the level read with a chunk of this latency, in place of the chunks
-    /// queued in front of the playback side. `None` while the usual latency is not known yet.
-    fn correction(&mut self, latency: Duration) -> Option<f64> {
+    /// The stream was interrupted. The usual latency is not moved by the time that passed.
+    fn interrupted(&mut self) {
+        self.last_update = None;
+    }
+
+    /// Frames to add to the level read `now` with a chunk of this latency.
+    /// `None` while the usual latency is not known yet.
+    fn correction(&mut self, latency: Duration, now: Instant) -> Option<f64> {
         let latency = latency.as_secs_f64();
-        let now = Instant::now();
         match self.usual {
             None => {
                 self.start[self.count] = latency;
@@ -559,10 +567,10 @@ impl LatencyReference {
 /// [`PIRateController`] and the [`DeadbeatRateController`] ask for. When rate adjust is disabled
 /// it does nothing, and no buffer level is published.
 ///
-/// After an interruption, such as a pause or a device that stopped taking data, the first level
-/// is left out, and a new adjust period starts there. The levels collected before the
-/// interruption are old by then, and the first one after it is measured while the buffer
-/// is still filling up.
+/// After an interruption, such as a pause, a playback restart, or a device that stopped taking
+/// data, the first level is left out, and a new adjust period starts there. The levels collected
+/// before the interruption are old by then, and the first one after it is measured while the
+/// buffer is still filling up.
 pub struct RateAdjustReporter {
     controller: PIRateController,
     deadbeat: DeadbeatRateController,
@@ -574,8 +582,10 @@ pub struct RateAdjustReporter {
     median_lag: f64,
     latency: LatencyReference,
     fit: LevelFit,
-    timer: Stopwatch,
-    period_millis: u64,
+    /// Whether all levels of the current period were referred by the latency reference.
+    referenced: bool,
+    period_start: Instant,
+    period: Duration,
     enabled: bool,
     interrupted: bool,
 }
@@ -606,8 +616,9 @@ impl RateAdjustReporter {
             median_lag: 0.0,
             latency: LatencyReference::new(samplerate),
             fit: LevelFit::default(),
-            timer: Stopwatch::new(),
-            period_millis: (1000.0 * adjust_period) as u64,
+            referenced: true,
+            period_start: Instant::now(),
+            period: Duration::from_millis((1000.0 * adjust_period) as u64),
             enabled: enabled && adjust_period > 0.0,
             interrupted: false,
         }
@@ -670,10 +681,11 @@ impl RateAdjustReporter {
         }
     }
 
-    /// Discard the levels collected so far and start a new adjust period.
-    pub fn restart(&mut self) {
-        self.timer.restart();
+    /// Discard the levels collected so far and start a new adjust period at `now`.
+    fn restart(&mut self, now: Instant) {
+        self.period_start = now;
         self.fit = LevelFit::default();
+        self.referenced = true;
     }
 
     /// Add a buffer level. Returns the new capture speeds once per adjust period.
@@ -682,25 +694,40 @@ impl RateAdjustReporter {
         reading: LevelReading,
         playback_status: &RwLock<PlaybackStatus>,
     ) -> Option<RateAdjust> {
+        self.update_at(reading, Instant::now(), playback_status)
+    }
+
+    /// [`update`](Self::update) with a level read at `now`.
+    fn update_at(
+        &mut self,
+        reading: LevelReading,
+        now: Instant,
+        playback_status: &RwLock<PlaybackStatus>,
+    ) -> Option<RateAdjust> {
         if !self.enabled {
             return None;
         }
-        let buffer_level = match self.latency.correction(reading.latency) {
-            Some(frames) => reading.device + frames,
-            None => reading.device + reading.queued,
-        };
         if self.interrupted {
+            // This level is the least representative one, and the time since the last one
+            // says nothing about how the latency changes, so neither moves the reference.
             self.interrupted = false;
-            self.restart();
+            self.restart(now);
             self.median.clear();
+            self.latency.interrupted();
             self.deadbeat.forget_levels();
             return None;
         }
-        let t = self.timer.current_duration().as_secs_f64();
+        let correction = self.latency.correction(reading.latency, now);
+        if correction.is_none() {
+            self.referenced = false;
+        }
+        let buffer_level = reading.device + reading.queued + correction.unwrap_or(0.0);
+        let elapsed = now.saturating_duration_since(self.period_start);
+        let t = elapsed.as_secs_f64();
         let level = self.median.add(buffer_level);
         let speed = self.deadbeat.effective_speed(t, self.median_lag);
         self.fit.add_with_speed(t, level, speed);
-        if !self.timer.larger_than_millis(self.period_millis) {
+        if elapsed < self.period {
             return None;
         }
         let average_level = self.fit.average()?;
@@ -708,14 +735,11 @@ impl RateAdjustReporter {
             self.seed_clock(params.capture_clock_speed());
         }
         let resampler = self.controller.next(average_level);
-        let clock = self
-            .deadbeat
-            .next_period(&self.fit)
-            .unwrap_or(self.deadbeat.applied);
+        let clock = self.deadbeat.next_period(&self.fit, self.referenced);
         if let Some(interval) = self.fit.interval() {
             self.median_lag = self.median.lag() * interval;
         }
-        self.restart();
+        self.restart(now);
         debug!(
             "Playback buffer level {average_level:.1}, set capture rate to {:.4}% for a resampler, {:.4}% for a clock.",
             100.0 * resampler,
@@ -735,25 +759,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fit_gives_end_level_and_slope() {
+    fn fit_gives_slope_and_average() {
         let mut fit = LevelFit::default();
-        // Rising 20 frames per second, with the chunk quantization of the queue on top.
+        assert_eq!(fit.slope(), None);
+        // Rising 20 frames per second, levels every 20 ms for 2 s.
         for i in 0..100 {
             let t = 0.02 * i as f64;
-            let queued = if i % 4 == 0 || i % 4 == 3 {
-                1024.0
-            } else {
-                0.0
-            };
-            fit.add(t, 1000.0 + 20.0 * t + queued);
+            fit.add(t, 1000.0 + 20.0 * t);
         }
-        let (end_level, slope) = fit.end_level_and_slope().unwrap();
+        let slope = fit.slope().unwrap();
         assert!((slope - 20.0).abs() < 1e-6, "slope {slope}");
-        assert!(
-            (end_level - (1512.0 + 20.0 * 1.98)).abs() < 1e-6,
-            "end level {end_level}"
-        );
-        assert!((fit.average().unwrap() - (1512.0 + 20.0 * 0.99)).abs() < 1e-6);
+        assert!((fit.average().unwrap() - (1000.0 + 20.0 * 0.99)).abs() < 1e-6);
+        assert!((fit.mean_t().unwrap() - 0.99).abs() < 1e-9);
+        assert!((fit.interval().unwrap() - 0.02).abs() < 1e-9);
     }
 
     #[test]
@@ -842,7 +860,7 @@ mod tests {
                 );
             }
             previous_speed = speed;
-            speed = controller.next_period(&fit).unwrap();
+            speed = controller.next_period(&fit, true);
             errors.push(level - controller.target_level);
             speeds.push(speed);
         }
@@ -850,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn average_deadbeat_allows_for_a_lag_in_the_levels() {
+    fn deadbeat_allows_for_a_lag_in_the_levels() {
         let true_speed = 1.0 / (1.0 - 100e-6);
         // Started 300 frames low, so the speed steps by a few hundred ppm at first.
         // The levels lag by 0.3 s, a lot more than the median adds, to make the effect clear.
@@ -873,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn average_deadbeat_settles_without_overshoot() {
+    fn deadbeat_settles_without_overshoot() {
         let true_speed = 1.0 / (1.0 - 100e-6);
         let mut controller = DeadbeatRateController::new(48000, 2.0, 2000, 3.0, 1.0, 0.01);
         let (errors, speeds) = run_periods(&mut controller, true_speed, 200.0, 20, |_, _| 0.0);
@@ -943,10 +961,29 @@ mod tests {
         assert_ne!(speeds[2], leftover, "speeds {speeds:?}");
     }
 
+    /// The time between levels in the latency and reporter tests, one 1024 frame chunk.
+    const CHUNK_TIME: Duration = Duration::from_micros(21333);
+
+    /// A latency reference that has settled on a usual latency of `usual`, with the latencies
+    /// fed every [`CHUNK_TIME`] from `start`. Returns the time of the last one.
+    fn settled_reference(
+        reference: &mut LatencyReference,
+        usual: Duration,
+        start: Instant,
+    ) -> Instant {
+        let mut now = start;
+        for _ in 0..LATENCY_START_SAMPLES {
+            now += CHUNK_TIME;
+            reference.correction(usual, now);
+        }
+        now
+    }
+
     #[test]
     fn latency_reference_adds_back_how_late_a_chunk_is() {
         let mut reference = LatencyReference::new(48000);
         let usual = Duration::from_millis(5);
+        let mut now = Instant::now();
         // The usual latency is the median of the first ones, so one slow chunk among them
         // does not move it.
         for i in 0..LATENCY_START_SAMPLES - 1 {
@@ -955,19 +992,167 @@ mod tests {
             } else {
                 usual
             };
-            assert_eq!(reference.correction(latency), None);
+            now += CHUNK_TIME;
+            assert_eq!(reference.correction(latency, now), None);
         }
-        assert_eq!(reference.correction(usual), Some(0.0));
+        now += CHUNK_TIME;
+        assert_eq!(reference.correction(usual, now), Some(0.0));
         // A chunk 1 ms late finds 48 frames less in the buffer, which the correction adds
         // back. The usual latency hardly follows a single one.
-        let late = reference.correction(Duration::from_millis(6)).unwrap();
-        assert!((late - 48.0).abs() < 0.01, "correction {late}");
-        let early = reference.correction(Duration::from_millis(4)).unwrap();
-        assert!((early + 48.0).abs() < 0.01, "correction {early}");
+        now += CHUNK_TIME;
+        let late = reference.correction(Duration::from_millis(6), now).unwrap();
+        assert!((late - 48.0).abs() < 0.1, "correction {late}");
+        now += CHUNK_TIME;
+        let early = reference.correction(Duration::from_millis(4), now).unwrap();
+        assert!((early + 48.0).abs() < 0.1, "correction {early}");
     }
 
     #[test]
-    fn average_deadbeat_shrugs_off_one_outlier() {
+    fn latency_reference_follows_a_lasting_change() {
+        // Processing got heavier, and every chunk now leaves 2 ms later than at the start.
+        // The usual latency follows, so that the level settles where it was before.
+        // This is also why the time chunks wait in the playback queue must not be part of
+        // the latency: a queue that stays would disappear from the level within minutes.
+        let mut reference = LatencyReference::new(48000);
+        let usual = Duration::from_millis(5);
+        let mut now = settled_reference(&mut reference, usual, Instant::now());
+        let later = Duration::from_millis(7);
+        let mut corrections = Vec::new();
+        for _ in 0..(300.0 / CHUNK_TIME.as_secs_f64()) as usize {
+            now += CHUNK_TIME;
+            corrections.push(reference.correction(later, now).unwrap());
+        }
+        assert!(
+            (corrections[0] - 96.0).abs() < 0.1,
+            "first {}",
+            corrections[0]
+        );
+        let last = *corrections.last().unwrap();
+        assert!(last.abs() < 1.0, "last {last}");
+    }
+
+    #[test]
+    fn latency_reference_skips_an_interruption() {
+        let mut reference = LatencyReference::new(48000);
+        let usual = Duration::from_millis(5);
+        let mut now = settled_reference(&mut reference, usual, Instant::now());
+        // A pause of two minutes. The first level after it starts the reporter's new period
+        // and never reaches the reference. The one after that is 10 ms late, and must not
+        // replace the usual latency just because a lot of time passed since the last update.
+        reference.interrupted();
+        now += Duration::from_secs(120);
+        let late = reference
+            .correction(Duration::from_millis(15), now)
+            .unwrap();
+        assert!((late - 480.0).abs() < 0.01, "correction {late}");
+        now += CHUNK_TIME;
+        let back = reference.correction(usual, now).unwrap();
+        assert!(back.abs() < 0.01, "correction {back}");
+    }
+
+    /// A reporter fed a level every [`CHUNK_TIME`] from `start`, `level(i)` for the `i`th.
+    /// Returns the speeds and the published buffer levels at the end of each period.
+    fn run_reporter(
+        reporter: &mut RateAdjustReporter,
+        start: Instant,
+        levels: usize,
+        reading: impl Fn(usize) -> LevelReading,
+    ) -> (Vec<RateAdjust>, Vec<usize>) {
+        let status = RwLock::new(PlaybackStatus::default());
+        let mut speeds = Vec::new();
+        let mut published = Vec::new();
+        for i in 0..levels {
+            let now = start + CHUNK_TIME * (i as u32 + 1);
+            if let Some(speed) = reporter.update_at(reading(i), now, &status) {
+                speeds.push(speed);
+                published.push(status.read().buffer_level);
+            }
+        }
+        (speeds, published)
+    }
+
+    #[test]
+    fn reporter_keeps_a_queue_that_stays() {
+        // The target is 5 chunks, and the device side holds only 4. The playback thread
+        // blocks in the write, and a chunk waits in the queue in front of it all the time.
+        // The clocks match, so the level stays put and the speed at 1.
+        let start = Instant::now();
+        let mut reporter = RateAdjustReporter::new(
+            48000,
+            2.0,
+            5120,
+            true,
+            Arc::new(ProcessingParameters::default()),
+        );
+        reporter.period_start = start;
+        let levels = (300.0 / CHUNK_TIME.as_secs_f64()) as usize;
+        let (speeds, published) = run_reporter(&mut reporter, start, levels, |_| LevelReading {
+            device: 4096.0,
+            queued: 1024.0,
+            latency: Duration::from_millis(5),
+        });
+        assert!(published.len() > 140, "periods {}", published.len());
+        assert!(
+            published.iter().all(|level| *level == 5120),
+            "published {published:?}"
+        );
+        assert!(
+            speeds.iter().all(|speed| *speed == RateAdjust::both(1.0)),
+            "speeds {speeds:?}"
+        );
+    }
+
+    #[test]
+    fn reporter_ignores_periods_before_the_latency_reference() {
+        // 8192 frame chunks at 44.1 kHz, 186 ms each. The latency reference takes 16 of
+        // them, 3 s, to come in, longer than the first second the deadbeat ignores anyway.
+        let fs = 44100;
+        let chunk = Duration::from_secs_f64(8192.0 / fs as f64);
+        let start = Instant::now();
+        let mut reporter = RateAdjustReporter::new(
+            fs,
+            1.0,
+            16384,
+            true,
+            Arc::new(ProcessingParameters::default()),
+        );
+        reporter.period_start = start;
+        let status = RwLock::new(PlaybackStatus::default());
+        // The start of each period, and the clock speed asked for at its end.
+        let mut clocks = Vec::new();
+        let mut period_start = 0.0;
+        for i in 0..40u32 {
+            let now = start + chunk * (i + 1);
+            // Rising 100 frames per second, so a counted period moves the speed.
+            let t = (chunk * (i + 1)).as_secs_f64();
+            let reading = LevelReading {
+                device: 16384.0 + 100.0 * t,
+                queued: 0.0,
+                latency: Duration::from_millis(5),
+            };
+            if let Some(speed) = reporter.update_at(reading, now, &status) {
+                clocks.push((period_start, speed.clock));
+                period_start = t;
+            }
+        }
+        // The reference comes in with the 16th level.
+        let reference_in = chunk.as_secs_f64() * LATENCY_START_SAMPLES as f64;
+        let first_counted = clocks
+            .iter()
+            .position(|(start, _)| *start >= reference_in)
+            .unwrap();
+        assert!(first_counted >= 3, "clocks {clocks:?}");
+        assert!(
+            clocks[..first_counted]
+                .iter()
+                .all(|(_, clock)| *clock == 1.0),
+            "clocks {clocks:?}"
+        );
+        assert_ne!(clocks[first_counted].1, 1.0, "clocks {clocks:?}");
+    }
+
+    #[test]
+    fn deadbeat_shrugs_off_one_outlier() {
         let true_speed = 1.0 / (1.0 - 100e-6);
         let mut controller = DeadbeatRateController::new_with_defaults(48000, 2.0, 2000);
         controller.seed(true_speed);

@@ -20,7 +20,7 @@ use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::ringbuffer::BacklogTrimmer;
+use crate::utils::ringbuffer::{BacklogTrimmer, on_playback_restart};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -88,6 +88,7 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub enable_rate_adjust: bool,
 }
 
 struct CaptureChannels {
@@ -593,7 +594,7 @@ fn playback_loop_bytes(
                 } else {
                     None
                 };
-                let latency = chunk.timestamp.elapsed();
+                let latency = chunk.capture_to_send();
                 let waiting_chunks_in_channel = channels.audio.len();
                 trace!(
                     "Avail frames in buffer: {avail_at_chunk_recvd:?}, waiting chunks in channel: {waiting_chunks_in_channel}"
@@ -625,7 +626,7 @@ fn playback_loop_bytes(
                 );
                 pcm_paused = false;
                 if let Ok(PlaybackResult::Restarted) = playback_res {
-                    backlog_trimmer.restarted();
+                    on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                 }
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal | PlaybackResult::Restarted) => {
@@ -1023,7 +1024,9 @@ fn capture_loop_bytes(
             &mut params,
             processing_params,
         );
-        let captured_at = capture_time(pcmdevice, params.capture_samplerate);
+        let captured_at = params
+            .rate_adjust
+            .then(|| capture_time(pcmdevice, params.capture_samplerate));
         match capture_res {
             Ok(CaptureResult::Normal) => {
                 xtrace!("Captured {} bytes", capture_bytes);
@@ -1109,7 +1112,9 @@ fn capture_loop_bytes(
             &channel_mask,
             false,
         );
-        chunk.timestamp = captured_at;
+        if let Some(captured_at) = captured_at {
+            chunk.timestamp = captured_at;
+        }
         chunk.update_stats(&mut chunk_stats);
         crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(
@@ -1294,6 +1299,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
+        let rate_adjust = self.enable_rate_adjust;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
@@ -1343,6 +1349,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             samplerate,
                             capture_samplerate,
                             async_src,
+                            rate_adjust,
                             capture_status,
                             stop_on_rate_change,
                             rate_measure_interval,

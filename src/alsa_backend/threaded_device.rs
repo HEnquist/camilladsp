@@ -21,7 +21,7 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder};
+use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder, on_playback_restart};
 use crate::utils::rt_channel;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -57,7 +57,7 @@ use crate::alsa_backend::utils::{
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::{RateAdjust, RateAdjustReporter};
+use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -91,6 +91,7 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub enable_rate_adjust: bool,
 }
 
 #[derive(Debug)]
@@ -1096,6 +1097,13 @@ enum PlaybackDeviceMessage {
     SetPitch(f64),
 }
 
+/// Commands from the outer capture thread to the inner one, which owns the pitch control.
+enum CaptureDeviceCommand {
+    Exit,
+    /// The capture clock speed to set.
+    SetPitch(f64),
+}
+
 enum CaptureDeviceMessage {
     Data {
         chunk_nbr: usize,
@@ -1312,11 +1320,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     if playback_restarted.swap(false, Ordering::AcqRel) {
-                                        backlog_trimmer.restarted();
+                                        on_playback_restart(
+                                            &mut backlog_trimmer,
+                                            &mut rate_reporter,
+                                        );
                                     }
                                     let estimate =
                                         buffer_fill.try_lock().map(|b| b.checked_estimate());
-                                    let latency = chunk.timestamp.elapsed();
+                                    let latency = chunk.capture_to_send();
                                     let queued_frames = channel.len() * chunksize;
                                     let level = match estimate {
                                         Some(countertimer::BufferEstimate::Level(frames)) => {
@@ -1474,6 +1485,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
+        let rate_adjust = self.enable_rate_adjust;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
@@ -1630,6 +1642,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     samplerate,
                                     capture_samplerate,
                                     async_src,
+                                    rate_adjust,
                                     capture_status: capture_status_inner,
                                     stop_on_rate_change,
                                     rate_measure_interval,
@@ -1691,7 +1704,7 @@ impl CaptureDevice for AlsaCaptureDevice {
 
                                 loop {
                                     match rx_inner_command.try_recv() {
-                                        Ok(CommandMessage::Exit) => {
+                                        Ok(CaptureDeviceCommand::Exit) => {
                                             status_channel_inner
                                                 .send(StatusMessage::CaptureDone)
                                                 .unwrap_or(());
@@ -1700,8 +1713,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                 .unwrap_or(());
                                             break;
                                         }
-                                        Ok(CommandMessage::SetSpeed { speed }) => {
-                                            let speed = speed.clock;
+                                        Ok(CaptureDeviceCommand::SetPitch(speed)) => {
                                             if let Some(elem_loopback) = &element_loopback {
                                                 elem_loopback
                                                     .write_as_int((100_000.0 / speed) as i32);
@@ -1760,8 +1772,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             // What did not fit was the newest part of the read.
                                             let dropped_frames = (bytes_read - pushed_bytes)
                                                 / cap_params.bytes_per_frame;
-                                            let read_end =
-                                                capture_time(&pcmdevice, capture_samplerate);
+                                            // Only rate adjust needs the capture time, and it
+                                            // costs a call to the driver.
+                                            let read_end = if cap_params.rate_adjust {
+                                                capture_time(&pcmdevice, capture_samplerate)
+                                            } else {
+                                                Instant::now()
+                                            };
                                             let last_pushed = read_end
                                                 .checked_sub(Duration::from_secs_f64(
                                                     dropped_frames as f64
@@ -1929,13 +1946,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     CommandOutcome::Continue => {}
                                     CommandOutcome::SetPitch(speed) => {
                                         tx_inner_command
-                                            .try_send(CommandMessage::SetSpeed {
-                                                speed: RateAdjust::both(speed),
-                                            })
+                                            .try_send(CaptureDeviceCommand::SetPitch(speed))
                                             .unwrap_or_default();
                                     }
                                     CommandOutcome::Exit | CommandOutcome::Disconnected => {
-                                        tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
+                                        tx_inner_command
+                                            .send(CaptureDeviceCommand::Exit)
+                                            .unwrap_or(());
                                         exit_forwarded = true;
                                     }
                                 }

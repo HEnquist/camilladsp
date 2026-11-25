@@ -249,48 +249,6 @@ impl Default for Stopwatch {
     }
 }
 
-/// Calculate the average of a series of numbers.
-pub struct Averager {
-    sum: f64,
-    nbr_values: usize,
-}
-
-impl Averager {
-    /// Create a new, empty averager.
-    pub fn new() -> Averager {
-        Averager {
-            sum: 0.0,
-            nbr_values: 0,
-        }
-    }
-
-    pub fn restart(&mut self) {
-        trace!("Restarting averager");
-        self.sum = 0.0;
-        self.nbr_values = 0;
-    }
-
-    pub fn add_value(&mut self, value: f64) {
-        self.sum += value;
-        self.nbr_values += 1;
-        trace!("Averager: added value {}, nb. {}", value, self.nbr_values);
-    }
-
-    pub fn average(&self) -> Option<f64> {
-        if self.nbr_values > 0 {
-            Some(self.sum / (self.nbr_values as f64))
-        } else {
-            None
-        }
-    }
-}
-
-impl Default for Averager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Calculate the average number of added counts per second.
 pub struct TimeAverage {
     sum: usize,
@@ -601,8 +559,8 @@ impl ValueHistory {
 mod tests {
     use crate::ProcessingState;
     use crate::utils::countertimer::{
-        Averager, BufferEstimate, DeviceBufferEstimator, FrameTimeline, HistoryRecord,
-        SilenceCounter, Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
+        BufferEstimate, DeviceBufferEstimator, FrameTimeline, HistoryRecord, SilenceCounter,
+        Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
     };
     use std::time::{Duration, Instant};
 
@@ -721,18 +679,6 @@ mod tests {
         assert!(t.stored_millis() >= 1000);
         t.restart();
         assert_eq!(t.stored_millis(), 0);
-    }
-
-    #[test]
-    fn averager() {
-        let mut a = Averager::new();
-        assert_eq!(a.average(), None);
-        a.add_value(1.0);
-        a.add_value(2.0);
-        a.add_value(6.0);
-        assert_eq!(a.average(), Some(3.0));
-        a.restart();
-        assert_eq!(a.average(), None);
     }
 
     #[test]
