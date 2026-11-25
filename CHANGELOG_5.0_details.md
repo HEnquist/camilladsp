@@ -142,8 +142,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the short version.
   between intervals. After a 200 ppm step on the Alsa Loopback it was back within 10 frames of the
   target in 16 s, where the PI controller needed about 100 s. Async resamplers still use PI.
 - Rate adjust refers each buffer level to when its chunk was captured, so that a late chunk no
-  longer reads as a low level. The Alsa backends take the capture time from the device position.
-  In a VM this cut the noise of the level readings from 50 to 85 frames to between 3 and 20.
+  longer reads as a low level. This makes the level readings considerably less noisy.
+  The Alsa backends take the capture time from the device position.
 - Rate adjust takes the median of the last five buffer levels. That drops a single chunk that
   arrives very late, and the reading a chunk too low that can follow it before the device side has
   counted the chunk pushed just before. Such pairs were seen with BlackHole, where a pitch change
