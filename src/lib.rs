@@ -34,6 +34,7 @@
 #[macro_use]
 extern crate log;
 
+use crate::utils::rate_controller::RateAdjust;
 use camilladsp_schema::protocol::SpectrumSide;
 use parking_lot::{Mutex, RwLock};
 use std::sync::{
@@ -163,8 +164,8 @@ pub enum StatusMessage {
     PlaybackDone,
     /// Capture device thread has finished normally.
     CaptureDone,
-    /// Request to change the resampling speed ratio (async resampling).
-    SetSpeed(f64),
+    /// Request to change the capture speed, for a resampler and for a device clock.
+    SetSpeed(RateAdjust),
     /// Request to set the master volume (dB).
     SetVolume(f32),
     /// Request to set the master mute state.
@@ -173,8 +174,8 @@ pub enum StatusMessage {
 
 /// Commands sent from the supervisor to an audio device thread.
 pub enum CommandMessage {
-    /// Change the resampling speed ratio (async resampling only).
-    SetSpeed { speed: f64 },
+    /// Change the capture speed, for a resampler and for a device clock.
+    SetSpeed { speed: RateAdjust },
     /// Tell the device thread to stop gracefully.
     Exit,
 }
@@ -358,6 +359,7 @@ pub struct ProcessingParameters {
     processing_load: AtomicU32,
     resampler_load: AtomicU32,
     pause_count: AtomicU64,
+    capture_clock_speed: AtomicU64,
 }
 
 impl ProcessingParameters {
@@ -396,7 +398,27 @@ impl ProcessingParameters {
             processing_load: AtomicU32::new(0.0f32.to_bits()),
             resampler_load: AtomicU32::new(0.0f32.to_bits()),
             pause_count: AtomicU64::new(0),
+            capture_clock_speed: AtomicU64::new(1.0f64.to_bits()),
         }
+    }
+
+    /// Return the speed the capture device clock ran at when it was opened.
+    ///
+    /// A clock control such as the BlackHole pitch or the Loopback rate shift belongs to the
+    /// device and keeps its value between sessions. The rate controller starts from this
+    /// value, since it has to know what speed is applied to estimate the drift.
+    pub fn capture_clock_speed(&self) -> f64 {
+        f64::from_bits(self.capture_clock_speed.load(Ordering::Acquire))
+    }
+
+    /// Record the speed of the capture device clock, or 1.0 for a device without one.
+    ///
+    /// Reset to 1.0 before a session starts its devices, and set by a capture device with a
+    /// clock control before it captures anything. The playback side reads it once a whole
+    /// adjust period of captured audio has reached it.
+    pub fn set_capture_clock_speed(&self, speed: f64) {
+        self.capture_clock_speed
+            .store(speed.to_bits(), Ordering::Release);
     }
 
     /// Return the requested target volume (dB) for `fader`.

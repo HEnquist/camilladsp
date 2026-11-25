@@ -224,6 +224,7 @@ impl PlaybackDevice for FilePlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        _processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let destination = self.destination.clone();
         let chunksize = self.chunksize;

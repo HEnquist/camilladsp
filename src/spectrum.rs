@@ -529,7 +529,6 @@ mod tests {
     use super::*;
     use crate::audiochunk::AudioChunk;
     use crate::{CamillaFloat, ToCamillaFloat};
-    use std::time::Instant;
 
     fn make_chunk_sine(freq: f64, amplitude: f64, samplerate: usize, frames: usize) -> AudioChunk {
         // An AudioChunk carries the processing precision, not the analyser's f32.
@@ -540,15 +539,13 @@ mod tests {
                 .to_camilla_float()
             })
             .collect();
-        AudioChunk {
+        AudioChunk::new(
+            vec![waveform],
+            amplitude.to_camilla_float(),
+            -amplitude.to_camilla_float(),
             frames,
-            channels: 1,
-            maxval: amplitude.to_camilla_float(),
-            minval: -amplitude.to_camilla_float(),
-            timestamp: Instant::now(),
-            valid_frames: frames,
-            waveforms: vec![waveform],
-        }
+            frames,
+        )
     }
 
     /// A chunk shaped like the ones capture produces when the pipeline does not use

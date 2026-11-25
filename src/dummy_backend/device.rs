@@ -29,7 +29,7 @@ use crate::generatordevice::SignalSource;
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command, send_capture_done};
 use crate::utils::conversions::chunk_to_buffer_rawbytes;
 use crate::utils::countertimer;
-use crate::utils::rate_controller::RateAdjustReporter;
+use crate::utils::rate_controller::{LevelReading, RateAdjustReporter};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::utils::stash::recycle_chunk;
 use crate::{CamillaFloat, ToCamillaFloat};
@@ -148,6 +148,7 @@ struct PlaybackParams {
     adjust_period: f32,
     enable_rate_adjust: bool,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+    processing_params: Arc<ProcessingParameters>,
     control: Arc<DummyControl>,
 }
 
@@ -450,6 +451,7 @@ fn playback_loop(
         params.adjust_period,
         params.target_level,
         params.enable_rate_adjust,
+        params.processing_params.clone(),
     );
     // A real device converts every chunk to the format the hardware wants on its way out,
     // which is where clipping happens. Without a format configured the audio is dropped as
@@ -462,6 +464,7 @@ fn playback_loop(
         match channel.recv() {
             Ok(AudioMessage::Audio(chunk)) => {
                 let frames = chunk.frames;
+                let latency = chunk.capture_to_send();
                 params.control.add_frames(frames);
                 if params.control.failing() {
                     let message = "Dummy playback device failed on request".to_string();
@@ -524,18 +527,23 @@ fn playback_loop(
                 let queued = (params.chunksize * channel.len()) as f64;
                 // The chunk goes into the virtual buffer, and its frames are gone
                 // once it has drained.
-                let buffer_level = match &mut pacer {
+                let reading = match &mut pacer {
                     Some(pacer) => {
                         // Measure as the chunk arrives, before it is written. Measured
                         // after the wait below, the reading would only ever be the level
                         // that wait stops at, whatever the device is really doing.
-                        let level = pacer.backlog().max(0.0) + queued;
+                        let level = LevelReading {
+                            device: pacer.backlog().max(0.0),
+                            queued,
+                            latency,
+                        };
                         // Block until there is room in the buffer, which is what a
                         // real device does when its own is full.
                         pacer.advance(frames);
                         pacer.wait_for_backlog_below(buffer_size);
                         if pacer.resync_if_behind(max_deficit) {
                             params.control.count_resync();
+                            rate_reporter.interrupt();
                             warn!(
                                 "Dummy playback fell behind and dropped the backlog, as an underrun would"
                             );
@@ -550,12 +558,16 @@ fn playback_loop(
                             started.set_rate(drifted_rate(params.samplerate, drift_ppm));
                             pacer = Some(started);
                         }
-                        prefilled as f64
+                        LevelReading {
+                            device: prefilled as f64,
+                            queued: 0.0,
+                            latency,
+                        }
                     }
                 };
                 // The controller uses the average over the adjust period, the way the
                 // real backends do.
-                if let Some(speed) = rate_reporter.update(buffer_level, &params.playback_status) {
+                if let Some(speed) = rate_reporter.update(reading, &params.playback_status) {
                     status_channel
                         .send(StatusMessage::SetSpeed(speed))
                         .unwrap_or(());
@@ -564,7 +576,7 @@ fn playback_loop(
                 // polling the getter does not have to wait one out. Written after the
                 // reporter, which publishes the period average, so this value wins.
                 if let Some(mut playback_status) = params.playback_status.try_write() {
-                    playback_status.buffer_level = buffer_level as usize;
+                    playback_status.buffer_level = (reading.device + reading.queued) as usize;
                 } else {
                     xtrace!("playback status blocked, skip buffer level update");
                 }
@@ -669,6 +681,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let samplerate = self.samplerate;
         let chunksize = self.chunksize;
@@ -694,6 +707,7 @@ impl PlaybackDevice for DummyPlaybackDevice {
                     adjust_period,
                     enable_rate_adjust,
                     playback_status,
+                    processing_params,
                     control: listener.control(),
                 };
                 status_channel

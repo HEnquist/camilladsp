@@ -20,7 +20,7 @@ use crate::audiodevice::*;
 use crate::config::{AlsaSampleFormat, Resampler};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::ringbuffer::BacklogTrimmer;
+use crate::utils::ringbuffer::{BacklogTrimmer, on_playback_restart};
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
 };
@@ -49,12 +49,12 @@ use crate::alsa_backend::buffermanager::{
 };
 use crate::alsa_backend::utils::{
     CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, PlaybackParams,
-    ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
+    capture_time, ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
     list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
     sync_linked_controls,
 };
-use crate::utils::rate_controller::PIRateController;
+use crate::utils::rate_controller::{LevelReading, RateAdjustReporter};
 use crate::utils::resampling::{ChunkResampler, new_resampler, resampler_is_async};
 use crate::{CaptureStatus, PlaybackStatus, ProcessingParameters, SHUTDOWN_REQUESTED};
 
@@ -88,6 +88,7 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub enable_rate_adjust: bool,
 }
 
 struct CaptureChannels {
@@ -487,7 +488,6 @@ fn playback_loop_bytes(
     params: PlaybackParams,
     buf_manager: &PlaybackBufferManager,
 ) {
-    let mut timer = countertimer::Stopwatch::new();
     let mut chunk_stats = ChunkStats {
         rms: vec![0.0; params.channels],
         peak: vec![0.0; params.channels],
@@ -495,9 +495,7 @@ fn playback_loop_bytes(
     let mut rms_values = Vec::new();
     let mut peak_values = Vec::new();
     let clipped_counter = params.playback_status.read().clipped_samples.clone();
-    let mut buffer_avg = countertimer::Averager::new();
     let mut conversion_result;
-    let adjust = params.adjust_period > 0.0 && params.adjust_enabled;
     let millis_per_frame: f32 = 1000.0 / params.samplerate as f32;
     let mut device_stalled = false;
     let mut pcm_paused = false;
@@ -533,11 +531,25 @@ fn playback_loop_bytes(
         info!("Playback device supports rate adjust");
     }
 
-    let mut rate_controller = PIRateController::new_with_default_gains(
+    let mut rate_reporter = RateAdjustReporter::new(
         params.samplerate,
-        params.adjust_period as f64,
+        params.adjust_period,
         params.target_level,
+        params.adjust_enabled,
+        params.processing_params.clone(),
     );
+    if let Some(elem) = &element_uac2_gadget {
+        // The pitch is written as the reciprocal of the capture speed, and keeps its value
+        // between sessions.
+        if let Some(value) = elem
+            .read()
+            .ok()
+            .and_then(|v| v.get_integer(0))
+            .filter(|v| *v > 0)
+        {
+            rate_reporter.playback_clock_speed(1_000_000.0 / value as f64);
+        }
+    }
     let mut backlog_trimmer = BacklogTrimmer::new(
         params.trim_backlog,
         params.target_level,
@@ -582,6 +594,7 @@ fn playback_loop_bytes(
                 } else {
                     None
                 };
+                let latency = chunk.capture_to_send();
                 let waiting_chunks_in_channel = channels.audio.len();
                 trace!(
                     "Avail frames in buffer: {avail_at_chunk_recvd:?}, waiting chunks in channel: {waiting_chunks_in_channel}"
@@ -594,8 +607,7 @@ fn playback_loop_bytes(
                 if backlog_trimmer.drop_chunk(level) {
                     // The levels measured with the backlog in place would push rate adjust
                     // the wrong way.
-                    timer.restart();
-                    buffer_avg.restart();
+                    rate_reporter.interrupt();
                     continue;
                 }
                 chunk.update_stats(&mut chunk_stats);
@@ -614,7 +626,7 @@ fn playback_loop_bytes(
                 );
                 pcm_paused = false;
                 if let Ok(PlaybackResult::Restarted) = playback_res {
-                    backlog_trimmer.restarted();
+                    on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                 }
                 device_stalled = match playback_res {
                     Ok(PlaybackResult::Normal | PlaybackResult::Restarted) => {
@@ -629,8 +641,7 @@ fn playback_loop_bytes(
                             pcmdevice
                                 .prepare()
                                 .unwrap_or_else(|err| warn!("PB: Playback error {err:?}"));
-                            timer.restart();
-                            buffer_avg.restart();
+                            rate_reporter.interrupt();
                         }
                         false
                     }
@@ -677,57 +688,46 @@ fn playback_loop_bytes(
                         conversion_result.1,
                         &clipped_counter,
                     );
-                    if let Some(avail) = avail_at_chunk_recvd {
+                    let speed = avail_at_chunk_recvd.and_then(|avail| {
                         let delay = buf_manager.current_delay(avail);
-                        buffer_avg.add_value(
-                            delay as f64 + (params.chunksize * waiting_chunks_in_channel) as f64,
-                        );
-                    }
-                    if timer.larger_than_millis((1000.0 * params.adjust_period) as u64)
-                        && let Some(avg_delay) = buffer_avg.average()
-                    {
-                        timer.restart();
-                        buffer_avg.restart();
-                        if adjust {
-                            let capture_speed = rate_controller.next(avg_delay);
-                            if let Some(elem_uac2_gadget) = &element_uac2_gadget {
-                                // speed is reciprocal on playback side
-                                let res =
-                                    ElemValue::new(ElemType::Integer).and_then(|mut elval| {
-                                        elval.set_integer(0, (1_000_000.0 / capture_speed) as i32);
-                                        elem_uac2_gadget.write(&elval)
-                                    });
-                                match res {
-                                    Ok(_) => {
-                                        debug!("Set gadget playback speed to {capture_speed}")
-                                    }
-                                    Err(err) => {
-                                        warn!("Failed to set the gadget playback pitch: {err}")
-                                    }
+                        rate_reporter.update(
+                            LevelReading {
+                                device: delay as f64,
+                                queued: (params.chunksize * waiting_chunks_in_channel) as f64,
+                                latency,
+                            },
+                            &params.playback_status,
+                        )
+                    });
+                    if let Some(speed) = speed {
+                        if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                            // speed is reciprocal on playback side
+                            let clock = speed.clock;
+                            let res = ElemValue::new(ElemType::Integer).and_then(|mut elval| {
+                                elval.set_integer(0, (1_000_000.0 / clock) as i32);
+                                elem_uac2_gadget.write(&elval)
+                            });
+                            match res {
+                                Ok(_) => {
+                                    debug!("Set gadget playback speed to {clock}")
                                 }
-                            } else {
-                                debug!("Send SetSpeed message for speed {capture_speed}");
-                                channels
-                                    .status
-                                    .send(StatusMessage::SetSpeed(capture_speed))
-                                    .unwrap_or(());
+                                Err(err) => {
+                                    warn!("Failed to set the gadget playback pitch: {err}")
+                                }
                             }
-                        }
-                        if let Some(mut playback_status) = params.playback_status.try_write() {
-                            playback_status.buffer_level = avg_delay as usize;
-                            debug!(
-                                "PB: buffer level: {:.1}, signal rms: {:?}",
-                                avg_delay,
-                                playback_status.signal_rms.last_sqrt()
-                            );
                         } else {
-                            xtrace!("playback params blocked, skip rms update");
+                            debug!("Send SetSpeed message for speed {speed:?}");
+                            channels
+                                .status
+                                .send(StatusMessage::SetSpeed(speed))
+                                .unwrap_or(());
                         }
                     }
                 }
             }
             Ok(AudioMessage::Pause) => {
                 trace!("PB: Pause message received");
+                rate_reporter.interrupt();
                 if can_pause && !pcm_paused {
                     debug!("Pausing playback device");
                     let pause_res = pcmdevice.pause(true);
@@ -840,6 +840,22 @@ fn capture_loop_bytes(
             Some(subdevice),
             "Capture Pitch 1000000",
         );
+        // The controls keep their values between sessions, and the rate controller has to
+        // start from the speed the clock already runs at. Both are read the inverse of
+        // how SetSpeed writes them.
+        let clock_speed = if let Some(elem) = &element_loopback {
+            elem.read_as_int()
+                .filter(|v| *v > 0)
+                .map(|v| 100_000.0 / v as f64)
+        } else if let Some(elem) = &element_uac2_gadget {
+            elem.read_as_int().map(|v| v as f64 / 1_000_000.0)
+        } else {
+            None
+        };
+        if let Some(speed) = clock_speed {
+            debug!("Capture clock speed is {speed} at start.");
+            processing_params.set_capture_clock_speed(speed);
+        }
 
         capture_elements.find_elements(
             h,
@@ -947,14 +963,19 @@ fn capture_loop_bytes(
                 break;
             }
             Ok(CommandMessage::SetSpeed { speed }) => {
-                rate_adjust = speed;
                 if let Some(elem_loopback) = &element_loopback {
+                    let speed = speed.clock;
+                    rate_adjust = speed;
                     debug!("Setting capture loopback speed to {speed}");
                     elem_loopback.write_as_int((100_000.0 / speed) as i32);
                 } else if let Some(elem_uac2_gadget) = &element_uac2_gadget {
+                    let speed = speed.clock;
+                    rate_adjust = speed;
                     debug!("Setting capture gadget speed to {speed}");
                     elem_uac2_gadget.write_as_int((speed * 1_000_000.0) as i32);
                 } else if let Some(resampl) = &mut resampler {
+                    let speed = speed.resampler;
+                    rate_adjust = speed;
                     if params.async_src {
                         debug!("Setting async resampler speed to {speed}");
                         if resampl.set_resample_ratio_relative(speed, true).is_err() {
@@ -963,6 +984,8 @@ fn capture_loop_bytes(
                     } else {
                         warn!("Requested rate adjust of synchronous resampler. Ignoring request.");
                     }
+                } else {
+                    rate_adjust = speed.resampler;
                 }
             }
             Err(crossbeam_channel::TryRecvError::Empty) => {}
@@ -1001,6 +1024,9 @@ fn capture_loop_bytes(
             &mut params,
             processing_params,
         );
+        let captured_at = params
+            .rate_adjust
+            .then(|| capture_time(pcmdevice, params.capture_samplerate));
         match capture_res {
             Ok(CaptureResult::Normal) => {
                 xtrace!("Captured {} bytes", capture_bytes);
@@ -1086,6 +1112,9 @@ fn capture_loop_bytes(
             &channel_mask,
             false,
         );
+        if let Some(captured_at) = captured_at {
+            chunk.timestamp = captured_at;
+        }
         chunk.update_stats(&mut chunk_stats);
         crate::push_capture_audio_buffer(&params.capture_status, &chunk);
         crate::update_capture_signal_status(
@@ -1177,6 +1206,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -1221,6 +1251,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             trim_backlog,
                             sample_format: binary_format,
                             playback_status,
+                            processing_params,
                             bytes_per_frame: channels * bytes_per_sample,
                             samplerate,
                             chunksize,
@@ -1268,6 +1299,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
+        let rate_adjust = self.enable_rate_adjust;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
@@ -1317,6 +1349,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             samplerate,
                             capture_samplerate,
                             async_src,
+                            rate_adjust,
                             capture_status,
                             stop_on_rate_change,
                             rate_measure_interval,

@@ -113,6 +113,46 @@ impl DeviceBufferEstimator {
     }
 }
 
+/// When a capture device captured a given frame, counted from the start of the stream.
+///
+/// For a backend where one thread talks to the device and another one cuts the chunks.
+/// The device side anchors the timeline after each read, with the number of frames it has
+/// passed on so far and when the device captured the last of them.
+/// The chunk side then asks when the last frame of each chunk was captured.
+/// That frame is usually the anchor itself, or close to it, so extrapolating at the
+/// nominal rate costs nothing measurable.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameTimeline {
+    anchor: Option<(u64, Instant)>,
+    sample_rate: f64,
+}
+
+impl FrameTimeline {
+    pub fn new(sample_rate: usize) -> Self {
+        FrameTimeline {
+            anchor: None,
+            sample_rate: sample_rate as f64,
+        }
+    }
+
+    /// The device had captured frame number `frames` at `time`.
+    pub fn anchor(&mut self, frames: u64, time: Instant) {
+        self.anchor = Some((frames, time));
+    }
+
+    /// When the device captured frame number `frames`, or `None` before the first anchor.
+    pub fn time_of(&self, frames: u64) -> Option<Instant> {
+        let (anchor_frames, anchor_time) = self.anchor?;
+        if frames >= anchor_frames {
+            let ahead = (frames - anchor_frames) as f64 / self.sample_rate;
+            anchor_time.checked_add(Duration::from_secs_f64(ahead))
+        } else {
+            let behind = (anchor_frames - frames) as f64 / self.sample_rate;
+            anchor_time.checked_sub(Duration::from_secs_f64(behind))
+        }
+    }
+}
+
 /// A counter for watching if the signal has been silent
 /// for longer than a given limit.
 pub struct SilenceCounter {
@@ -204,48 +244,6 @@ impl Stopwatch {
 }
 
 impl Default for Stopwatch {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Calculate the average of a series of numbers.
-pub struct Averager {
-    sum: f64,
-    nbr_values: usize,
-}
-
-impl Averager {
-    /// Create a new, empty averager.
-    pub fn new() -> Averager {
-        Averager {
-            sum: 0.0,
-            nbr_values: 0,
-        }
-    }
-
-    pub fn restart(&mut self) {
-        trace!("Restarting averager");
-        self.sum = 0.0;
-        self.nbr_values = 0;
-    }
-
-    pub fn add_value(&mut self, value: f64) {
-        self.sum += value;
-        self.nbr_values += 1;
-        trace!("Averager: added value {}, nb. {}", value, self.nbr_values);
-    }
-
-    pub fn average(&self) -> Option<f64> {
-        if self.nbr_values > 0 {
-            Some(self.sum / (self.nbr_values as f64))
-        } else {
-            None
-        }
-    }
-}
-
-impl Default for Averager {
     fn default() -> Self {
         Self::new()
     }
@@ -561,13 +559,30 @@ impl ValueHistory {
 mod tests {
     use crate::ProcessingState;
     use crate::utils::countertimer::{
-        Averager, BufferEstimate, DeviceBufferEstimator, HistoryRecord, SilenceCounter, Stopwatch,
-        TimeAverage, ValueHistory, ValueWatcher,
+        BufferEstimate, DeviceBufferEstimator, FrameTimeline, HistoryRecord, SilenceCounter,
+        Stopwatch, TimeAverage, ValueHistory, ValueWatcher,
     };
     use std::time::{Duration, Instant};
 
     fn instant_in_past(duration: Duration) -> Instant {
         Instant::now().checked_sub(duration).unwrap()
+    }
+
+    #[test]
+    fn frame_timeline_extrapolates_from_the_anchor() {
+        let mut timeline = FrameTimeline::new(48000);
+        assert_eq!(timeline.time_of(1000), None);
+        let anchor = Instant::now();
+        timeline.anchor(48000, anchor);
+        assert_eq!(timeline.time_of(48000), Some(anchor));
+        assert_eq!(
+            timeline.time_of(52800),
+            Some(anchor + Duration::from_millis(100))
+        );
+        assert_eq!(
+            timeline.time_of(43200),
+            Some(anchor - Duration::from_millis(100))
+        );
     }
 
     fn set_last_record_time(hist: &mut ValueHistory, time: Instant) {
@@ -664,18 +679,6 @@ mod tests {
         assert!(t.stored_millis() >= 1000);
         t.restart();
         assert_eq!(t.stored_millis(), 0);
-    }
-
-    #[test]
-    fn averager() {
-        let mut a = Averager::new();
-        assert_eq!(a.average(), None);
-        a.add_value(1.0);
-        a.add_value(2.0);
-        a.add_value(6.0);
-        assert_eq!(a.average(), Some(3.0));
-        a.restart();
-        assert_eq!(a.average(), None);
     }
 
     #[test]

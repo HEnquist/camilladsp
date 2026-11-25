@@ -21,7 +21,7 @@ use crate::config::{AlsaSampleFormat, BinarySampleFormat, Resampler};
 use crate::utils::capture_command::{CommandOutcome, handle_capture_command};
 use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbytes};
 use crate::utils::countertimer;
-use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder};
+use crate::utils::ringbuffer::{BacklogTrimmer, RingBufferFeeder, on_playback_restart};
 use crate::utils::rt_channel;
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -51,7 +51,7 @@ use crate::alsa_backend::threaded_buffermanager::{
     CaptureBufferManager, DeviceBufferManager, PlaybackBufferManager,
 };
 use crate::alsa_backend::utils::{
-    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors,
+    CaptureElements, CaptureParams, CaptureResult, ElemData, FileDescriptors, capture_time,
     ensure_capture_running, find_elem, list_channels_as_text, list_device_names,
     list_formats_as_text, list_samplerates_as_text, pick_preferred_format, process_events,
     recover_suspended_pcm, restart_capture_pcm, resume_capture_pcm, state_desc,
@@ -91,6 +91,7 @@ pub struct AlsaCaptureDevice {
     pub stop_on_inactive: bool,
     pub link_volume_control: Option<String>,
     pub link_mute_control: Option<String>,
+    pub enable_rate_adjust: bool,
 }
 
 #[derive(Debug)]
@@ -1081,9 +1082,10 @@ fn nbr_capture_frames(resampler: &Option<ChunkResampler>, capture_frames: usize)
 }
 
 /// Sent by an inner device thread once the device is open, with the negotiated sample format
-/// and whether the device has a pitch control for rate adjust.
+/// and, when the device has a pitch control for rate adjust, the speed that control is at.
+/// The control keeps its value between sessions, and the rate controller starts from it.
 enum AlsaThreadState {
-    Ready(BinarySampleFormat, bool),
+    Ready(BinarySampleFormat, Option<f64>),
     Error(String),
 }
 
@@ -1095,8 +1097,21 @@ enum PlaybackDeviceMessage {
     SetPitch(f64),
 }
 
+/// Commands from the outer capture thread to the inner one, which owns the pitch control.
+enum CaptureDeviceCommand {
+    Exit,
+    /// The capture clock speed to set.
+    SetPitch(f64),
+}
+
 enum CaptureDeviceMessage {
-    Data { chunk_nbr: usize, nbr_bytes: usize },
+    Data {
+        chunk_nbr: usize,
+        nbr_bytes: usize,
+        /// The frames pushed to the ring buffer so far, and when the device captured the last
+        /// of them. `None` when nothing was pushed.
+        captured: Option<(u64, Instant)>,
+    },
     EndOfStream,
 }
 
@@ -1108,6 +1123,7 @@ impl PlaybackDevice for AlsaPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let target_level = if self.target_level > 0 {
@@ -1178,11 +1194,16 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                 let pitch_elem = pitch_hctl
                                     .as_ref()
                                     .and_then(|h| find_playback_pitch(h, &pcmdevice));
+                                // The pitch is the reciprocal of the capture speed.
+                                let pitch_speed = pitch_elem.as_ref().map(|elem| {
+                                    elem.read()
+                                        .ok()
+                                        .and_then(|v| v.get_integer(0))
+                                        .filter(|v| *v > 0)
+                                        .map_or(1.0, |v| 1_000_000.0 / v as f64)
+                                });
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(
-                                        binary_format,
-                                        pitch_elem.is_some(),
-                                    ))
+                                    .send(AlsaThreadState::Ready(binary_format, pitch_speed))
                                     .unwrap_or(());
 
                                 let io = pcmdevice.io_bytes();
@@ -1244,7 +1265,8 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_speed)) => {
+                        let pitch_supported = pitch_speed.is_some();
                         status_channel
                             .send(StatusMessage::PlaybackReady)
                             .unwrap_or(());
@@ -1281,7 +1303,11 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             adjust_period,
                             target_level,
                             adjust_enabled,
+                            processing_params,
                         );
+                        if let Some(speed) = pitch_speed {
+                            rate_reporter.playback_clock_speed(speed);
+                        }
                         let mut feeder = RingBufferFeeder::new(chunksize, samplerate);
                         let mut backlog_trimmer = BacklogTrimmer::new(
                             trim_backlog,
@@ -1294,10 +1320,14 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                             match channel.recv() {
                                 Ok(AudioMessage::Audio(chunk)) => {
                                     if playback_restarted.swap(false, Ordering::AcqRel) {
-                                        backlog_trimmer.restarted();
+                                        on_playback_restart(
+                                            &mut backlog_trimmer,
+                                            &mut rate_reporter,
+                                        );
                                     }
                                     let estimate =
                                         buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                    let latency = chunk.capture_to_send();
                                     let queued_frames = channel.len() * chunksize;
                                     let level = match estimate {
                                         Some(countertimer::BufferEstimate::Level(frames)) => {
@@ -1314,12 +1344,13 @@ impl PlaybackDevice for AlsaPlaybackDevice {
                                     if let Some(speed) = rate_reporter.update_from_estimate(
                                         estimate,
                                         queued_frames,
+                                        latency,
                                         &playback_status,
                                     ) {
                                         if pitch_supported {
                                             let _ = send_playback_device_message(
                                                 &tx_dev,
-                                                PlaybackDeviceMessage::SetPitch(speed),
+                                                PlaybackDeviceMessage::SetPitch(speed.clock),
                                             );
                                         } else {
                                             status_channel
@@ -1454,6 +1485,7 @@ impl CaptureDevice for AlsaCaptureDevice {
         let conf_sample_format = self.sample_format;
         let resampler_config = self.resampler_config;
         let async_src = resampler_is_async(&resampler_config);
+        let rate_adjust = self.enable_rate_adjust;
         let stop_on_rate_change = self.stop_on_rate_change;
         let rate_measure_interval = self.rate_measure_interval;
         let stop_on_inactive = self.stop_on_inactive;
@@ -1548,11 +1580,26 @@ impl CaptureDevice for AlsaCaptureDevice {
                                         "Capture Pitch 1000000",
                                     );
                                 }
-                                let pitch_supported =
-                                    element_loopback.is_some() || element_uac2_gadget.is_some();
+                                // Both read the inverse of how SetSpeed writes them.
+                                let pitch_speed = if let Some(elem) = &element_loopback {
+                                    Some(
+                                        elem.read_as_int()
+                                            .filter(|v| *v > 0)
+                                            .map_or(1.0, |v| 100_000.0 / v as f64),
+                                    )
+                                } else {
+                                    element_uac2_gadget.as_ref().map(|elem| {
+                                        elem.read_as_int()
+                                            .map_or(1.0, |v| v as f64 / 1_000_000.0)
+                                    })
+                                };
+                                if let Some(speed) = pitch_speed {
+                                    debug!("Capture clock speed is {speed} at start.");
+                                    processing_params_inner.set_capture_clock_speed(speed);
+                                }
 
                                 tx_state_dev
-                                    .send(AlsaThreadState::Ready(binary_format, pitch_supported))
+                                    .send(AlsaThreadState::Ready(binary_format, pitch_speed))
                                     .unwrap_or(());
                                 if rx_start_inner.recv().is_err() {
                                     return;
@@ -1564,8 +1611,19 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 let capture_bytes = chunksize * bytes_per_frame;
                                 let capture_frames = chunksize as Frames;
                                 let mut buffer = vec![0u8; capture_bytes];
+                                // Read one period per wake, and leave anything beyond it in the
+                                // device. Reading everything empties the device, and the next
+                                // wake then depends on a whole period having arrived. A device
+                                // whose position moves in coarse steps, such as the Loopback
+                                // with its jiffies timer, can show a little less than that at a
+                                // period tick, and then the wake waits for the next one.
+                                // What is left behind keeps the next wake clear of that.
+                                let read_bytes = (buf_manager.data.periodsize().max(1) as usize)
+                                    .min(chunksize)
+                                    * bytes_per_frame;
                                 let mut chunk_nbr = 0usize;
                                 let mut ring_full = false;
+                                let mut pushed_frames = 0u64;
 
                                 let fds = pcmdevice.get().unwrap();
                                 let nbr_pcm_fds = fds.len();
@@ -1584,6 +1642,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     samplerate,
                                     capture_samplerate,
                                     async_src,
+                                    rate_adjust,
                                     capture_status: capture_status_inner,
                                     stop_on_rate_change,
                                     rate_measure_interval,
@@ -1645,7 +1704,7 @@ impl CaptureDevice for AlsaCaptureDevice {
 
                                 loop {
                                     match rx_inner_command.try_recv() {
-                                        Ok(CommandMessage::Exit) => {
+                                        Ok(CaptureDeviceCommand::Exit) => {
                                             status_channel_inner
                                                 .send(StatusMessage::CaptureDone)
                                                 .unwrap_or(());
@@ -1654,7 +1713,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                 .unwrap_or(());
                                             break;
                                         }
-                                        Ok(CommandMessage::SetSpeed { speed }) => {
+                                        Ok(CaptureDeviceCommand::SetPitch(speed)) => {
                                             if let Some(elem_loopback) = &element_loopback {
                                                 elem_loopback
                                                     .write_as_int((100_000.0 / speed) as i32);
@@ -1675,7 +1734,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     }
 
                                     let capture_res = capture_buffer(
-                                        &mut buffer,
+                                        &mut buffer[..read_bytes],
                                         &pcmdevice,
                                         &io,
                                         capture_frames as usize,
@@ -1710,10 +1769,29 @@ impl CaptureDevice for AlsaCaptureDevice {
                                             } else {
                                                 ring_full = false;
                                             }
+                                            // What did not fit was the newest part of the read.
+                                            let dropped_frames = (bytes_read - pushed_bytes)
+                                                / cap_params.bytes_per_frame;
+                                            // Only rate adjust needs the capture time, and it
+                                            // costs a call to the driver.
+                                            let read_end = if cap_params.rate_adjust {
+                                                capture_time(&pcmdevice, capture_samplerate)
+                                            } else {
+                                                Instant::now()
+                                            };
+                                            let last_pushed = read_end
+                                                .checked_sub(Duration::from_secs_f64(
+                                                    dropped_frames as f64
+                                                        / capture_samplerate as f64,
+                                                ))
+                                                .unwrap_or(read_end);
+                                            pushed_frames +=
+                                                (pushed_bytes / cap_params.bytes_per_frame) as u64;
                                             if tx_dev
                                                 .try_send(CaptureDeviceMessage::Data {
                                                     chunk_nbr,
                                                     nbr_bytes: pushed_bytes,
+                                                    captured: Some((pushed_frames, last_pushed)),
                                                 })
                                                 .is_err()
                                             {
@@ -1728,6 +1806,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                                                 .try_send(CaptureDeviceMessage::Data {
                                                     chunk_nbr,
                                                     nbr_bytes: 0,
+                                                    captured: None,
                                                 })
                                                 .unwrap_or_default();
                                         }
@@ -1787,7 +1866,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                     .unwrap();
 
                 match rx_state_dev.recv() {
-                    Ok(AlsaThreadState::Ready(binary_format, pitch_supported)) => {
+                    Ok(AlsaThreadState::Ready(binary_format, pitch_speed)) => {
+                        let pitch_supported = pitch_speed.is_some();
                         let bytes_per_sample = binary_format.bytes_per_sample();
                         let blockalign = bytes_per_sample * channels;
 
@@ -1827,6 +1907,8 @@ impl CaptureDevice for AlsaCaptureDevice {
                         let mut data_buffer = vec![0u8; 4 * blockalign * capture_frames];
                         let mut expected_chunk_nbr = 0usize;
                         let mut exit_forwarded = false;
+                        let mut timeline = countertimer::FrameTimeline::new(capture_samplerate);
+                        let mut popped_frames = 0u64;
 
                         status_channel.send(StatusMessage::CaptureReady).unwrap_or(());
                         barrier.wait();
@@ -1864,11 +1946,13 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     CommandOutcome::Continue => {}
                                     CommandOutcome::SetPitch(speed) => {
                                         tx_inner_command
-                                            .try_send(CommandMessage::SetSpeed { speed })
+                                            .try_send(CaptureDeviceCommand::SetPitch(speed))
                                             .unwrap_or_default();
                                     }
                                     CommandOutcome::Exit | CommandOutcome::Disconnected => {
-                                        tx_inner_command.send(CommandMessage::Exit).unwrap_or(());
+                                        tx_inner_command
+                                            .send(CaptureDeviceCommand::Exit)
+                                            .unwrap_or(());
                                         exit_forwarded = true;
                                     }
                                 }
@@ -1885,7 +1969,11 @@ impl CaptureDevice for AlsaCaptureDevice {
                                     Ok(CaptureDeviceMessage::Data {
                                         chunk_nbr,
                                         nbr_bytes,
+                                        captured,
                                     }) => {
+                                        if let Some((frames, time)) = captured {
+                                            timeline.anchor(frames, time);
+                                        }
                                         if chunk_nbr > expected_chunk_nbr {
                                             warn!(
                                                 "Capture, samples were dropped, missing {} buffers.",
@@ -1923,8 +2011,12 @@ impl CaptureDevice for AlsaCaptureDevice {
                             while let Ok(CaptureDeviceMessage::Data {
                                 chunk_nbr,
                                 nbr_bytes: _,
+                                captured,
                             }) = rx_dev.try_recv()
                             {
+                                if let Some((frames, time)) = captured {
+                                    timeline.anchor(frames, time);
+                                }
                                 expected_chunk_nbr = chunk_nbr + 1;
                             }
 
@@ -1942,6 +2034,7 @@ impl CaptureDevice for AlsaCaptureDevice {
                             }
 
                             device_consumer.pop_slice(&mut data_buffer[0..capture_bytes]);
+                            popped_frames += capture_frames as u64;
                             // What the device delivered since the last chunk, rather than the
                             // chunk itself. A chunk can only be taken once the period that
                             // completes it has arrived, so counting chunks times them up to a
@@ -1995,6 +2088,9 @@ impl CaptureDevice for AlsaCaptureDevice {
                                 &channel_mask,
                                 false,
                             );
+                            if let Some(captured_at) = timeline.time_of(popped_frames) {
+                                chunk.timestamp = captured_at;
+                            }
 
                             chunk.update_stats(&mut chunk_stats);
                             crate::push_capture_audio_buffer(&capture_status, &chunk);

@@ -28,7 +28,7 @@ use parking_lot::RwLock;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::ProcessingParameters;
 
@@ -54,6 +54,8 @@ pub struct CaptureParams {
     pub samplerate: usize,
     pub capture_samplerate: usize,
     pub async_src: bool,
+    /// Rate adjust is enabled, and needs to know when each chunk was captured.
+    pub rate_adjust: bool,
     pub capture_status: Arc<RwLock<CaptureStatus>>,
     pub stop_on_rate_change: bool,
     pub rate_measure_interval: f32,
@@ -72,6 +74,7 @@ pub struct PlaybackParams {
     pub trim_backlog: bool,
     pub sample_format: BinarySampleFormat,
     pub playback_status: Arc<RwLock<PlaybackStatus>>,
+    pub processing_params: Arc<ProcessingParameters>,
     pub bytes_per_frame: usize,
     pub samplerate: usize,
     pub chunksize: usize,
@@ -355,6 +358,21 @@ pub fn resume_capture_pcm(pcmdevice: &alsa::PCM) -> Res<()> {
         pcmdevice.start()?;
     }
     Ok(())
+}
+
+/// When the capture device captured the last frame read from it so far.
+/// That is now, less the frames it has captured since, which are waiting to be read.
+/// Gives now if the device can not tell.
+pub fn capture_time(pcmdevice: &alsa::PCM, samplerate: usize) -> Instant {
+    let now = Instant::now();
+    pcmdevice
+        .avail()
+        .ok()
+        .filter(|avail| *avail > 0)
+        .and_then(|avail| {
+            now.checked_sub(Duration::from_secs_f64(avail as f64 / samplerate as f64))
+        })
+        .unwrap_or(now)
 }
 
 pub fn list_samplerates(hwp: &HwParams) -> Res<SupportedValues> {

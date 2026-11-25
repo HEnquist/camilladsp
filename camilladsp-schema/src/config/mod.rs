@@ -836,7 +836,7 @@ impl Devices {
     }
 
     pub fn adjust_interval_s(&self) -> f32 {
-        self.adjust_interval_s.map_or(10.0, FiniteF32::get)
+        self.adjust_interval_s.map_or(2.0, FiniteF32::get)
     }
 
     pub fn rate_measure_interval_s(&self) -> f32 {

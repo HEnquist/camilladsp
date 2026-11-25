@@ -18,6 +18,8 @@ use ringbuf::traits::*;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
+use crate::utils::rate_controller::RateAdjustReporter;
+
 /// How many times [`RingBufferFeeder::push`] waits for room before it drops a chunk.
 const PUSH_RETRIES: usize = 16;
 
@@ -155,6 +157,18 @@ impl BacklogTrimmer {
         }
         self.dropped_frames = 0;
     }
+}
+
+/// The playback device was restarted after an underrun.
+/// The backlog trimmer starts watching the level, and rate adjust starts a new period.
+/// The level jumps when the device is primed again, and a period with that jump in it gives a
+/// drift that can be thousands of ppm off.
+pub fn on_playback_restart(
+    backlog_trimmer: &mut BacklogTrimmer,
+    rate_reporter: &mut RateAdjustReporter,
+) {
+    backlog_trimmer.restarted();
+    rate_reporter.interrupt();
 }
 
 /// How many frames of silence to put in front of the data when playback starts or restarts.

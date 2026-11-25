@@ -16,7 +16,8 @@
 
 use crate::ToF32;
 use crate::utils::ringbuffer::{
-    BacklogTrimmer, RingBufferFeeder, fill_playback_output_from_ringbuffer, priming_frames,
+    BacklogTrimmer, RingBufferFeeder, fill_playback_output_from_ringbuffer, on_playback_restart,
+    priming_frames,
 };
 use crate::utils::rt_priority::{
     demote_current_thread_from_real_time, promote_current_thread_to_real_time,
@@ -259,6 +260,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let node_name = self
             .node_name
@@ -600,8 +602,13 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                     let clipped_counter = playback_status_clone.read().clipped_samples.clone();
                     // Pre-allocate conversion buffer to avoid repeated allocations
                     let mut raw_buffer = vec![0u8; chunksize * stride];
-                    let mut rate_reporter =
-                        RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                    let mut rate_reporter = RateAdjustReporter::new(
+                        samplerate,
+                        adjust_period,
+                        target_level,
+                        adjust,
+                        processing_params,
+                    );
                     let mut backlog_trimmer =
                         BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
                     let mut conversion_result;
@@ -611,9 +618,10 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                         match channel.recv() {
                             Ok(AudioMessage::Audio(chunk)) => {
                                 if playback_restarted.swap(false, Ordering::AcqRel) {
-                                    backlog_trimmer.restarted();
+                                    on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                                 }
                                 let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                                let latency = chunk.capture_to_send();
                                 let queued_frames = channel.len() * chunksize;
                                 let level = match estimate {
                                     Some(countertimer::BufferEstimate::Level(frames)) => Some(frames + queued_frames),
@@ -625,7 +633,7 @@ impl PlaybackDevice for PipeWirePlaybackDevice {
                                     rate_reporter.interrupt();
                                     continue;
                                 }
-                                if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, &playback_status) {
+                                if let Some(speed) = rate_reporter.update_from_estimate(estimate, queued_frames, latency, &playback_status) {
                                     status_channel.send(StatusMessage::SetSpeed(speed)).unwrap_or(());
                                 }
                                 chunk.update_stats(&mut chunk_stats);

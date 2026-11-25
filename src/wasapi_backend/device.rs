@@ -24,7 +24,7 @@ use crate::utils::conversions::{buffer_to_chunk_rawbytes, chunk_to_buffer_rawbyt
 use crate::utils::countertimer;
 use crate::utils::rate_controller::RateAdjustReporter;
 use crate::utils::ringbuffer::{
-    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, priming_frames,
+    BacklogTrimmer, RingBufferFeeder, append_from_ringbuffer, on_playback_restart, priming_frames,
 };
 use crate::utils::rt_channel;
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError, bounded, unbounded};
@@ -858,6 +858,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
         barrier: Arc<Barrier>,
         status_channel: crossbeam_channel::Sender<StatusMessage>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        processing_params: Arc<ProcessingParameters>,
     ) -> Res<Box<thread::JoinHandle<()>>> {
         let devname = self.devname.clone();
         let exclusive = self.exclusive;
@@ -897,8 +898,13 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                 let mut peak_values = Vec::new();
                 let clipped_counter = playback_status.read().clipped_samples.clone();
 
-                let mut rate_reporter =
-                    RateAdjustReporter::new(samplerate, adjust_period, target_level, adjust);
+                let mut rate_reporter = RateAdjustReporter::new(
+                    samplerate,
+                    adjust_period,
+                    target_level,
+                    adjust,
+                    processing_params,
+                );
                 let mut backlog_trimmer =
                     BacklogTrimmer::new(trim_backlog, target_level, chunksize, samplerate);
 
@@ -1028,9 +1034,10 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                     match channel.recv() {
                         Ok(AudioMessage::Audio(chunk)) => {
                             if playback_restarted.swap(false, Ordering::AcqRel) {
-                                backlog_trimmer.restarted();
+                                on_playback_restart(&mut backlog_trimmer, &mut rate_reporter);
                             }
                             let estimate = buffer_fill.try_lock().map(|b| b.checked_estimate());
+                            let latency = chunk.capture_to_send();
                             let queued_frames = channel.len() * chunksize;
                             let level = match estimate {
                                 Some(countertimer::BufferEstimate::Level(frames)) => {
@@ -1047,6 +1054,7 @@ impl PlaybackDevice for WasapiPlaybackDevice {
                             if let Some(speed) = rate_reporter.update_from_estimate(
                                 estimate,
                                 queued_frames,
+                                latency,
                                 &playback_status,
                             ) {
                                 status_channel

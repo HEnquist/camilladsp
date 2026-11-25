@@ -142,6 +142,8 @@ pub fn start_pipeline(
     let (tx_command_cap, rx_command_cap) = crossbeam_channel::unbounded();
     let (tx_pipeconf, rx_pipeconf) = crossbeam_channel::unbounded();
     let barrier = Arc::new(Barrier::new(4));
+    // A capture device with a clock control replaces this with the speed it finds.
+    status_structs.processing.set_capture_clock_speed(1.0);
 
     // Processing thread
     processing::run_processing(
@@ -161,6 +163,7 @@ pub fn start_pipeline(
             barrier.clone(),
             tx_status.clone(),
             status_structs.playback.clone(),
+            status_structs.processing.clone(),
         )
         .unwrap();
 

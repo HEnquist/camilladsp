@@ -14,7 +14,7 @@
 // Mozilla Public License along with this program. If not, see
 // <https://www.gnu.org/licenses/> and <https://www.mozilla.org/MPL/2.0/>.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::CamillaFloat;
 use crate::ToF32;
@@ -26,7 +26,12 @@ pub struct AudioChunk {
     pub channels: usize,
     pub maxval: CamillaFloat,
     pub minval: CamillaFloat,
+    /// When the capture device captured the last frame of the chunk, as close as the capture
+    /// backend can tell. A backend that cannot tell leaves the time the chunk was created.
     pub timestamp: Instant,
+    /// When processing sent the chunk on to playback. Until then, when the chunk was created.
+    /// A playback channel that is full holds the send up, and that wait counts as well.
+    pub sent: Instant,
     pub valid_frames: usize,
     pub waveforms: Vec<Vec<CamillaFloat>>,
 }
@@ -87,6 +92,7 @@ impl AudioChunk {
             maxval,
             minval,
             timestamp,
+            sent: timestamp,
             valid_frames,
             waveforms,
         }
@@ -94,6 +100,7 @@ impl AudioChunk {
 
     pub fn from(chunk: &AudioChunk, waveforms: Vec<Vec<CamillaFloat>>) -> Self {
         let timestamp = chunk.timestamp;
+        let sent = chunk.sent;
         let maxval = chunk.maxval;
         let minval = chunk.minval;
         let frames = chunk.frames;
@@ -105,9 +112,16 @@ impl AudioChunk {
             maxval,
             minval,
             timestamp,
+            sent,
             valid_frames,
             waveforms,
         }
+    }
+
+    /// How long after the capture device captured its last frame processing sent the chunk
+    /// on to playback.
+    pub fn capture_to_send(&self) -> Duration {
+        self.sent.saturating_duration_since(self.timestamp)
     }
 
     pub fn stats(&self) -> ChunkStats {
