@@ -263,9 +263,13 @@ impl Faders {
             let target_db = self.processing_params.target_volume(idx).min(fader.limit);
 
             if (target_db - fader.target_db).abs() > 0.01 || fader.mute != shared_mute {
+                let stays_muted = fader.mute && shared_mute;
                 fader.target_db = target_db;
                 fader.mute = shared_mute;
-                if fader.ramp_chunks > 0 && !resumed_after_pause {
+                if stays_muted {
+                    // The settled level is still the mute level, so a running
+                    // mute ramp carries on, and the new target waits for unmute.
+                } else if fader.ramp_chunks > 0 && !resumed_after_pause {
                     trace!(
                         "fader {idx}: starting ramp {} -> {}, mute: {}",
                         fader.current_db, target_db, shared_mute
@@ -399,6 +403,39 @@ mod tests {
         faders.prepare_chunk();
         assert_eq!(levels.level_db(2), MUTE_LEVEL_DB);
         assert_eq!(levels.gain(2), FaderGain::Constant(0.0));
+    }
+
+    /// A volume change while muted neither delays the mute ramp nor lifts the
+    /// settled mute, and the new volume applies after unmuting.
+    #[test]
+    fn volume_change_while_muted_keeps_the_mute() {
+        let params = Arc::new(ProcessingParameters::default());
+        let mut faders = faders(&params, 4.0);
+        let levels = faders.levels();
+
+        params.set_mute(0, true);
+        faders.prepare_chunk();
+        faders.prepare_chunk();
+        params.set_target_volume(0, -6.0);
+        faders.prepare_chunk();
+        faders.prepare_chunk();
+        assert_eq!(
+            levels.gain(0),
+            FaderGain::Ramp {
+                start_db: -75.0,
+                end_db: MUTE_LEVEL_DB
+            }
+        );
+
+        params.set_target_volume(0, -12.0);
+        faders.prepare_chunk();
+        assert_eq!(levels.gain(0), FaderGain::Constant(0.0));
+
+        params.set_mute(0, false);
+        for _ in 0..4 {
+            faders.prepare_chunk();
+        }
+        assert_eq!(levels.level_db(0), -12.0);
     }
 
     /// A fader starting above its limit starts at the limit, without ramping down.
